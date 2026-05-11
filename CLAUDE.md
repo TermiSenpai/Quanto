@@ -25,7 +25,10 @@ App de escritorio **Electron** para calcular precios de packs de personalizació
 | Persistencia compartida | **`config.js` plano** en el NAS | Versionable, legible, restaurable a mano |
 | Persistencia local | `settings.json` en `%APPDATA%\packprice\` | Nombre del usuario y ruta del config |
 | Empaquetado | `electron-builder` portable Windows x64 | No requiere instalador |
-| Idioma | **Español** en código de dominio (variables, comentarios, UI) | El cliente y los usuarios son hispanohablantes |
+| Idioma de UI | **Español** en strings visibles al usuario | El cliente y los usuarios son hispanohablantes |
+| Idioma de código | **Inglés** en variables, funciones, comentarios, IPC channels y nombres de archivo | Más mantenible a largo plazo, alinea con el ecosistema Electron/Node |
+
+> **Nota sobre la migración de idioma**: gran parte del código actual (`main.js`, `app.js`, `calculo.js`, `admin.js`, `lib/config-parser.js`) está escrito en español por razones históricas y se irá migrando progresivamente. Todo **código nuevo** se escribe en inglés desde el primer commit. Cuando toques un archivo legacy y el cambio sea sustancial, considera renombrar las identificadoras tocadas a inglés (sin convertir el archivo entero, para mantener diffs revisables). Las **strings visibles al usuario** (UI, mensajes de error mostrados) siguen en español.
 
 **No usamos** (y no debemos añadir sin justificación documentada):
 
@@ -44,7 +47,7 @@ Si crees que algo de esa lista es necesario, **abre primero un debate y actualiz
 
 ```
 packs app/
-├── PLAN_Calculadora.md   ← plan funcional (fuente de verdad de negocio)
+├── PLAN_Calculadora.md          ← plan funcional (fuente de verdad de negocio)
 ├── CLAUDE.md                    ← este archivo
 ├── README-build.md              ← cómo construir y distribuir el .exe
 ├── package.json                 ← scripts y dependencias
@@ -52,10 +55,27 @@ packs app/
 ├── preload.js                   ← bridge contextual main↔renderer
 ├── config.default.js            ← valores por defecto (semilla del config.js)
 ├── icon.png                     ← icono del .exe
-└── renderer/
-    ├── index.html               ← UI completa (todas las pantallas)
-    ├── app.js                   ← lógica de cálculo, eventos, IPC con main
-    └── styles.css               ← estilos (paleta gris azulado, modo claro)
+├── lib/                         ← módulos compartibles main↔tests (CommonJS, en inglés)
+│   ├── config-parser.js         ← extracción/serialización de config.js (legacy ES)
+│   ├── config-schema.js         ← validación estricta de esquema (EN)
+│   ├── diff.js                  ← diff plano para audit y previsualización (EN)
+│   ├── audit.js                 ← append-only audit log (EN)
+│   ├── history.js               ← historial de presupuestos (EN)
+│   └── logger.js                ← wrapper de electron-log (EN)
+├── renderer/
+│   ├── index.html               ← UI completa (todas las pantallas)
+│   ├── app.js                   ← orquestación: eventos, IPC con main (legacy ES)
+│   ├── calculo.js               ← lógica de cálculo pura (legacy ES)
+│   ├── admin.js                 ← editor de modo admin (legacy ES)
+│   ├── format.js                ← utilidades DOM/formato (legacy ES)
+│   └── styles.css               ← estilos (paleta gris azulado, modo claro)
+└── tests/                       ← Vitest, en inglés
+    ├── calculo.test.js          ← tests legacy (ES)
+    ├── config-default.test.js   ← tests legacy (ES)
+    ├── config-parser.test.js    ← tests legacy (ES)
+    ├── config-schema.test.js    ← tests del validador (EN)
+    ├── diff.test.js             ← tests del diff (EN)
+    └── ...
 ```
 
 El `config.js` en producción **no está en este repo**. Vive en el NAS:
@@ -139,13 +159,19 @@ Cuando añadas un nuevo tipo de pack, sigue el patrón: input simple → funció
 
 ### 5.4. Nombres de IPC channels
 
-`<recurso>:<accion>` siempre, en kebab-case. Ejemplos válidos:
+`<resource>:<action>` siempre, en kebab-case y **en inglés**. Ejemplos válidos:
 
 - `config:read`, `config:write`, `config:create-default`
-- `dialog:select-config`, `dialog:confirmar-conflicto`
+- `dialog:select-config`, `dialog:confirm-conflict`
 - `settings:read`, `settings:write`
+- `audit:list`, `audit:append`
+- `quotes:list`, `quotes:save`, `quotes:delete`, `quotes:search`
+- `pdf:export`
+- `logs:read-last`
 
-Los handlers se registran en `main.js` con `ipcMain.handle`. La envoltura amigable se expone en `preload.js`.
+Canales legacy en español (`dialog:confirmar-conflicto`, `dialog:confirmar`, `dialog:info`, `dialog:error`) se mantienen vivos hasta que se migre el renderer; **nuevos canales se nombran en inglés**.
+
+Los handlers se registran en `main.js` con `ipcMain.handle`. La envoltura amigable se expone en `preload.js`. Los nombres de los métodos expuestos en `window.packprice` también se nombran en inglés (ej. `readConfig`, `saveQuote`, `exportPdf`).
 
 ---
 
@@ -174,7 +200,9 @@ Los handlers se registran en `main.js` con `ipcMain.handle`. La envoltura amigab
 
 ### 6.2. Lectura segura
 
-`leerConfigDesdeArchivo` ejecuta el contenido en un `vm.runInNewContext` con timeout 1s. **Nunca** uses `eval`, `new Function`, ni `require` dinámico para parsear un config externo.
+`leerConfigDesdeArchivo` (legacy, en `main.js`) extrae el JSON con un escáner de llaves y lo parsea con `JSON.parse`. **NUNCA** uses `eval`, `new Function`, `vm.runInNewContext` ni `require` dinámico para parsear un config externo: `vm` no es una frontera de seguridad y abriría una puerta a RCE.
+
+Adicionalmente, todo config recién leído debe pasar por `validateConfigSchema` (ver `lib/config-schema.js`) antes de devolverse al renderer; si falla, devuelve un error legible con el campo concreto que falta o es inválido.
 
 ### 6.3. Migraciones de esquema
 
