@@ -232,6 +232,9 @@
       </div>
 
       <div class="topbar__actions">
+        <button id="btn-historial" class="btn btn-ghost" title="Ver presupuestos guardados">
+          <svg class="icon"><use href="#i-clipboard"/></svg> Historial
+        </button>
         <button id="btn-recargar" class="btn btn-ghost" title="Vuelve a leer config.js del NAS">
           <svg class="icon"><use href="#i-refresh"/></svg> Recargar
         </button>
@@ -395,7 +398,10 @@
             <button class="btn btn-ghost" id="btn-copiar-resumen" type="button">
               <svg class="icon"><use href="#i-copy"/></svg> Copiar resumen
             </button>
-            <button class="btn btn-secondary" id="btn-exportar-pdf" type="button" disabled title="Próximamente">
+            <button class="btn btn-secondary" id="btn-guardar-presupuesto" type="button" title="Guardar este presupuesto en el historial local">
+              <svg class="icon"><use href="#i-save"/></svg> Guardar presupuesto
+            </button>
+            <button class="btn btn-secondary" id="btn-exportar-pdf" type="button" title="Exportar este presupuesto a PDF">
               <svg class="icon"><use href="#i-share"/></svg> Exportar PDF
             </button>
           </div>
@@ -459,6 +465,9 @@
             <button class="admin-nav__item" data-tab="packs" type="button">
               <svg class="icon"><use href="#i-tag"/></svg> Packs (PVP)
             </button>
+            <button class="admin-nav__item" data-tab="auditoria" type="button">
+              <svg class="icon"><use href="#i-clock"/></svg> Auditoría
+            </button>
           </nav>
 
           <div class="admin-form">
@@ -475,6 +484,9 @@
         <footer class="modal__foot">
           <span class="modal__foot-left" id="admin-foot-info">Última escritura: —</span>
           <div class="modal__foot-right">
+            <button id="btn-ver-logs" class="btn btn-ghost" type="button" title="Ver últimas líneas del log">
+              <svg class="icon"><use href="#i-info"/></svg> Ver logs
+            </button>
             <button id="btn-cancelar-admin" class="btn btn-ghost" type="button">Cancelar cambios</button>
             <button id="btn-guardar-config" class="btn btn-primary" type="button">
               <svg class="icon"><use href="#i-save"/></svg> Guardar
@@ -482,6 +494,93 @@
           </div>
         </footer>
       </div>
+    </div>
+  </div>
+
+  <!-- ================== MODAL: PREVIEW DE CAMBIOS (DIFF) ================== -->
+  <div id="diff-overlay" class="overlay hidden">
+    <div class="modal modal--sm" role="dialog" aria-labelledby="diff-title">
+      <header class="modal__head">
+        <div class="modal__head-title">
+          <span class="modal__head-icon"><svg class="icon icon--lg"><use href="#i-info"/></svg></span>
+          <div class="modal__head-text">
+            <h2 id="diff-title">Confirmar cambios</h2>
+            <p>Revisa qué se va a modificar antes de guardar.</p>
+          </div>
+        </div>
+        <button id="btn-cerrar-diff" class="modal__close" type="button" aria-label="Cerrar">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div id="diff-body"></div>
+      </div>
+      <footer class="modal__foot">
+        <span class="modal__foot-left"></span>
+        <div class="modal__foot-right">
+          <button id="btn-diff-cancelar" class="btn btn-ghost" type="button">Cancelar</button>
+          <button id="btn-diff-confirmar" class="btn btn-primary" type="button">
+            <svg class="icon"><use href="#i-save"/></svg> Confirmar y guardar
+          </button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ================== MODAL: HISTORIAL DE PRESUPUESTOS ================== -->
+  <div id="history-overlay" class="overlay hidden">
+    <div class="modal" role="dialog" aria-labelledby="history-title">
+      <header class="modal__head">
+        <div class="modal__head-title">
+          <span class="modal__head-icon"><svg class="icon icon--lg"><use href="#i-clipboard"/></svg></span>
+          <div class="modal__head-text">
+            <h2 id="history-title">Historial de presupuestos</h2>
+            <p>Solo en este equipo. Los presupuestos no se sincronizan al NAS.</p>
+          </div>
+        </div>
+        <button id="btn-cerrar-history" class="modal__close" type="button" aria-label="Cerrar">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div class="field__row" style="margin-bottom: 12px;">
+          <input type="text" id="history-search" class="input" placeholder="Buscar por ID, cliente o usuario…">
+        </div>
+        <div id="history-body"></div>
+      </div>
+      <footer class="modal__foot">
+        <span class="modal__foot-left" id="history-foot-info"></span>
+        <div class="modal__foot-right">
+          <button id="btn-history-cerrar" class="btn btn-primary" type="button">Cerrar</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ================== MODAL: VER LOGS ================== -->
+  <div id="logs-overlay" class="overlay hidden">
+    <div class="modal modal--sm" role="dialog" aria-labelledby="logs-title">
+      <header class="modal__head">
+        <div class="modal__head-title">
+          <span class="modal__head-icon"><svg class="icon icon--lg"><use href="#i-info"/></svg></span>
+          <div class="modal__head-text">
+            <h2 id="logs-title">Últimos logs</h2>
+            <p>Eventos registrados en este equipo.</p>
+          </div>
+        </div>
+        <button id="btn-cerrar-logs" class="modal__close" type="button" aria-label="Cerrar">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div id="logs-body"></div>
+      </div>
+      <footer class="modal__foot">
+        <span class="modal__foot-left"></span>
+        <div class="modal__foot-right">
+          <button id="btn-logs-cerrar" class="btn btn-primary" type="button">Cerrar</button>
+        </div>
+      </footer>
     </div>
   </div>
 

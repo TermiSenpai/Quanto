@@ -141,6 +141,21 @@ const PACKS = {
   }
 };
 
+// --- Empresa y plantilla de presupuesto (usadas en el PDF) ---
+const EMPRESA = {
+  nombre:    'Mi Taller DTF',
+  cif:       '',
+  direccion: '',
+  telefono:  '',
+  email:     '',
+  web:       ''
+};
+
+const PRESUPUESTO = {
+  validez_dias: 30,
+  condiciones:  'Precios IVA incluido. Validez 30 días desde la fecha de emisión. La aceptación implica conformidad con las condiciones del taller.'
+};
+
 /**
  * Devuelve un objeto de configuración nuevo con los defaults del plan.
  * Cada llamada devuelve una copia independiente, segura para mutar.
@@ -159,7 +174,9 @@ function buildDefaultConfig(meta = {}) {
     parametros:   JSON.parse(JSON.stringify(PARAMETROS)),
     modelos_roly: JSON.parse(JSON.stringify(MODELOS_ROLY)),
     tramos:       JSON.parse(JSON.stringify(TRAMOS)),
-    packs:        JSON.parse(JSON.stringify(PACKS))
+    packs:        JSON.parse(JSON.stringify(PACKS)),
+    empresa:      JSON.parse(JSON.stringify(EMPRESA)),
+    presupuesto:  JSON.parse(JSON.stringify(PRESUPUESTO))
   };
 }
 

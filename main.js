@@ -29,10 +29,23 @@ const {
   reinyectarAdminClave,
   serializarConfig
 } = require('./lib/config-parser');
+const { validateConfigSchema } = require('./lib/config-schema');
+const { configureLogger, readLastLines, getLogPath, logger } = require('./lib/logger');
+const { diffObjects } = require('./lib/diff');
+const { appendAuditEntry, readRecentEntries } = require('./lib/audit');
+const {
+  saveQuote: saveQuoteToHistory,
+  listQuotes,
+  searchQuotes,
+  deleteQuote,
+  getQuote
+} = require('./lib/history');
+const { renderQuoteHtml } = require('./lib/pdf-template');
 
 // --- Configuración de paths ---
 const SETTINGS_DIR = path.join(app.getPath('userData'));
 const SETTINGS_PATH = path.join(SETTINGS_DIR, 'settings.json');
+const LOG_DIR = path.join(SETTINGS_DIR, 'logs');
 
 // Ruta por defecto donde la app espera (y si hace falta crea) el config.js
 // compartido en el NAS. Se puede cambiar en "Ajustes" en cada PC y queda
@@ -107,7 +120,7 @@ function crearBackup(rutaConfig) {
     return backupPath;
   } catch (err) {
     // No bloqueante: si falla el backup, avisamos pero seguimos.
-    console.error('Error creando backup:', err.message);
+    logger.warn('backup failed (non-blocking)', { ruta: rutaConfig, error: err.message });
     return null;
   }
 }
@@ -185,7 +198,7 @@ function leerSettings() {
     const contenido = fs.readFileSync(SETTINGS_PATH, 'utf-8');
     return JSON.parse(contenido);
   } catch (err) {
-    console.error('settings.json corrupto, se ignora:', err.message);
+    logger.warn('corrupt settings.json, ignored', { error: err.message });
     return null;
   }
 }
@@ -332,6 +345,10 @@ ipcMain.handle('dialog:select-config', async () => {
 ipcMain.handle('config:read', (event, ruta) => {
   try {
     const config = leerConfigDesdeArchivo(ruta);
+    // Strict schema validation: fail-fast with a precise message so
+    // the admin sees exactly which field is broken instead of getting
+    // NaNs deep in the calculator.
+    validateConfigSchema(config);
     const info = obtenerInfoArchivo(ruta);
     return { ok: true, config: stripAdminClave(config), info };
   } catch (err) {
@@ -389,6 +406,9 @@ ipcMain.handle('config:write', (event, { ruta, configNuevo, infoEsperada }) => {
             fechaActualizacion = cfgActual.fecha_actualizacion || '';
           } catch (_) {}
 
+          logger.warn('config:write conflict detected', {
+            ruta, modificadoPor, fechaActualizacion
+          });
           return {
             ok: false,
             conflicto: true,
@@ -400,8 +420,16 @@ ipcMain.handle('config:write', (event, { ruta, configNuevo, infoEsperada }) => {
       }
     }
 
+    // Snapshot del config previo en disco para calcular el diff
+    // antes de sobrescribir. Si no se puede leer (primer arranque,
+    // archivo corrupto), seguimos: el audit log saldrá con kind:'add'
+    // en cada campo nuevo, lo cual es correcto.
+    let configPrevio = null;
+    try { configPrevio = leerConfigDesdeArchivo(ruta); } catch (_) {}
+
     const configCompleto = fusionarConClaveActual(ruta, configNuevo);
     validarFormaConfig(configCompleto);
+    validateConfigSchema(configCompleto);
     const contenido = serializarConfig(configCompleto);
 
     // Backup antes de sobrescribir
@@ -410,10 +438,28 @@ ipcMain.handle('config:write', (event, { ruta, configNuevo, infoEsperada }) => {
     // Escribir
     fs.writeFileSync(ruta, contenido, 'utf-8');
 
+    // Audit AFTER successful write (orden: backup → write → audit).
+    // Si esto falla, no rompemos al usuario: el cambio está hecho y
+    // existe el backup. Solo logueamos.
+    try {
+      const cambios = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
+      appendAuditEntry(ruta, {
+        usuario: configCompleto.modificado_por || 'desconocido',
+        app_version: app.getVersion(),
+        cambios
+      });
+      logger.info('config:write success', {
+        ruta, usuario: configCompleto.modificado_por, cambios: cambios.length, backupPath
+      });
+    } catch (auditErr) {
+      logger.warn('audit append failed (non-blocking)', { error: auditErr.message });
+    }
+
     // Devolver nueva info
     const infoNueva = obtenerInfoArchivo(ruta);
     return { ok: true, info: infoNueva, backupPath };
   } catch (err) {
+    logger.error('config:write failed', { ruta, error: err.message });
     return { ok: false, error: err.message };
   }
 });
@@ -421,13 +467,60 @@ ipcMain.handle('config:write', (event, { ruta, configNuevo, infoEsperada }) => {
 // --- Forzar escritura (sobrescribir conflicto) ---
 ipcMain.handle('config:force-write', (event, { ruta, configNuevo }) => {
   try {
+    let configPrevio = null;
+    try { configPrevio = leerConfigDesdeArchivo(ruta); } catch (_) {}
+
     const configCompleto = fusionarConClaveActual(ruta, configNuevo);
     validarFormaConfig(configCompleto);
+    validateConfigSchema(configCompleto);
     const contenido = serializarConfig(configCompleto);
-    crearBackup(ruta);
+    const backupPath = crearBackup(ruta);
     fs.writeFileSync(ruta, contenido, 'utf-8');
+
+    try {
+      const cambios = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
+      appendAuditEntry(ruta, {
+        usuario: configCompleto.modificado_por || 'desconocido',
+        app_version: app.getVersion(),
+        cambios
+      });
+      logger.info('config:force-write success', {
+        ruta, usuario: configCompleto.modificado_por, cambios: cambios.length, backupPath
+      });
+    } catch (auditErr) {
+      logger.warn('audit append failed (non-blocking)', { error: auditErr.message });
+    }
+
     const infoNueva = obtenerInfoArchivo(ruta);
     return { ok: true, info: infoNueva };
+  } catch (err) {
+    logger.error('config:force-write failed', { ruta, error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+// --- Audit log ---
+//
+// `audit:list` returns the last N entries of <NAS>/audit.log (oldest
+// to newest within the slice). `audit:diff-preview` is a pure helper
+// the renderer can use to compute the diff between the current admin
+// draft and the on-disk config, used by the "review changes" modal.
+ipcMain.handle('audit:list', (event, { ruta, limit }) => {
+  try {
+    const lim = Number.isFinite(limit) ? Math.min(Math.max(1, limit), 5000) : 200;
+    return { ok: true, entries: readRecentEntries(ruta, lim) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('audit:diff-preview', (event, { ruta, configNuevo }) => {
+  try {
+    let configPrevio = null;
+    try { configPrevio = leerConfigDesdeArchivo(ruta); } catch (_) {}
+    const configCompleto = fusionarConClaveActual(ruta, configNuevo);
+    const cambios = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
+    return { ok: true, cambios };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -519,11 +612,148 @@ ipcMain.handle('dialog:error', async (event, { titulo, mensaje, detalle }) => {
   });
 });
 
+// --- Logs (electron-log) ---
+ipcMain.handle('logs:read-last', (event, lineLimit) => {
+  try {
+    const limit = Number.isFinite(lineLimit) ? Math.min(Math.max(1, lineLimit), 5000) : 200;
+    return { ok: true, path: getLogPath(), lines: readLastLines(limit) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// --- Quote history (local, per-PC) ---
+//
+// Stored under <userData>/presupuestos.json. The renderer doesn't
+// need to know the path; it just sends/receives plain quote objects.
+ipcMain.handle('quotes:save', (event, draft) => {
+  try {
+    const saved = saveQuoteToHistory(SETTINGS_DIR, draft);
+    logger.info('quote saved', { id: saved.id, total: saved.total_iva_inc });
+    return { ok: true, quote: saved };
+  } catch (err) {
+    logger.error('quote save failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('quotes:list', () => {
+  try {
+    return { ok: true, quotes: listQuotes(SETTINGS_DIR) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('quotes:search', (event, query) => {
+  try {
+    return { ok: true, quotes: searchQuotes(SETTINGS_DIR, query) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('quotes:get', (event, id) => {
+  try {
+    return { ok: true, quote: getQuote(SETTINGS_DIR, id) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('quotes:delete', (event, id) => {
+  try {
+    const removed = deleteQuote(SETTINGS_DIR, id);
+    if (removed) logger.info('quote deleted', { id });
+    return { ok: true, removed };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// --- PDF export ---
+//
+// Renders the quote into a hidden BrowserWindow and uses
+// `webContents.printToPDF` (built into Electron) to produce the
+// file. We do not depend on external PDF libraries.
+//
+// Inputs:
+//   { quote, empresa, presupuesto } -- quote is the persisted record
+//                                       OR a fresh draft (resultado-only).
+//   { defaultName }                 -- suggested file name.
+//
+// Returns { ok, ruta } on success or { ok:false, error } on failure.
+ipcMain.handle('pdf:export', async (event, payload) => {
+  const { quote, empresa, presupuesto, defaultName } = payload || {};
+  if (!quote) return { ok: false, error: 'Falta el presupuesto a exportar.' };
+
+  let win = null;
+  let tmpHtmlPath = null;
+  try {
+    const saveDialog = await dialog.showSaveDialog(mainWindow, {
+      title: 'Exportar presupuesto a PDF',
+      defaultPath: defaultName || `${quote.id || 'presupuesto'}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    });
+    if (saveDialog.canceled || !saveDialog.filePath) {
+      return { ok: false, cancelado: true };
+    }
+
+    const html = renderQuoteHtml(quote, { empresa, presupuesto });
+    // electron-builder strips temp dirs from app userData, so use the
+    // OS temp folder. The file is deleted after PDF generation.
+    tmpHtmlPath = path.join(app.getPath('temp'), `packprice-quote-${Date.now()}.html`);
+    fs.writeFileSync(tmpHtmlPath, html, 'utf-8');
+
+    win = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true
+      }
+    });
+
+    await win.loadFile(tmpHtmlPath);
+    const pdfBuffer = await win.webContents.printToPDF({
+      pageSize: 'A4',
+      printBackground: true,
+      margins: { marginType: 'default' }
+    });
+    fs.writeFileSync(saveDialog.filePath, pdfBuffer);
+
+    logger.info('pdf exported', { id: quote.id, ruta: saveDialog.filePath });
+    return { ok: true, ruta: saveDialog.filePath };
+  } catch (err) {
+    logger.error('pdf export failed', { error: err.message });
+    return { ok: false, error: err.message };
+  } finally {
+    if (win && !win.isDestroyed()) win.close();
+    if (tmpHtmlPath && fs.existsSync(tmpHtmlPath)) {
+      try { fs.unlinkSync(tmpHtmlPath); } catch (_) {}
+    }
+  }
+});
+
 // ============================================================
 // Ciclo de vida de la app
 // ============================================================
 
 app.whenReady().then(() => {
+  configureLogger({ logDir: LOG_DIR });
+  logger.info('app started', {
+    version: app.getVersion(),
+    platform: process.platform,
+    userData: SETTINGS_DIR
+  });
+
+  process.on('uncaughtException', (err) => {
+    logger.error('uncaughtException', { message: err.message, stack: err.stack });
+  });
+  process.on('unhandledRejection', (reason) => {
+    logger.error('unhandledRejection', { reason: String(reason) });
+  });
+
   crearVentana();
 
   app.on('activate', () => {

@@ -40,6 +40,23 @@ contextBridge.exposeInMainWorld('packprice', {
   confirmarConflicto: (d) => ipcRenderer.invoke('dialog:confirmar-conflicto', d),
   confirmar:          (d) => ipcRenderer.invoke('dialog:confirmar', d),
   mostrarInfo:        (d) => ipcRenderer.invoke('dialog:info', d),
-  mostrarError:       (d) => ipcRenderer.invoke('dialog:error', d)
+  mostrarError:       (d) => ipcRenderer.invoke('dialog:error', d),
+
+  // --- Logs (electron-log) ---
+  readLogs:           (lineLimit) => ipcRenderer.invoke('logs:read-last', lineLimit),
+
+  // --- Audit log (admin config changes) ---
+  listAuditEntries:   (datos) => ipcRenderer.invoke('audit:list', datos),
+  previewConfigDiff:  (datos) => ipcRenderer.invoke('audit:diff-preview', datos),
+
+  // --- Quote history (local, per-PC) ---
+  saveQuote:          (draft) => ipcRenderer.invoke('quotes:save', draft),
+  listQuotes:         ()      => ipcRenderer.invoke('quotes:list'),
+  searchQuotes:       (q)     => ipcRenderer.invoke('quotes:search', q),
+  getQuote:           (id)    => ipcRenderer.invoke('quotes:get', id),
+  deleteQuote:        (id)    => ipcRenderer.invoke('quotes:delete', id),
+
+  // --- PDF export ---
+  exportPdf:          (payload) => ipcRenderer.invoke('pdf:export', payload)
 
 });

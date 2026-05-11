@@ -29,6 +29,7 @@
       "main.js",
       "preload.js",
       "config.default.js",
+      "lib/**/*",
       "renderer/**/*",
       "icon.png",
       "package.json"
@@ -37,7 +38,9 @@
       "target": [
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "icon.png"
@@ -45,5 +48,8 @@
     "portable": {
       "artifactName": "PackPrice-${version}-preliminar.exe"
     }
+  },
+  "dependencies": {
+    "electron-log": "^5.4.3"
   }
 }

@@ -24,6 +24,15 @@ import {
   actualizarConfigDesdeInput,
   ejecutarAccionAdmin
 } from './admin.js';
+import {
+  renderAuditTab,
+  renderDiffPreview,
+  renderLogsModal
+} from './admin-extras.js';
+import {
+  renderHistoryList,
+  buildQuoteDraft
+} from './history.js';
 
 // ============================================================
 // Estado del módulo
@@ -78,7 +87,8 @@ const ADMIN_TAB_META = {
   parametros: { titulo: 'Parámetros de cálculo', desc: 'Variables que afectan al coste interno y al recargo de tallas grandes.' },
   modelos:    { titulo: 'Modelos Roly',          desc: 'Precio base de cada prenda Roly. No incluye DTF ni mano de obra.' },
   tramos:     { titulo: 'Tramos por volumen',    desc: 'Rangos de unidades que activan cada tramo y su reducción de tiempo.' },
-  packs:      { titulo: 'Packs (PVP)',           desc: 'PVP final IVA incluido por tramo, capucha y caras.' }
+  packs:      { titulo: 'Packs (PVP)',           desc: 'PVP final IVA incluido por tramo, capucha y caras.' },
+  auditoria:  { titulo: 'Auditoría',              desc: 'Quién cambió qué y cuándo, leído desde audit.log junto al config.' }
 };
 
 // ============================================================
@@ -346,6 +356,46 @@ function bindearEventos() {
   });
   el('btn-guardar-config').addEventListener('click', guardarConfigEnNAS);
   el('btn-cancelar-admin').addEventListener('click', cancelarCambiosAdmin);
+
+  // Logs viewer (admin footer)
+  const btnVerLogs = el('btn-ver-logs');
+  if (btnVerLogs) btnVerLogs.addEventListener('click', abrirLogs);
+  const btnLogsCerrar = el('btn-logs-cerrar');
+  if (btnLogsCerrar) btnLogsCerrar.addEventListener('click', cerrarLogs);
+  const btnLogsClose = el('btn-cerrar-logs');
+  if (btnLogsClose) btnLogsClose.addEventListener('click', cerrarLogs);
+  const logsOverlay = el('logs-overlay');
+  if (logsOverlay) {
+    logsOverlay.addEventListener('click', (e) => {
+      if (e.target.id === 'logs-overlay') cerrarLogs();
+    });
+  }
+
+  // History
+  const btnHistorial = el('btn-historial');
+  if (btnHistorial) btnHistorial.addEventListener('click', abrirHistorial);
+  const btnHistoryCerrar = el('btn-history-cerrar');
+  if (btnHistoryCerrar) btnHistoryCerrar.addEventListener('click', cerrarHistorial);
+  const btnHistoryClose = el('btn-cerrar-history');
+  if (btnHistoryClose) btnHistoryClose.addEventListener('click', cerrarHistorial);
+  const historyOverlay = el('history-overlay');
+  if (historyOverlay) {
+    historyOverlay.addEventListener('click', (e) => {
+      if (e.target.id === 'history-overlay') cerrarHistorial();
+    });
+  }
+  const searchInput = el('history-search');
+  if (searchInput) {
+    let searchTimer = null;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(refrescarHistorial, 150);
+    });
+  }
+  const btnGuardarPresupuesto = el('btn-guardar-presupuesto');
+  if (btnGuardarPresupuesto) btnGuardarPresupuesto.addEventListener('click', guardarPresupuesto);
+  const btnExportarPdf = el('btn-exportar-pdf');
+  if (btnExportarPdf) btnExportarPdf.addEventListener('click', exportarPresupuestoPdf);
 
   document.querySelectorAll('.admin-nav__item, .admin-tab').forEach(tab => {
     tab.addEventListener('click', () => mostrarAdminTab(tab.dataset.tab));
@@ -1447,6 +1497,23 @@ function mostrarAdminTab(tab, opts = {}) {
   const scrollPrev = (opts.preserveScroll && scroller) ? scroller.scrollTop : null;
 
   const cont = el('admin-tab-content');
+
+  // Auditoría: contenido async, lo cargamos por IPC.
+  if (tab === 'auditoria') {
+    cont.innerHTML = '<p class="hint">Cargando auditoría…</p>';
+    window.packprice.listAuditEntries({ ruta: SETTINGS.ruta_config, limit: 200 })
+      .then((r) => {
+        cont.innerHTML = (r && r.ok)
+          ? renderAuditTab(r.entries || [])
+          : `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>No se pudo leer audit.log: ${escAttr(r && r.error)}</span></div>`;
+      })
+      .catch((err) => {
+        cont.innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>${escAttr(err.message)}</span></div>`;
+      });
+    if (scrollPrev !== null && scroller) scroller.scrollTop = scrollPrev;
+    return;
+  }
+
   cont.innerHTML = renderAdminTabContent(CFG, tab);
 
   cont.querySelectorAll('input[data-cfg-path]').forEach(input => {
@@ -1476,6 +1543,15 @@ function mostrarAdminTab(tab, opts = {}) {
   }
 }
 
+// Pequeño escape sólo para inyectar mensajes de error en el HTML
+// asíncrono. No depende de format.js para no introducir importaciones
+// circulares en una función defensiva.
+function escAttr(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 async function guardarConfigEnNAS() {
   CFG.fecha_actualizacion = new Date().toLocaleString('es-ES');
   CFG.modificado_por = SETTINGS.nombre_usuario;
@@ -1485,6 +1561,11 @@ async function guardarConfigEnNAS() {
     configNuevo: CFG,
     infoEsperada: infoConfigAlAbrirAdmin
   };
+
+  // Diff preview: muestra al admin exactamente qué va a cambiar antes
+  // de escribir. Si no hay cambios reales, avisa y aborta.
+  const confirmado = await mostrarDiffPreview(datos);
+  if (!confirmado) return;
 
   const r = await window.packprice.guardarConfig(datos);
 
@@ -1555,6 +1636,270 @@ function cancelarCambiosAdmin() {
     mostrarAdminTab(estado.adminTab);
     inicializarApp();
   }
+}
+
+// ============================================================
+// Diff preview modal (call before writing the config)
+// ============================================================
+//
+// Resolves to `true` when the user confirms, `false` when they
+// cancel or there are no changes. Always reuses the same overlay
+// element; the actual buttons are wired here for each call so the
+// promise resolves cleanly.
+async function mostrarDiffPreview(datos) {
+  let preview;
+  try {
+    preview = await window.packprice.previewConfigDiff({
+      ruta: datos.ruta,
+      configNuevo: datos.configNuevo
+    });
+  } catch (err) {
+    await window.packprice.mostrarError({
+      titulo: 'No se pudo generar la previsualización',
+      mensaje: err.message || 'Error desconocido'
+    });
+    return false;
+  }
+
+  if (!preview || !preview.ok) {
+    await window.packprice.mostrarError({
+      titulo: 'No se pudo generar la previsualización',
+      mensaje: (preview && preview.error) || 'Error desconocido'
+    });
+    return false;
+  }
+
+  const cambios = preview.cambios || [];
+  if (cambios.length === 0) {
+    await window.packprice.mostrarInfo({
+      titulo: 'Sin cambios',
+      mensaje: 'No hay nada que guardar: el config actual ya coincide con el del NAS.'
+    });
+    return false;
+  }
+
+  el('diff-body').innerHTML = renderDiffPreview(cambios);
+  show('diff-overlay');
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      hide('diff-overlay');
+      btnConfirm.removeEventListener('click', onConfirm);
+      btnCancel.removeEventListener('click', onCancel);
+      btnClose.removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onOverlayClick);
+      document.removeEventListener('keydown', onKey);
+    };
+    const onConfirm = () => { cleanup(); resolve(true); };
+    const onCancel  = () => { cleanup(); resolve(false); };
+    const onOverlayClick = (e) => { if (e.target.id === 'diff-overlay') onCancel(); };
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+
+    const btnConfirm = el('btn-diff-confirmar');
+    const btnCancel  = el('btn-diff-cancelar');
+    const btnClose   = el('btn-cerrar-diff');
+    const overlay    = el('diff-overlay');
+
+    btnConfirm.addEventListener('click', onConfirm);
+    btnCancel.addEventListener('click', onCancel);
+    btnClose.addEventListener('click', onCancel);
+    overlay.addEventListener('click', onOverlayClick);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+// ============================================================
+// Logs viewer modal
+// ============================================================
+async function abrirLogs() {
+  el('logs-body').innerHTML = '<p class="hint">Cargando…</p>';
+  show('logs-overlay');
+  try {
+    const r = await window.packprice.readLogs(200);
+    if (r && r.ok) {
+      el('logs-body').innerHTML = renderLogsModal({ path: r.path, lines: r.lines });
+    } else {
+      el('logs-body').innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>No se pudo leer el log: ${escAttr(r && r.error)}</span></div>`;
+    }
+  } catch (err) {
+    el('logs-body').innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>${escAttr(err.message)}</span></div>`;
+  }
+}
+
+function cerrarLogs() {
+  hide('logs-overlay');
+}
+
+// ============================================================
+// Quote history modal
+// ============================================================
+async function abrirHistorial() {
+  show('history-overlay');
+  const search = el('history-search');
+  if (search) search.value = '';
+  await refrescarHistorial();
+}
+
+function cerrarHistorial() {
+  hide('history-overlay');
+}
+
+async function refrescarHistorial() {
+  const body = el('history-body');
+  const search = el('history-search');
+  const query = search ? search.value : '';
+  body.innerHTML = '<p class="hint">Cargando…</p>';
+  try {
+    const r = query
+      ? await window.packprice.searchQuotes(query)
+      : await window.packprice.listQuotes();
+    if (!r || !r.ok) {
+      body.innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>${escAttr(r && r.error)}</span></div>`;
+      return;
+    }
+    body.innerHTML = renderHistoryList(r.quotes || []);
+    el('history-foot-info').textContent = `${(r.quotes || []).length} presupuesto${(r.quotes || []).length === 1 ? '' : 's'}`;
+
+    body.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => onHistoryAction(btn.dataset.action, btn.dataset.id));
+    });
+  } catch (err) {
+    body.innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>${escAttr(err.message)}</span></div>`;
+  }
+}
+
+async function onHistoryAction(action, id) {
+  if (action === 'delete') {
+    const ok = await window.packprice.confirmar({
+      titulo: 'Eliminar presupuesto',
+      mensaje: `¿Eliminar el presupuesto ${id}?`,
+      detalle: 'Esta acción no se puede deshacer.',
+      botones: ['Eliminar', 'Cancelar'],
+      defaultId: 1
+    });
+    if (ok !== 0) return;
+    await window.packprice.deleteQuote(id);
+    await refrescarHistorial();
+    return;
+  }
+  if (action === 'open') {
+    const r = await window.packprice.getQuote(id);
+    if (!r || !r.ok || !r.quote) return;
+    ultimoResultado = r.quote.resultado || r.quote;
+    cerrarHistorial();
+    if (typeof renderResultado === 'function') {
+      try { renderResultado(ultimoResultado); } catch (_) {}
+    }
+    await window.packprice.mostrarInfo({
+      titulo: 'Presupuesto cargado',
+      mensaje: `Presupuesto ${id} reabierto en pantalla.`
+    });
+    return;
+  }
+  if (action === 'pdf') {
+    const r = await window.packprice.getQuote(id);
+    if (!r || !r.ok || !r.quote) return;
+    const out = await window.packprice.exportPdf({
+      quote: r.quote,
+      empresa: CFG && CFG.empresa,
+      presupuesto: CFG && CFG.presupuesto,
+      defaultName: `${r.quote.id}.pdf`
+    });
+    if (out && out.cancelado) return;
+    if (!out || !out.ok) {
+      await window.packprice.mostrarError({
+        titulo: 'Error al exportar',
+        mensaje: (out && out.error) || 'Error desconocido'
+      });
+      return;
+    }
+    await window.packprice.mostrarInfo({
+      titulo: 'PDF exportado',
+      mensaje: `Guardado en:\n${out.ruta}`
+    });
+  }
+}
+
+async function guardarPresupuesto() {
+  if (!ultimoResultado) {
+    await window.packprice.mostrarError({
+      titulo: 'Nada que guardar',
+      mensaje: 'Calcula un presupuesto antes de guardarlo.'
+    });
+    return;
+  }
+  const draft = buildQuoteDraft(ultimoResultado, {
+    usuario: SETTINGS.nombre_usuario,
+    configVersion: CFG && CFG.version,
+    packId: estado.packId
+  });
+  const r = await window.packprice.saveQuote(draft);
+  if (!r || !r.ok) {
+    await window.packprice.mostrarError({
+      titulo: 'No se pudo guardar',
+      mensaje: (r && r.error) || 'Error desconocido'
+    });
+    return;
+  }
+  await window.packprice.mostrarInfo({
+    titulo: 'Presupuesto guardado',
+    mensaje: `Asignado el ID ${r.quote.id}.`,
+    detalle: 'Disponible en el botón “Historial” del menú superior.'
+  });
+}
+
+async function exportarPresupuestoPdf() {
+  if (!ultimoResultado) {
+    await window.packprice.mostrarError({
+      titulo: 'Nada que exportar',
+      mensaje: 'Calcula un presupuesto antes de exportarlo.'
+    });
+    return;
+  }
+
+  // The PDF needs a quote object with id + fecha. If the user hasn't
+  // saved it yet, persist it now so the PDF and the history are
+  // consistent (same id printed on the document and stored locally).
+  let quote;
+  if (ultimoResultado.id && ultimoResultado.fecha) {
+    quote = ultimoResultado;
+  } else {
+    const draft = buildQuoteDraft(ultimoResultado, {
+      usuario: SETTINGS.nombre_usuario,
+      configVersion: CFG && CFG.version,
+      packId: estado.packId
+    });
+    const r = await window.packprice.saveQuote(draft);
+    if (!r || !r.ok) {
+      await window.packprice.mostrarError({
+        titulo: 'No se pudo preparar el PDF',
+        mensaje: (r && r.error) || 'Error al guardar el presupuesto previo a exportar.'
+      });
+      return;
+    }
+    quote = r.quote;
+    // Replace ultimoResultado so subsequent clicks reuse the saved id.
+    ultimoResultado = quote;
+  }
+
+  const r = await window.packprice.exportPdf({
+    quote,
+    empresa: CFG && CFG.empresa,
+    presupuesto: CFG && CFG.presupuesto,
+    defaultName: `${quote.id}.pdf`
+  });
+  if (r && r.cancelado) return;
+  if (!r || !r.ok) {
+    await window.packprice.mostrarError({
+      titulo: 'Error al exportar',
+      mensaje: (r && r.error) || 'Error desconocido'
+    });
+    return;
+  }
+  await window.packprice.mostrarInfo({
+    titulo: 'PDF exportado',
+    mensaje: `Guardado en:\n${r.ruta}`
+  });
 }
 
 // ============================================================
