@@ -7,6 +7,7 @@ Tres planes organizados por nivel de fricción contra los principios de CLAUDE.m
 | 1 | [`tier-1-profesionalidad-real.md`](tier-1-profesionalidad-real.md) | Mejoras alineadas con CLAUDE.md. Subir el listón sin romper nada. | Próximos releases |
 | 2 | [`tier-2-ux-taller.md`](tier-2-ux-taller.md) | UX y robustez operativa. Asume Tier 1 hecho. | Tras Tier 1 |
 | 3 | [`tier-3-debate.md`](tier-3-debate.md) | Cambios que requieren debate previo y actualización de CLAUDE.md. | Solo si hay disparador objetivo |
+| Refactor | [`migracion-codigo-ingles.md`](migracion-codigo-ingles.md) | Migración por ondas de los identificadores a inglés (CLAUDE.md §2). | Transversal a Tier 1/2 |
 
 ## Orden global recomendado
 
