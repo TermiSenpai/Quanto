@@ -30,6 +30,7 @@ También hace algo más útil para un equipo pequeño: **bloquea decisiones**. U
 | 08  | [Flujo principal](08-flujo-principal/README.md)                                       | Selección de pack, datos del pedido con preview en vivo, resultado. |
 | 09  | [Modo admin con detección de conflictos](09-modo-admin-conflictos/README.md)          | mtime + sha256, backups automáticos, diálogos nativos.              |
 | 10  | [Empaquetado, distribución y futuro](10-empaquetado-y-futuro/README.md)               | electron-builder portable, roadmap V0→V5, ampliación con el tiempo. |
+| 11  | [Tier-1 profesionalidad real](11-tier-1-profesionalidad-real/README.md)               | Validación, logs, auditoría con diff, historial e PDF.              |
 
 ---
 
