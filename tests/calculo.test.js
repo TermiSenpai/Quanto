@@ -1,32 +1,28 @@
 // ============================================================
-// Tests de la lógica de cálculo (renderer/calculo.js)
+// Calculation logic tests (renderer/calculo.js) — v3
 // ============================================================
-// Cubrimos los casos del PLAN_Calculadora.md y los bordes de tramo.
-// Las funciones son puras: reciben (cfg, opciones) y devuelven el
-// resultado.
-//
-// renderer/calculo.js todavía consume el esquema v2 (se migra en
-// Onda 6), así que alimentamos el fixture v2 canónico en vez de
-// buildDefaultConfig (que ya emite v3).
+// Covers the cases from PLAN_Calculadora.md and the tier borders.
+// Pure functions: they take (cfg, options) and return the result.
+// `cfg` is built with buildDefaultConfig (v3).
 // ============================================================
 import { describe, test, expect } from 'vitest';
 import {
-  getTramo,
-  calcularExtras,
-  calcularCostePrenda,
-  calcularPackPena,
-  calcularPackIndividual,
-  calcularPackMixto,
-  calcularPackPersonalizado
+  getTier,
+  calculateExtras,
+  calculateGarmentCost,
+  calculateCrewPack,
+  calculateSinglePack,
+  calculateMixedPack,
+  calculateCustomPack
 } from '../renderer/calculo.js';
-import { buildV2Config } from './fixtures/config-v2.js';
+import { buildDefaultConfig } from '../config.default.js';
 
-const CFG = buildV2Config();
+const CFG = buildDefaultConfig();
 
-// Tolerancia de 1 céntimo para evitar fragilidad por flotantes.
+// 1-cent tolerance to avoid float fragility.
 const EUR = 0.01;
 
-describe('getTramo', () => {
+describe('getTier', () => {
   test.each([
     [9,    null],
     [10,   'T1'],
@@ -37,210 +33,209 @@ describe('getTramo', () => {
     [99,   'T3'],
     [100,  'T4'],
     [9999, 'T4']
-  ])('cantidad=%i → %s', (cant, esperado) => {
-    const t = getTramo(CFG, cant);
-    if (esperado === null) {
+  ])('quantity=%i → %s', (qty, expected) => {
+    const t = getTier(CFG, qty);
+    if (expected === null) {
       expect(t).toBeNull();
     } else {
       expect(t).not.toBeNull();
-      expect(t.id).toBe(esperado);
+      expect(t.id).toBe(expected);
     }
   });
 });
 
-describe('calcularExtras', () => {
-  test('sin extras devuelve ceros', () => {
-    const r = calcularExtras(CFG, {});
-    expect(r.sin_iva).toBe(0);
-    expect(r.iva_inc).toBe(0);
+describe('calculateExtras', () => {
+  test('no extras returns zeros', () => {
+    const r = calculateExtras(CFG, {});
+    expect(r.no_vat).toBe(0);
+    expect(r.vat_inc).toBe(0);
   });
 
-  test('aplica IVA encima del subtotal sin IVA', () => {
-    // 2 nombres × 1.5 + 1 manga corta × 1.5 + 1 manga larga × 3 = 7.5 sin IVA
-    // con IVA 21% → 9.075
-    const r = calcularExtras(CFG, {
-      nombres: 2,
-      mangas_cortas: 1,
-      mangas_largas: 1
+  test('applies VAT on top of the VAT-free subtotal', () => {
+    // 2 names × 1.5 + 1 short sleeve × 1.5 + 1 long sleeve × 3 = 7.5 (no VAT)
+    // with 21% VAT → 9.075
+    const r = calculateExtras(CFG, {
+      names: 2,
+      short_sleeves: 1,
+      long_sleeves: 1
     });
-    expect(r.sin_iva).toBeCloseTo(7.5, 4);
-    expect(r.iva_inc).toBeCloseTo(9.075, 4);
+    expect(r.no_vat).toBeCloseTo(7.5, 4);
+    expect(r.vat_inc).toBeCloseTo(9.075, 4);
   });
 });
 
-describe('calcularPackPena (caso del plan §3.1)', () => {
-  // 12 packs sin capucha, 2 caras → tramo T1, PVP 25.95 → 311.40 €
-  test('12 packs sin capucha 2 caras = 311.40 €', () => {
-    const r = calcularPackPena(CFG, {
-      cantidad: 12,
-      capucha: 'sin',
-      caras: 2,
-      cant_4xl: 0,
-      cant_5xl: 0
+describe('calculateCrewPack (plan case §3.1)', () => {
+  // 12 packs without hood, 2 sides → tier T1, price 25.95 → 311.40 €
+  test('12 packs without hood, 2 sides = 311.40 €', () => {
+    const r = calculateCrewPack(CFG, {
+      quantity: 12,
+      hood: 'without',
+      sides: 2,
+      qty_4xl: 0,
+      qty_5xl: 0
     });
     expect(r.error).toBeUndefined();
-    expect(r.tramo).toMatch(/10-24/);
-    expect(r.pvp_unitario).toBe(25.95);
-    expect(r.total_iva_inc).toBeCloseTo(311.40, 2);
+    expect(r.tier).toMatch(/10-24/);
+    expect(r.unit_price).toBe(25.95);
+    expect(r.total_vat_inc).toBeCloseTo(311.40, 2);
   });
 
-  test('rechaza cantidad por debajo del mínimo', () => {
-    const r = calcularPackPena(CFG, {
-      cantidad: 5, capucha: 'sin', caras: 2, cant_4xl: 0, cant_5xl: 0
+  test('rejects a quantity below the minimum', () => {
+    const r = calculateCrewPack(CFG, {
+      quantity: 5, hood: 'without', sides: 2, qty_4xl: 0, qty_5xl: 0
     });
     expect(r.error).toBeDefined();
   });
 
-  test('cambia tramo y PVP cuando se cruza una frontera', () => {
-    const r25 = calcularPackPena(CFG, {
-      cantidad: 25, capucha: 'sin', caras: 2, cant_4xl: 0, cant_5xl: 0
+  test('changes tier and price when a border is crossed', () => {
+    const r25 = calculateCrewPack(CFG, {
+      quantity: 25, hood: 'without', sides: 2, qty_4xl: 0, qty_5xl: 0
     });
-    expect(r25.pvp_unitario).toBe(24.95); // T2
+    expect(r25.unit_price).toBe(24.95); // T2
 
-    const r100 = calcularPackPena(CFG, {
-      cantidad: 100, capucha: 'con', caras: 1, cant_4xl: 0, cant_5xl: 0
+    const r100 = calculateCrewPack(CFG, {
+      quantity: 100, hood: 'with', sides: 1, qty_4xl: 0, qty_5xl: 0
     });
-    expect(r100.pvp_unitario).toBe(22.95); // T4 con_capucha una_cara
+    expect(r100.unit_price).toBe(22.95); // T4 with_hood one_side
   });
 
-  test('recargos 4XL/5XL+ se suman al total', () => {
-    const base = calcularPackPena(CFG, {
-      cantidad: 12, capucha: 'sin', caras: 2, cant_4xl: 0, cant_5xl: 0
+  test('4XL/5XL+ surcharges add to the total', () => {
+    const base = calculateCrewPack(CFG, {
+      quantity: 12, hood: 'without', sides: 2, qty_4xl: 0, qty_5xl: 0
     });
-    const con = calcularPackPena(CFG, {
-      cantidad: 12, capucha: 'sin', caras: 2, cant_4xl: 2, cant_5xl: 1
+    const withSurcharge = calculateCrewPack(CFG, {
+      quantity: 12, hood: 'without', sides: 2, qty_4xl: 2, qty_5xl: 1
     });
-    const recargoEsperado = 2 * 3 + 1 * 5; // 11 €
-    expect(con.total_iva_inc - base.total_iva_inc).toBeCloseTo(recargoEsperado, 2);
+    const expectedSurcharge = 2 * 3 + 1 * 5; // 11 €
+    expect(withSurcharge.total_vat_inc - base.total_vat_inc).toBeCloseTo(expectedSurcharge, 2);
   });
 });
 
-describe('calcularPackIndividual', () => {
-  test('solo_camisetas T1 dos_caras 10 uds', () => {
-    const r = calcularPackIndividual(CFG, 'solo_camisetas', {
-      cantidad: 10, caras: 2, cant_4xl: 0, cant_5xl: 0
+describe('calculateSinglePack', () => {
+  test('tshirts_only T1 two_sides 10 units', () => {
+    const r = calculateSinglePack(CFG, 'tshirts_only', {
+      quantity: 10, sides: 2, qty_4xl: 0, qty_5xl: 0
     });
     expect(r.error).toBeUndefined();
-    expect(r.pvp_unitario).toBe(11.99);
-    expect(r.total_iva_inc).toBeCloseTo(119.90, 2);
+    expect(r.unit_price).toBe(11.99);
+    expect(r.total_vat_inc).toBeCloseTo(119.90, 2);
   });
 
-  test('rechaza por debajo del mínimo', () => {
-    const r = calcularPackIndividual(CFG, 'solo_urban', {
-      cantidad: 9, caras: 1, cant_4xl: 0, cant_5xl: 0
+  test('rejects below the minimum', () => {
+    const r = calculateSinglePack(CFG, 'urban_only', {
+      quantity: 9, sides: 1, qty_4xl: 0, qty_5xl: 0
     });
     expect(r.error).toBeDefined();
   });
 });
 
-describe('calcularPackMixto (caso del plan)', () => {
-  // 7 URBAN + 5 CLASICA, T1, 1 cara: 7×14.95 + 5×12.95 = 104.65 + 64.75 = 169.40
-  // El plan menciona 193.40 que parece corresponder a 2 caras: 7×16.95 + 5×14.95 = 118.65 + 74.75 = 193.40
-  test('7 URBAN + 5 CLASICA, 2 caras = 193.40 €', () => {
-    const r = calcularPackMixto(CFG, {
-      cant_clasica: 5,
-      cant_urban: 7,
-      caras: 2,
-      cant_4xl: 0,
-      cant_5xl: 0
+describe('calculateMixedPack (plan case)', () => {
+  // 7 URBAN + 5 CLASICA, T1, 2 sides: 7×16.95 + 5×14.95 = 118.65 + 74.75 = 193.40
+  test('7 URBAN + 5 CLASICA, 2 sides = 193.40 €', () => {
+    const r = calculateMixedPack(CFG, {
+      qty_classic: 5,
+      qty_urban: 7,
+      sides: 2,
+      qty_4xl: 0,
+      qty_5xl: 0
     });
     expect(r.error).toBeUndefined();
-    expect(r.cantidad_total).toBe(12);
-    expect(r.tramo).toMatch(/10-24/);
-    expect(r.total_iva_inc).toBeCloseTo(193.40, 2);
+    expect(r.total_quantity).toBe(12);
+    expect(r.tier).toMatch(/10-24/);
+    expect(r.total_vat_inc).toBeCloseTo(193.40, 2);
   });
 
-  test('rechaza si total < min', () => {
-    const r = calcularPackMixto(CFG, {
-      cant_clasica: 4, cant_urban: 4, caras: 2, cant_4xl: 0, cant_5xl: 0
+  test('rejects if total < min', () => {
+    const r = calculateMixedPack(CFG, {
+      qty_classic: 4, qty_urban: 4, sides: 2, qty_4xl: 0, qty_5xl: 0
     });
     expect(r.error).toBeDefined();
   });
 
-  test('subtotal = suma de líneas', () => {
-    const r = calcularPackMixto(CFG, {
-      cant_clasica: 5, cant_urban: 7, caras: 2, cant_4xl: 0, cant_5xl: 0
+  test('subtotal = sum of lines', () => {
+    const r = calculateMixedPack(CFG, {
+      qty_classic: 5, qty_urban: 7, sides: 2, qty_4xl: 0, qty_5xl: 0
     });
-    const sumLineas = r.desglose.reduce((s, l) => s + l.subtotal, 0);
-    expect(r.subtotal).toBeCloseTo(sumLineas, 2);
+    const sumLines = r.breakdown.reduce((s, l) => s + l.subtotal, 0);
+    expect(r.subtotal).toBeCloseTo(sumLines, 2);
   });
 });
 
-describe('calcularPackPersonalizado', () => {
-  test('mezcla cualquier combo a su PVP individual', () => {
-    const r = calcularPackPersonalizado(CFG, {
-      lineas: [
-        { modelo: 'BEAGLE',  cantidad: 5,  caras: 2 },
-        { modelo: 'CLASICA', cantidad: 3,  caras: 2 },
-        { modelo: 'URBAN',   cantidad: 2,  caras: 1 }
+describe('calculateCustomPack', () => {
+  test('mixes any combo at its single price', () => {
+    const r = calculateCustomPack(CFG, {
+      lines: [
+        { model: 'BEAGLE',  quantity: 5, sides: 2 },
+        { model: 'CLASICA', quantity: 3, sides: 2 },
+        { model: 'URBAN',   quantity: 2, sides: 1 }
       ],
-      cant_4xl: 0, cant_5xl: 0
+      qty_4xl: 0, qty_5xl: 0
     });
     expect(r.error).toBeUndefined();
-    expect(r.cantidad_total).toBe(10);
-    // T1: BEAGLE 2c=11.99, CLASICA 2c=14.95, URBAN 1c=14.95
+    expect(r.total_quantity).toBe(10);
+    // T1: BEAGLE 2s=11.99, CLASICA 2s=14.95, URBAN 1s=14.95
     // 5×11.99 + 3×14.95 + 2×14.95 = 59.95 + 44.85 + 29.90 = 134.70
     expect(r.subtotal).toBeCloseTo(134.70, 2);
   });
 
-  test('rechaza líneas vacías', () => {
-    const r = calcularPackPersonalizado(CFG, { lineas: [], cant_4xl: 0, cant_5xl: 0 });
+  test('rejects empty lines', () => {
+    const r = calculateCustomPack(CFG, { lines: [], qty_4xl: 0, qty_5xl: 0 });
     expect(r.error).toBeDefined();
   });
 
-  test('rechaza si total < min', () => {
-    const r = calcularPackPersonalizado(CFG, {
-      lineas: [{ modelo: 'BEAGLE', cantidad: 5, caras: 2 }],
-      cant_4xl: 0, cant_5xl: 0
+  test('rejects if total < min', () => {
+    const r = calculateCustomPack(CFG, {
+      lines: [{ model: 'BEAGLE', quantity: 5, sides: 2 }],
+      qty_4xl: 0, qty_5xl: 0
     });
     expect(r.error).toBeDefined();
   });
 
-  test('rechaza modelo sin pack de referencia', () => {
-    const cfgRoto = buildV2Config();
-    cfgRoto.modelos_roly.NUEVO = { nombre: 'X', ref: 'X', precio: 1 };
-    const r = calcularPackPersonalizado(cfgRoto, {
-      lineas: [
-        { modelo: 'BEAGLE', cantidad: 9,  caras: 1 },
-        { modelo: 'NUEVO',  cantidad: 1,  caras: 1 }
+  test('rejects a model without a reference pack', () => {
+    const brokenCfg = buildDefaultConfig();
+    brokenCfg.roly_models.NUEVO = { name: 'X', ref: 'X', price: 1 };
+    const r = calculateCustomPack(brokenCfg, {
+      lines: [
+        { model: 'BEAGLE', quantity: 9, sides: 1 },
+        { model: 'NUEVO',  quantity: 1, sides: 1 }
       ],
-      cant_4xl: 0, cant_5xl: 0
+      qty_4xl: 0, qty_5xl: 0
     });
     expect(r.error).toMatch(/NUEVO/);
   });
 });
 
-describe('calcularCostePrenda', () => {
-  test('coste BEAGLE 2 caras T1, lote 10', () => {
-    const t1 = getTramo(CFG, 10);
-    const r = calcularCostePrenda(CFG, 'BEAGLE', 2, t1, 10);
-    // No bloqueamos un valor exacto (depende de muchos parámetros), pero
-    // el coste debe ser positivo y razonable (entre 1 y 20 €).
+describe('calculateGarmentCost', () => {
+  test('BEAGLE 2 sides T1, batch 10', () => {
+    const t1 = getTier(CFG, 10);
+    const r = calculateGarmentCost(CFG, 'BEAGLE', 2, t1, 10);
+    // We don't pin an exact value (depends on many params), but the
+    // cost must be positive and reasonable (between 1 and 20 €).
     expect(r.total).toBeGreaterThan(1);
     expect(r.total).toBeLessThan(20);
   });
 
-  test('reducción de tiempo en T4 baja el coste vs T1', () => {
-    const t1 = getTramo(CFG, 10);
-    const t4 = getTramo(CFG, 100);
-    const c1 = calcularCostePrenda(CFG, 'URBAN', 2, t1, 10).total;
-    const c4 = calcularCostePrenda(CFG, 'URBAN', 2, t4, 100).total;
+  test('time reduction in T4 lowers the cost vs T1', () => {
+    const t1 = getTier(CFG, 10);
+    const t4 = getTier(CFG, 100);
+    const c1 = calculateGarmentCost(CFG, 'URBAN', 2, t1, 10).total;
+    const c4 = calculateGarmentCost(CFG, 'URBAN', 2, t4, 100).total;
     expect(c4).toBeLessThan(c1);
   });
 });
 
-describe('coherencia interna de calcularTotales', () => {
-  test('base + IVA == total IVA inc', () => {
-    const r = calcularPackPena(CFG, {
-      cantidad: 30, capucha: 'con', caras: 2, cant_4xl: 1, cant_5xl: 1
+describe('calculateTotals internal coherence', () => {
+  test('base + VAT == total VAT inc', () => {
+    const r = calculateCrewPack(CFG, {
+      quantity: 30, hood: 'with', sides: 2, qty_4xl: 1, qty_5xl: 1
     });
-    expect(r.base_venta + r.iva).toBeCloseTo(r.total_iva_inc, EUR);
+    expect(r.sale_base + r.vat).toBeCloseTo(r.total_vat_inc, EUR);
   });
 
-  test('margen + coste_total + iva == total IVA inc', () => {
-    const r = calcularPackPena(CFG, {
-      cantidad: 30, capucha: 'con', caras: 2, cant_4xl: 0, cant_5xl: 0
+  test('margin + total_cost + vat == total VAT inc', () => {
+    const r = calculateCrewPack(CFG, {
+      quantity: 30, hood: 'with', sides: 2, qty_4xl: 0, qty_5xl: 0
     });
-    expect(r.margen + r.coste_total + r.iva).toBeCloseTo(r.total_iva_inc, EUR);
+    expect(r.margin + r.total_cost + r.vat).toBeCloseTo(r.total_vat_inc, EUR);
   });
 });

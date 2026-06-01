@@ -411,14 +411,14 @@ ipcMain.handle('config:write', (event, payload) => {
     // If this fails, we do not break the user: the change is done
     // and a backup exists. We only log.
     try {
-      const cambios = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
+      const changes = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
       appendAuditEntry(filePath, {
-        usuario: configCompleto.modified_by || 'desconocido',
+        user: configCompleto.modified_by || 'desconocido',
         app_version: app.getVersion(),
-        cambios
+        changes
       });
       logger.info('config:write success', {
-        ruta: filePath, usuario: configCompleto.modified_by, cambios: cambios.length, backupPath
+        ruta: filePath, user: configCompleto.modified_by, changes: changes.length, backupPath
       });
     } catch (auditErr) {
       logger.warn('audit append failed (non-blocking)', { error: auditErr.message });
@@ -450,14 +450,14 @@ ipcMain.handle('config:force-write', (event, payload) => {
     writeConfigAtomic(filePath, configCompleto);
 
     try {
-      const cambios = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
+      const changes = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
       appendAuditEntry(filePath, {
-        usuario: configCompleto.modified_by || 'desconocido',
+        user: configCompleto.modified_by || 'desconocido',
         app_version: app.getVersion(),
-        cambios
+        changes
       });
       logger.info('config:force-write success', {
-        ruta: filePath, usuario: configCompleto.modified_by, cambios: cambios.length, backupPath
+        ruta: filePath, user: configCompleto.modified_by, changes: changes.length, backupPath
       });
     } catch (auditErr) {
       logger.warn('audit append failed (non-blocking)', { error: auditErr.message });
@@ -491,8 +491,8 @@ ipcMain.handle('audit:diff-preview', (event, { ruta, configNuevo }) => {
     let configPrevio = null;
     try { configPrevio = migrateConfig(readConfigFromFile(ruta)); } catch (_) {}
     const configCompleto = mergeWithCurrentPassword(ruta, configNuevo);
-    const cambios = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
-    return { ok: true, cambios };
+    const changes = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
+    return { ok: true, changes };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -649,13 +649,13 @@ ipcMain.handle('quotes:delete', (event, id) => {
 // file. We do not depend on external PDF libraries.
 //
 // Inputs:
-//   { quote, empresa, presupuesto } -- quote is the persisted record
-//                                       OR a fresh draft (resultado-only).
-//   { defaultName }                 -- suggested file name.
+//   { quote, company, quote_settings } -- quote is the persisted record
+//                                          OR a fresh draft (result-only).
+//   { defaultName }                    -- suggested file name.
 //
 // Returns { ok, ruta } on success or { ok:false, error } on failure.
 ipcMain.handle('pdf:export', async (event, payload) => {
-  const { quote, empresa, presupuesto, defaultName } = payload || {};
+  const { quote, company, quote_settings, defaultName } = payload || {};
   if (!quote) return { ok: false, error: 'Falta el presupuesto a exportar.' };
 
   let win = null;
@@ -670,7 +670,7 @@ ipcMain.handle('pdf:export', async (event, payload) => {
       return { ok: false, cancelado: true };
     }
 
-    const html = renderQuoteHtml(quote, { empresa, presupuesto });
+    const html = renderQuoteHtml(quote, { company, quoteSettings: quote_settings });
     // electron-builder strips temp dirs from app userData, so use the
     // OS temp folder. The file is deleted after PDF generation.
     tmpHtmlPath = path.join(app.getPath('temp'), `packprice-quote-${Date.now()}.html`);

@@ -65,21 +65,21 @@ export function renderAuditTab(entries) {
     <div class="audit-list">
   `;
   for (const entry of ordered) {
-    const cambios = Array.isArray(entry.cambios) ? entry.cambios : [];
-    const cambiosHtml = cambios.length === 0
+    const changes = Array.isArray(entry.changes) ? entry.changes : [];
+    const changesHtml = changes.length === 0
       ? '<p class="hint">Sin cambios registrados.</p>'
       : '<ul class="audit-changes">' +
-        cambios.map(renderChangeRow).join('') +
+        changes.map(renderChangeRow).join('') +
         '</ul>';
     html += `
       <article class="audit-entry">
         <header class="audit-entry__head">
-          <span class="audit-entry__user">${esc(entry.usuario || 'desconocido')}</span>
+          <span class="audit-entry__user">${esc(entry.user || 'desconocido')}</span>
           <span class="audit-entry__ts">${esc(formatTimestamp(entry.ts))}</span>
           ${entry.app_version ? `<span class="audit-entry__ver">v${esc(entry.app_version)}</span>` : ''}
-          <span class="audit-entry__count">${cambios.length} cambio${cambios.length === 1 ? '' : 's'}</span>
+          <span class="audit-entry__count">${changes.length} cambio${changes.length === 1 ? '' : 's'}</span>
         </header>
-        <div class="audit-entry__body">${cambiosHtml}</div>
+        <div class="audit-entry__body">${changesHtml}</div>
       </article>
     `;
   }

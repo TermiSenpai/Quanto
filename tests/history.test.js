@@ -1,5 +1,5 @@
 // ============================================================
-// Tests · lib/history.js
+// Tests · lib/history.js — v3
 // ============================================================
 import { describe, test, expect, afterAll } from 'vitest';
 import fs from 'fs';
@@ -67,13 +67,13 @@ describe('saveQuote', () => {
   test('persists the quote with assigned id and ISO date', () => {
     const dir = makeUserData();
     const quote = saveQuote(dir, {
-      usuario: 'Alberto',
-      pack: 'pena',
-      total_iva_inc: 311.40
+      user: 'Alberto',
+      pack: 'crew',
+      total_vat_inc: 311.40
     }, { now: new Date('2026-05-11T14:32:00Z') });
     expect(quote.id).toBe('PP-2026-0001');
-    expect(quote.fecha).toBe('2026-05-11T14:32:00.000Z');
-    expect(quote.total_iva_inc).toBe(311.40);
+    expect(quote.date).toBe('2026-05-11T14:32:00.000Z');
+    expect(quote.total_vat_inc).toBe(311.40);
 
     const onDisk = listQuotes(dir);
     expect(onDisk).toHaveLength(1);
@@ -100,7 +100,7 @@ describe('listQuotes', () => {
     expect(listQuotes(makeUserData())).toEqual([]);
   });
 
-  test('newest first by fecha', () => {
+  test('newest first by date', () => {
     const dir = makeUserData();
     saveQuote(dir, { tag: 'old' }, { now: new Date('2026-01-01T10:00:00Z') });
     saveQuote(dir, { tag: 'mid' }, { now: new Date('2026-06-01T10:00:00Z') });
@@ -119,10 +119,10 @@ describe('searchQuotes', () => {
     expect(searchQuotes(dir, 'PP-2027').map(q => q.id)).toEqual(['PP-2027-0001']);
   });
 
-  test('matches by client name and user', () => {
+  test('matches by customer name and user', () => {
     const dir = makeUserData();
-    saveQuote(dir, { usuario: 'Alberto', cliente: { nombre: 'Lobito' } });
-    saveQuote(dir, { usuario: 'Carlos',  cliente: { nombre: 'Marina' } });
+    saveQuote(dir, { user: 'Alberto', customer: { name: 'Lobito' } });
+    saveQuote(dir, { user: 'Carlos',  customer: { name: 'Marina' } });
     expect(searchQuotes(dir, 'lobito')).toHaveLength(1);
     expect(searchQuotes(dir, 'carlos')).toHaveLength(1);
     expect(searchQuotes(dir, 'in')).toHaveLength(1); // 'Marina' contains 'in'
@@ -158,6 +158,44 @@ describe('getQuote', () => {
     const dir = makeUserData();
     const a = saveQuote(dir, { tag: 'unique' });
     expect(getQuote(dir, a.id)).toMatchObject({ id: a.id, tag: 'unique' });
+  });
+});
+
+describe('lazy v2 -> v3 migration of presupuestos.json', () => {
+  test('migrates v2 entries on read and backs up the original', () => {
+    const dir = makeUserData();
+    const filePath = historyPathFor(dir);
+    const v2 = [{
+      id: 'PP-2026-0001',
+      fecha: '2026-05-01T10:00:00.000Z',
+      usuario: 'Alberto',
+      cliente: { nombre: 'Club X', telefono: '600' },
+      tipo: 'pena',
+      totales: { total_iva_inc: 311.40, base_venta: 257.36, iva: 54.04 }
+    }];
+    fs.writeFileSync(filePath, JSON.stringify(v2, null, 2), 'utf-8');
+
+    const all = listQuotes(dir);
+    expect(all).toHaveLength(1);
+    expect(all[0].date).toBe('2026-05-01T10:00:00.000Z');
+    expect(all[0].user).toBe('Alberto');
+    expect(all[0].customer).toEqual({ name: 'Club X', phone: '600' });
+    expect(all[0].totals.total_vat_inc).toBe(311.40);
+    expect(all[0].fecha).toBeUndefined();
+
+    // The original v2 file was backed up and the file rewritten as v3
+    expect(fs.existsSync(filePath + '.bak-pre-v3')).toBe(true);
+    const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    expect(onDisk[0].user).toBe('Alberto');
+    expect('usuario' in onDisk[0]).toBe(false);
+  });
+
+  test('a v3 history is not migrated again (no backup)', () => {
+    const dir = makeUserData();
+    saveQuote(dir, { user: 'A', customer: { name: 'X' } });
+    const filePath = historyPathFor(dir);
+    listQuotes(dir);
+    expect(fs.existsSync(filePath + '.bak-pre-v3')).toBe(false);
   });
 });
 

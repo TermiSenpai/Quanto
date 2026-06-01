@@ -40,15 +40,15 @@ export function renderHistoryList(quotes) {
   }
 
   const rows = quotes.map(q => {
-    const total = q.totales?.total_iva_inc ?? q.total_iva_inc;
-    const cliente = q.cliente?.nombre || '—';
-    const pack = q.pack || q.tipo || '—';
+    const total = q.totals?.total_vat_inc ?? q.total_vat_inc;
+    const customer = q.customer?.name || '—';
+    const pack = q.pack || q.type || '—';
     return `
       <tr>
         <td class="text-mono">${esc(q.id)}</td>
-        <td>${esc(formatDate(q.fecha))}</td>
-        <td>${esc(q.usuario || '—')}</td>
-        <td>${esc(cliente)}</td>
+        <td>${esc(formatDate(q.date))}</td>
+        <td>${esc(q.user || '—')}</td>
+        <td>${esc(customer)}</td>
         <td>${esc(pack)}</td>
         <td class="num">${esc(formatEur(total))}</td>
         <td class="actions">
@@ -93,24 +93,24 @@ export function renderHistoryList(quotes) {
  * unrelated fields. Snapshot the user, date, and config version
  * so the entry survives future config changes.
  *
- * @param {object} resultado  the calculator output
- * @param {object} ctx        { usuario, configVersion, cliente?, packId? }
+ * @param {object} result  the calculator output
+ * @param {object} ctx      { user, configVersion, customer?, packId? }
  * @returns {object} draft passed to packprice.saveQuote
  */
-export function buildQuoteDraft(resultado, ctx) {
+export function buildQuoteDraft(result, ctx) {
   return {
-    usuario: ctx.usuario || null,
+    user: ctx.user || null,
     config_version: ctx.configVersion || null,
     pack_id: ctx.packId || null,
-    pack: resultado.pack || null,
-    cliente: ctx.cliente || null,
-    resultado,
-    totales: {
-      total_iva_inc: resultado.total_iva_inc ?? null,
-      base_venta:    resultado.base_venta ?? null,
-      iva:           resultado.iva ?? null,
-      coste_total:   resultado.coste_total ?? null,
-      margen:        resultado.margen ?? null
+    pack: result.pack || null,
+    customer: ctx.customer || null,
+    result,
+    totals: {
+      total_vat_inc: result.total_vat_inc ?? null,
+      sale_base:     result.sale_base ?? null,
+      vat:           result.vat ?? null,
+      total_cost:    result.total_cost ?? null,
+      margin:        result.margin ?? null
     }
   };
 }
