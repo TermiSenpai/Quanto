@@ -306,6 +306,14 @@ describe('bug 3 — 4XL/5XL quantities bounded by order size', () => {
     });
     expect(r.error).toBeDefined();
   });
+
+  test('crew: large sizes exactly equal to the order are accepted (boundary)', () => {
+    // 12 packs → 24 garments; 24 large sizes is the inclusive upper bound.
+    const r = calculateCrewPack(CFG, {
+      quantity: 12, hood: 'without', sides: 2, qty_4xl: 24, qty_5xl: 0
+    });
+    expect(r.error).toBeUndefined();
+  });
 });
 
 describe('calculateGarmentCost', () => {
