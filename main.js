@@ -54,6 +54,9 @@ const {
   getQuote
 } = require('./lib/history');
 const { renderQuoteHtml } = require('./lib/pdf-template');
+const { validateSettingsPayload } = require('./lib/settings-validator');
+const { isPathAllowed } = require('./lib/path-guard');
+const { initialThrottleState, nextThrottleState } = require('./lib/admin-throttle');
 
 // --- Path configuration ---
 const SETTINGS_DIR = path.join(app.getPath('userData'));
@@ -73,6 +76,34 @@ const CONFIG_PATH_CANDIDATES = [
 ];
 
 let mainWindow = null;
+
+// ============================================================
+// IPC path allow-list (Item D — security hardening)
+// ============================================================
+// Renderer-supplied paths must point at a "blessed" config.js (or its
+// sidecar audit.log / backups/). The set is the union of the default
+// candidates, the path persisted in settings.config_path, and any path
+// the user picks via the native dialog this session. It is seeded on
+// startup (app.whenReady) and grows when the user picks/sets a path.
+const blessedConfigPaths = new Set(CONFIG_PATH_CANDIDATES);
+
+function rememberBlessedConfigPath(filePath) {
+  if (typeof filePath === 'string' && filePath !== '') {
+    blessedConfigPaths.add(filePath);
+  }
+}
+
+/**
+ * Guards every handler that takes a renderer-supplied path. Throws a
+ * Spanish error unless the path is a blessed config or its sidecar
+ * (audit.log / backups/). Keeps a compromised renderer from coaxing
+ * main into reading/writing arbitrary files.
+ */
+function assertConfigPathAllowed(ruta) {
+  if (!isPathAllowed(blessedConfigPaths, ruta)) {
+    throw new Error('Ruta no permitida.');
+  }
+}
 
 // ============================================================
 // Filesystem helpers
@@ -248,7 +279,13 @@ ipcMain.handle('settings:read', () => {
 
 ipcMain.handle('settings:write', (event, settings) => {
   try {
-    writeSettings(settings);
+    // Validate + strip to known fields before persisting; never write
+    // a raw renderer object to disk (Item A — security hardening).
+    const clean = validateSettingsPayload(settings);
+    if (typeof clean.config_path === 'string' && clean.config_path !== '') {
+      rememberBlessedConfigPath(clean.config_path);
+    }
+    writeSettings(clean);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -270,6 +307,15 @@ ipcMain.handle('config:default-path', () => {
 
 ipcMain.handle('config:exists', (event, ruta) => {
   try {
+    // `config:exists` is the explicit "I want to use this path" probe
+    // during setup (welcome screen / error screen). It is a benign
+    // existence + writability check (no content read, no write), so we
+    // treat it as the user committing to a config path and bless it for
+    // this session. The content handlers (read/write/info/audit) stay
+    // guarded against any path never surfaced this way (Item D).
+    if (typeof ruta === 'string' && ruta !== '') {
+      rememberBlessedConfigPath(ruta);
+    }
     return { existe: fs.existsSync(ruta), escribible: isPathWritable(ruta) };
   } catch (err) {
     return { existe: false, escribible: false, error: err.message };
@@ -282,6 +328,11 @@ ipcMain.handle('config:create-default', (event, payload) => {
   const filePath = payload.ruta ?? payload.path;
   const modifiedBy = payload.modificadoPor ?? payload.modifiedBy;
   try {
+    // Creating a config at a path is a strong commit signal from setup;
+    // bless it so the follow-up read of that same file is allowed.
+    if (typeof filePath === 'string' && filePath !== '') {
+      rememberBlessedConfigPath(filePath);
+    }
     const r = createDefaultConfigFile(filePath, { modified_by: modifiedBy });
     if (!r.creado) {
       return { ok: false, motivo: r.motivo, error: 'El archivo ya existe en esa ruta' };
@@ -313,7 +364,12 @@ ipcMain.handle('dialog:select-config', async () => {
   if (resultado.canceled || resultado.filePaths.length === 0) {
     return { cancelado: true };
   }
-  return { cancelado: false, ruta: resultado.filePaths[0] };
+  // A path the user explicitly picked via the native dialog is trusted
+  // for this session (Item D): bless it so the follow-up read/write of
+  // that config is allowed.
+  const picked = resultado.filePaths[0];
+  rememberBlessedConfigPath(picked);
+  return { cancelado: false, ruta: picked };
 });
 
 // --- Config read (with lazy v2 -> v3 migration) ---
@@ -326,6 +382,7 @@ ipcMain.handle('config:read', (event, payload) => {
     ? (payload.path ?? payload.ruta)
     : payload;
   try {
+    assertConfigPathAllowed(filePath);
     const { config } = readAndMigrateConfig(filePath, {
       onMigrate: (info) => logger.info('config migrated v2→v3', info),
       onBackupError: (err) => logger.warn('pre-v3 backup failed (non-blocking)', { error: err.message })
@@ -359,6 +416,7 @@ ipcMain.handle('config:write', (event, payload) => {
   const configNuevo = payload.configNuevo ?? payload.newConfig;
   const infoEsperada = payload.infoEsperada ?? payload.expectedInfo;
   try {
+    assertConfigPathAllowed(filePath);
     // Conflict detection: did the file change since the admin read it?
     if (infoEsperada) {
       const infoActual = getFileInfo(filePath);
@@ -438,6 +496,7 @@ ipcMain.handle('config:force-write', (event, payload) => {
   const filePath = payload.ruta ?? payload.path;
   const configNuevo = payload.configNuevo ?? payload.newConfig;
   try {
+    assertConfigPathAllowed(filePath);
     let configPrevio = null;
     try { configPrevio = migrateConfig(readConfigFromFile(filePath)); } catch (_) {}
 
@@ -479,6 +538,7 @@ ipcMain.handle('config:force-write', (event, payload) => {
 // draft and the on-disk config, used by the "review changes" modal.
 ipcMain.handle('audit:list', (event, { ruta, limit }) => {
   try {
+    assertConfigPathAllowed(ruta);
     const lim = Number.isFinite(limit) ? Math.min(Math.max(1, limit), 5000) : 200;
     return { ok: true, entries: readRecentEntries(ruta, lim) };
   } catch (err) {
@@ -488,6 +548,7 @@ ipcMain.handle('audit:list', (event, { ruta, limit }) => {
 
 ipcMain.handle('audit:diff-preview', (event, { ruta, configNuevo }) => {
   try {
+    assertConfigPathAllowed(ruta);
     let configPrevio = null;
     try { configPrevio = migrateConfig(readConfigFromFile(ruta)); } catch (_) {}
     const configCompleto = mergeWithCurrentPassword(ruta, configNuevo);
@@ -505,19 +566,45 @@ ipcMain.handle('audit:diff-preview', (event, { ruta, configNuevo }) => {
 // avoid leaking by time. If lengths differ we return `false`
 // directly: timing stays tied to the candidate length, not its
 // content, which is acceptable for an "anti-accidental-click".
-ipcMain.handle('auth:verify-admin', (event, { ruta, clave }) => {
+// In-memory throttle state (per main-process, not persisted). Reset
+// on restart, which is fine for an internal anti-accidental-click gate.
+let adminThrottle = initialThrottleState();
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+ipcMain.handle('auth:verify-admin', async (event, { ruta, clave }) => {
   try {
     if (typeof clave !== 'string' || typeof ruta !== 'string') {
       return { ok: false, error: 'Parámetros inválidos' };
     }
+    assertConfigPathAllowed(ruta);
+
+    // Reject up front if we are inside an active lock window, without
+    // even reading the config or evaluating the password (Item C).
+    if (adminThrottle.lockedUntil && Date.now() < adminThrottle.lockedUntil) {
+      return { ok: false, error: 'Demasiados intentos. Espera unos segundos e inténtalo de nuevo.' };
+    }
+
     const cfg = migrateConfig(readConfigFromFile(ruta));
     const currentPassword = (cfg.admin && cfg.admin.password) || '';
     const aBuf = Buffer.from(clave, 'utf-8');
     const bBuf = Buffer.from(currentPassword, 'utf-8');
-    if (aBuf.length !== bBuf.length) {
-      return { ok: true, valida: false };
+    const valida = (aBuf.length === bBuf.length) && crypto.timingSafeEqual(aBuf, bBuf);
+
+    // Advance the throttle: escalate delay/lock on failure, reset on
+    // success. The pure state machine decides; the handler enforces.
+    const transition = nextThrottleState(adminThrottle, valida, Date.now());
+    adminThrottle = transition.state;
+
+    if (transition.locked) {
+      logger.warn('auth:verify-admin locked (too many attempts)', { ruta });
+      return { ok: false, error: 'Demasiados intentos. Espera unos segundos e inténtalo de nuevo.' };
     }
-    const valida = crypto.timingSafeEqual(aBuf, bBuf);
+    if (transition.delayMs > 0) {
+      await sleep(transition.delayMs);
+    }
     return { ok: true, valida };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -527,6 +614,7 @@ ipcMain.handle('auth:verify-admin', (event, { ruta, clave }) => {
 // --- File info (to detect external changes) ---
 ipcMain.handle('config:info', (event, ruta) => {
   try {
+    assertConfigPathAllowed(ruta);
     return getFileInfo(ruta);
   } catch (err) {
     return null;
@@ -712,6 +800,16 @@ ipcMain.handle('pdf:export', async (event, payload) => {
 
 app.whenReady().then(() => {
   configureLogger({ logDir: LOG_DIR });
+
+  // Seed the path allow-list with the config_path persisted on this PC
+  // (Item D). Default candidates are blessed at module load.
+  try {
+    const saved = readSettings();
+    if (saved && typeof saved.config_path === 'string') {
+      rememberBlessedConfigPath(saved.config_path);
+    }
+  } catch (_) {}
+
   logger.info('app started', {
     version: app.getVersion(),
     platform: process.platform,
