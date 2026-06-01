@@ -1,120 +1,152 @@
 // ============================================================
-// Tests · lib/migrations.js (v2 → v3 data migrations)
+// Tests · lib/migrations.js (v2 → v3 → v4 data migrations)
 // ============================================================
-// Covers the universal rules from the migration plan §6.2:
-//   - migrateConfig(v2-complete) === v3-expected (canonical fixture)
-//   - migrateConfig(v3) === v3 (no-op, same reference)
-//   - migrateConfig(migrateConfig(v2)) === migrateConfig(v2) (idempotent)
-//   - migrateConfig({version:'2.0.0'}) with missing fields → throws
+// Covers:
+//   - migrateConfig chains v2 → v3 → v4 and v3 → v4
+//   - migrateConfigV3ToV4 mapping (products, addons, packs, params)
+//   - idempotency (v4 returned by same reference; double-migrate stable)
+//   - a migrated config passes the v4 validator
+//   - a migrated config reproduces the legacy prices via calculatePack
 //   - migrateQuote / migrateSettings / normalizeAuditEntry round-trips
 // ============================================================
 
 import { describe, test, expect } from 'vitest';
 import {
   migrateConfig,
+  migrateConfigV3ToV4,
   migrateQuote,
   migrateResult,
   migrateSettings,
   normalizeAuditEntry
 } from '../lib/migrations.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { collectConfigErrors } from '../lib/config-schema.js';
+import { calculatePack } from '../renderer/calculo.js';
 import { buildV2Config } from './fixtures/config-v2.js';
+import { buildV3Config } from './fixtures/config-v3.js';
 
-describe('migrateConfig — v2 → v3 round-trip', () => {
-  test('a complete v2 config migrates to exactly the v3 defaults', () => {
-    const v2 = buildV2Config({ fecha_actualizacion: 'X-DATE', modificado_por: 'Y-USER' });
-    const expected = buildDefaultConfig({ updated_at: 'X-DATE', modified_by: 'Y-USER' });
-    expect(migrateConfig(v2)).toEqual(expected);
+describe('migrateConfig — chains to v4', () => {
+  test('a v2 config migrates all the way to v4', () => {
+    const v4 = migrateConfig(buildV2Config({ fecha_actualizacion: 'D', modificado_por: 'U' }));
+    expect(v4.version).toBe('4.0.0');
+    expect(v4.updated_at).toBe('D');
+    expect(v4.modified_by).toBe('U');
+    expect(v4.products).toBeDefined();
+    expect(v4.suppliers).toBeDefined();
+    expect(v4.addons).toBeDefined();
+    expect(v4.roly_models).toBeUndefined(); // gone in v4
   });
 
-  test('top-level meta keys are renamed', () => {
-    const v3 = migrateConfig(buildV2Config({ fecha_actualizacion: 'D', modificado_por: 'U' }));
-    expect(v3.version).toBe('3.0.0');
-    expect(v3.updated_at).toBe('D');
-    expect(v3.modified_by).toBe('U');
-    expect(v3.fecha_actualizacion).toBeUndefined();
-    expect(v3.modificado_por).toBeUndefined();
+  test('a v3 config migrates to v4', () => {
+    const v4 = migrateConfig(buildV3Config({ modified_by: 'Alberto' }));
+    expect(v4.version).toBe('4.0.0');
+    expect(v4.modified_by).toBe('Alberto');
   });
 
-  test('admin.clave becomes admin.password', () => {
-    const v3 = migrateConfig(buildV2Config());
-    expect(v3.admin.password).toBe('fuzfuz2026');
-    expect(v3.admin.clave).toBeUndefined();
+  test('admin.password survives the chain', () => {
+    const v4 = migrateConfig(buildV2Config());
+    expect(v4.admin.password).toBe('fuzfuz2026');
+  });
+});
+
+describe('migrateConfigV3ToV4 — mapping', () => {
+  const v4 = migrateConfigV3ToV4(buildV3Config());
+
+  test('suppliers registry has ROLY', () => {
+    expect(v4.suppliers.ROLY).toEqual({ name: 'Roly', web: '', notes: '' });
   });
 
-  test('parameters keys are renamed', () => {
-    const v3 = migrateConfig(buildV2Config());
-    expect(v3.parameters.vat).toBe(0.21);
-    expect(v3.parameters.labor_eur_hour).toBe(15);
-    expect(v3.parameters.dtf_meters_two_sides).toBe(0.40);
-    expect(v3.parameters.iva).toBeUndefined();
-    expect(v3.parameters.mo_eur_hora).toBeUndefined();
+  test('products are built from roly_models with a default supplier', () => {
+    expect(v4.products.BEAGLE.name).toBe('Camiseta');
+    expect(v4.products.BEAGLE.category).toBe('tshirt');
+    expect(v4.products.BEAGLE.extra_cost_3xl).toBe(0.40);
+    expect(v4.products.CLASICA.category).toBe('hoodie');
+    expect(v4.products.CLASICA.extra_cost_3xl).toBe(0.60);
+    const def = v4.products.BEAGLE.suppliers.find(s => s.is_default);
+    expect(def.supplier).toBe('ROLY');
+    expect(def.ref).toBe('CA65540558');
+    expect(def.price).toBe(1.7325);
   });
 
-  test('roly model keys are renamed, ids and user-facing values kept', () => {
-    const v3 = migrateConfig(buildV2Config());
-    expect(v3.roly_models.BEAGLE.name).toBe('Camiseta'); // Spanish on purpose
-    expect(v3.roly_models.BEAGLE.price).toBe(1.7325);
-    expect(v3.roly_models.BEAGLE.nombre).toBeUndefined();
+  test('product price table is copied from the matching single pack', () => {
+    expect(v4.products.BEAGLE.prices.two_sides.T1).toBe(11.99);
+    expect(v4.products.BEAGLE.prices.one_side.T3).toBe(8.45);
+    expect(v4.products.URBAN.prices.two_sides.T1).toBe(16.95);
   });
 
-  test('tier keys are renamed, T-ids and labels kept', () => {
-    const v3 = migrateConfig(buildV2Config());
-    expect(v3.tiers.map(t => t.id)).toEqual(['T1', 'T2', 'T3', 'T4']);
-    expect(v3.tiers[0].label).toBe('10-24 uds'); // Spanish on purpose
-    expect(v3.tiers[0].from).toBe(10);
-    expect(v3.tiers[0].to).toBe(24);
-    expect(v3.tiers[3].to).toBeNull();
-    expect(v3.tiers[0].desde).toBeUndefined();
+  test('addons are built from the v3 extra_* params', () => {
+    expect(v4.addons.name.price).toBe(1.5);
+    expect(v4.addons.name.applies_to).toEqual(['*']);
+    expect(v4.addons.short_sleeve.price).toBe(1.5);
+    expect(v4.addons.short_sleeve.applies_to).toEqual(['tshirt']);
+    expect(v4.addons.long_sleeve.price).toBe(3);
+    expect(v4.addons.long_sleeve.applies_to).toEqual(['hoodie']);
+    expect(v4.addons.long_sleeve.cost).toBe(0.40);
   });
 
-  test('pack ids, types, price keys and references are renamed', () => {
-    const v3 = migrateConfig(buildV2Config());
-
-    // Pack ids
-    expect(v3.packs.crew_full).toBeDefined();
-    expect(v3.packs.tshirts_only).toBeDefined();
-    expect(v3.packs.hoodies_mixed).toBeDefined();
-    expect(v3.packs.custom).toBeDefined();
-    expect(v3.packs.pena_completa).toBeUndefined();
-
-    // Type values
-    expect(v3.packs.crew_full.type).toBe('crew');
-    expect(v3.packs.tshirts_only.type).toBe('single');
-    expect(v3.packs.hoodies_mixed.type).toBe('mixed');
-    expect(v3.packs.custom.type).toBe('custom');
-
-    // Price structure (T-ids preserved)
-    expect(v3.packs.crew_full.prices.without_hood.two_sides.T1).toBe(25.95);
-    expect(v3.packs.crew_full.prices.with_hood.one_side.T4).toBe(22.95);
-    expect(v3.packs.tshirts_only.prices.one_side.T3).toBe(8.45);
-
-    // Reference maps (keys = model ids; values = renamed pack ids)
-    expect(v3.packs.hoodies_mixed.reference_packs.CLASICA).toBe('classic_only');
-    expect(v3.packs.custom.reference_models.BEAGLE).toBe('tshirts_only');
+  test('parameters drop v3-only keys and add v4 keys', () => {
+    expect(v4.parameters.buffer_3xl_eur_pack).toBeUndefined();
+    expect(v4.parameters.extra_name_eur).toBeUndefined();
+    expect(v4.parameters.extra_short_sleeve_eur).toBeUndefined();
+    expect(v4.parameters.extra_long_sleeve_eur).toBeUndefined();
+    expect(v4.parameters.default_target_margin).toBe(0.35);
+    expect(v4.parameters.price_rounding_ending).toBe(0.95);
+    // kept params
+    expect(v4.parameters.vat).toBe(0.21);
+    expect(v4.parameters.labor_eur_hour).toBe(15);
   });
 
-  test('company and quote_settings are renamed; terms text kept', () => {
-    const v3 = migrateConfig(buildV2Config());
-    expect(v3.company.name).toBe('Mi Taller DTF');
-    expect(v3.company.tax_id).toBe('');
-    expect(v3.quote_settings.validity_days).toBe(30);
-    expect(v3.quote_settings.terms).toMatch(/IVA incluido/); // Spanish on purpose
-    expect(v3.empresa).toBeUndefined();
-    expect(v3.presupuesto).toBeUndefined();
+  test('crew pack becomes a bundle with the right combo prices', () => {
+    const crew = v4.packs.crew_full;
+    expect(crew.pricing_mode).toBe('bundle');
+    expect(crew.bundle_prices['without_hood|two_sides'].T1).toBe(25.95);
+    expect(crew.bundle_prices['with_hood|one_side'].T4).toBe(22.95);
+    expect(crew.options.map(o => o.id)).toEqual(['hood', 'sides']);
+    const hoodOption = crew.options.find(o => o.id === 'hood');
+    expect(hoodOption.maps_product.with_hood).toBe('URBAN');
+  });
+
+  test('single packs become components packs', () => {
+    expect(v4.packs.tshirts_only.pricing_mode).toBe('components');
+    expect(v4.packs.tshirts_only.components[0].product).toBe('BEAGLE');
+    expect(v4.packs.tshirts_only.min_total).toBe(10);
+  });
+
+  test('mixed pack becomes a two-component components pack', () => {
+    const m = v4.packs.hoodies_mixed;
+    expect(m.pricing_mode).toBe('components');
+    expect(m.components.map(c => c.product)).toEqual(['CLASICA', 'URBAN']);
+  });
+
+  test('custom pack becomes free_components', () => {
+    expect(v4.packs.custom.free_components).toBe(true);
+    expect(v4.packs.custom.pricing_mode).toBe('components');
+  });
+
+  test('tiers, company, quote_settings, admin are carried over', () => {
+    expect(v4.tiers.map(t => t.id)).toEqual(['T1', 'T2', 'T3', 'T4']);
+    expect(v4.company.name).toBe('Mi Taller DTF');
+    expect(v4.quote_settings.validity_days).toBe(30);
+    expect(v4.admin.password).toBe('fuzfuz2026');
   });
 });
 
 describe('migrateConfig — idempotence and guards', () => {
-  test('a v3 config is returned untouched (same reference)', () => {
-    const v3 = buildDefaultConfig();
-    expect(migrateConfig(v3)).toBe(v3);
+  test('a v4 config is returned untouched (same reference)', () => {
+    const v4 = migrateConfigV3ToV4(buildV3Config());
+    expect(migrateConfig(v4)).toBe(v4);
   });
 
-  test('migrating twice equals migrating once', () => {
+  test('migrating twice equals migrating once (v2)', () => {
     const v2 = buildV2Config();
     const once = migrateConfig(v2);
     const twice = migrateConfig(migrateConfig(v2));
+    expect(twice).toEqual(once);
+  });
+
+  test('migrating twice equals migrating once (v3)', () => {
+    const v3 = buildV3Config();
+    const once = migrateConfig(v3);
+    const twice = migrateConfig(migrateConfig(v3));
     expect(twice).toEqual(once);
   });
 
@@ -125,6 +157,38 @@ describe('migrateConfig — idempotence and guards', () => {
   test('throws on non-object input', () => {
     expect(() => migrateConfig(null)).toThrow();
     expect(() => migrateConfig('nope')).toThrow();
+  });
+});
+
+describe('migrated config validity + legacy parity', () => {
+  test('a migrated (v2→v4) config passes the v4 validator', () => {
+    const v4 = migrateConfig(buildV2Config());
+    expect(collectConfigErrors(v4)).toEqual([]);
+  });
+
+  test('a migrated (v3→v4) config passes the v4 validator', () => {
+    const v4 = migrateConfigV3ToV4(buildV3Config());
+    expect(collectConfigErrors(v4)).toEqual([]);
+  });
+
+  test('crew pack reproduces the legacy 311.40 € figure', () => {
+    const v4 = migrateConfig(buildV2Config());
+    const r = calculatePack(v4, 'crew_full', {
+      options: { hood: 'without_hood', sides: 'two_sides' },
+      packs: 12
+    });
+    expect(r.error).toBeUndefined();
+    expect(r.total_vat_inc).toBeCloseTo(311.40, 2);
+  });
+
+  test('mixed pack reproduces the legacy 193.40 € figure', () => {
+    const v4 = migrateConfig(buildV2Config());
+    const r = calculatePack(v4, 'hoodies_mixed', {
+      options: { sides: 'two_sides' },
+      quantities: { classic: 5, urban: 7 }
+    });
+    expect(r.error).toBeUndefined();
+    expect(r.total_vat_inc).toBeCloseTo(193.40, 2);
   });
 });
 

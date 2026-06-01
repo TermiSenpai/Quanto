@@ -21,6 +21,7 @@ import {
 import { serializeConfig, extractJsonFromConfig } from '../lib/config-parser.js';
 import { buildDefaultConfig } from '../config.default.js';
 import { buildV2Config } from './fixtures/config-v2.js';
+import { buildV3Config } from './fixtures/config-v3.js';
 
 let tmpDir;
 
@@ -37,7 +38,7 @@ function writeRawConfig(filePath, obj) {
 }
 
 describe('readAndMigrateConfig — lazy migration of a v2 config', () => {
-  test('migrates v2 to v3 on disk, backs up, preserves data', () => {
+  test('migrates v2 to v4 on disk, backs up, preserves data', () => {
     const cfgPath = path.join(tmpDir, 'config.js');
     writeRawConfig(cfgPath, buildV2Config({ modificado_por: 'Alberto' }));
 
@@ -46,21 +47,22 @@ describe('readAndMigrateConfig — lazy migration of a v2 config', () => {
       onMigrate: (info) => { migrateInfo = info; }
     });
 
-    // Returned config is v3
+    // Returned config is v4
     expect(didMigrate).toBe(true);
-    expect(config.version).toBe('3.0.0');
+    expect(config.version).toBe('4.0.0');
     expect(config.parameters.vat).toBe(0.21);
 
-    // The on-disk file was rewritten as v3
+    // The on-disk file was rewritten as v4
     const onDisk = readConfigFromFile(cfgPath);
-    expect(onDisk.version).toBe('3.0.0');
+    expect(onDisk.version).toBe('4.0.0');
     expect(onDisk.parameters.labor_eur_hour).toBe(15);
 
-    // No data lost: spot-check across every section
-    expect(config.packs.crew_full.prices.without_hood.two_sides.T1).toBe(25.95);
-    expect(config.packs.hoodies_mixed.reference_packs.URBAN).toBe('urban_only');
-    expect(config.roly_models.BEAGLE.price).toBe(1.7325);
-    expect(config.roly_models.BEAGLE.name).toBe('Camiseta');
+    // No data lost: spot-check across every section (v4 shape)
+    expect(config.packs.crew_full.bundle_prices['without_hood|two_sides'].T1).toBe(25.95);
+    expect(config.packs.hoodies_mixed.components.map(c => c.product)).toEqual(['CLASICA', 'URBAN']);
+    const beagleDefault = config.products.BEAGLE.suppliers.find(s => s.is_default);
+    expect(beagleDefault.price).toBe(1.7325);
+    expect(config.products.BEAGLE.name).toBe('Camiseta');
     expect(config.admin.password).toBe('fuzfuz2026');
     expect(config.company.name).toBe('Mi Taller DTF');
 
@@ -74,10 +76,29 @@ describe('readAndMigrateConfig — lazy migration of a v2 config', () => {
 
     // onMigrate hook got version info
     expect(migrateInfo.fromVersion).toBe('2.0.0');
-    expect(migrateInfo.toVersion).toBe('3.0.0');
+    expect(migrateInfo.toVersion).toBe('4.0.0');
 
     // Atomic write left no .tmp behind
     expect(fs.existsSync(cfgPath + '.tmp')).toBe(false);
+  });
+
+  test('migrates a v3 config to v4 on disk', () => {
+    const cfgPath = path.join(tmpDir, 'config.js');
+    writeRawConfig(cfgPath, buildV3Config({ modified_by: 'Alberto' }));
+
+    let migrateInfo = null;
+    const { config, didMigrate } = readAndMigrateConfig(cfgPath, {
+      onMigrate: (info) => { migrateInfo = info; }
+    });
+
+    expect(didMigrate).toBe(true);
+    expect(config.version).toBe('4.0.0');
+    expect(config.products.URBAN.prices.two_sides.T1).toBe(16.95);
+    expect(migrateInfo.fromVersion).toBe('3.0.0');
+    expect(migrateInfo.toVersion).toBe('4.0.0');
+
+    const onDisk = readConfigFromFile(cfgPath);
+    expect(onDisk.version).toBe('4.0.0');
   });
 
   test('is idempotent: second read does not migrate or back up again', () => {
@@ -92,7 +113,7 @@ describe('readAndMigrateConfig — lazy migration of a v2 config', () => {
     expect(fs.readdirSync(path.join(tmpDir, 'backups'))).toHaveLength(1);
   });
 
-  test('a v3 config is returned untouched and never rewritten', () => {
+  test('a v4 config is returned untouched and never rewritten', () => {
     const cfgPath = path.join(tmpDir, 'config.js');
     writeRawConfig(cfgPath, buildDefaultConfig({ modified_by: 'X' }));
     const before = fs.statSync(cfgPath).mtimeMs;
