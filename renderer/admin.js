@@ -228,8 +228,9 @@ export function renderAdminProducts(cfg) {
               <label style="flex-direction: row; align-items: center; gap: 6px; font-weight: 600;">
                 <input type="radio" name="prod-default-${esc(id)}" ${sup.is_default ? 'checked' : ''}
                        data-action-change="set-default-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}">
-                Por defecto
+                Usar por defecto
               </label>
+              ${sup.is_default ? '<span class="badge badge--accent" style="margin-left: 6px;">Por defecto</span>' : ''}
             </div>
             <button type="button" class="admin-row__remove"
                     data-action="remove-product-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}"

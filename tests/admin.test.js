@@ -218,6 +218,25 @@ describe('products actions', () => {
     expect(html).toContain('Aplicar PVP recomendado');
     expect(html).not.toContain('roly_models');
   });
+
+  test('the "Por defecto" badge marks exactly one supplier per product, not every row', () => {
+    const cfg = freshCfg();
+    // Give BEAGLE three suppliers (one default, two not).
+    executeAdminAction(cfg, { action: 'add-product-supplier', id: 'BEAGLE' });
+    executeAdminAction(cfg, { action: 'add-product-supplier', id: 'BEAGLE' });
+    expect(cfg.products.BEAGLE.suppliers.length).toBe(3);
+    expect(cfg.products.BEAGLE.suppliers.filter(s => s.is_default).length).toBe(1);
+
+    const html = renderAdminProducts(cfg);
+    const badges = html.match(/class="badge badge--accent"[^>]*>Por defecto</g) || [];
+    const radios = html.match(/Usar por defecto/g) || [];
+    // One badge per product (each has exactly one default supplier)...
+    expect(badges.length).toBe(Object.keys(cfg.products).length);
+    // ...while every supplier row offers the "Usar por defecto" control,
+    // so a multi-supplier product has more radios than badges (the old bug
+    // showed "Por defecto" on every row).
+    expect(radios.length).toBeGreaterThan(badges.length);
+  });
 });
 
 // ============================================================
