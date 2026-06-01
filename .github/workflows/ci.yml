@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # Windows is the only supported target, so test there too.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      # Informational only: this is an offline internal app, so build-time
+      # transitive advisories are tolerable (CLAUDE.md §8.3). Don't fail CI on them.
+      - name: Audit (non-blocking)
+        run: npm audit --audit-level=high
+        continue-on-error: true
