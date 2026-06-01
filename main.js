@@ -1,17 +1,23 @@
 // ============================================================
-// PackPrice - Proceso principal Electron
+// PackPrice - Electron main process
 // ============================================================
-// Responsabilidades:
-//   - Crear y gestionar la ventana
-//   - Acceso al filesystem (lectura/escritura del config)
-//   - Persistencia de settings locales (%APPDATA%)
-//   - IPC para que el renderer pida operaciones de filesystem
+// Responsibilities:
+//   - Create and manage the window
+//   - Filesystem access (read/write of the config)
+//   - Local settings persistence (%APPDATA%)
+//   - IPC so the renderer can request filesystem operations
 //
-// Buenas prácticas de seguridad activadas:
+// Security best practices enabled:
 //   - contextIsolation: true
 //   - nodeIntegration: false
-//   - sandbox: true (no se puede por preload con require, pero limitamos exposición)
-//   - El renderer NO tiene acceso a fs/path/etc. directamente.
+//   - sandbox: true (cannot, because preload uses require, but we
+//     keep the exposed surface minimal)
+//   - The renderer has NO direct access to fs/path/etc.
+//
+// Data migration (CLAUDE.md §6.3): config.js and settings.json are
+// migrated v2 -> v3 lazily on read, via lib/config-store.js. The
+// renderer-facing config keys are now v3 (English). User-facing
+// strings stay in Spanish.
 // ============================================================
 
 'use strict';
@@ -23,13 +29,20 @@ const crypto = require('crypto');
 
 const { buildDefaultConfig } = require('./config.default');
 const {
-  extraerJsonDeConfig,
-  validarFormaConfig,
-  stripAdminClave,
-  reinyectarAdminClave,
-  serializarConfig
+  validateConfigShape,
+  stripAdminPassword,
+  injectAdminPassword
 } = require('./lib/config-parser');
 const { validateConfigSchema } = require('./lib/config-schema');
+const { migrateConfig, migrateSettings } = require('./lib/migrations');
+const {
+  readConfigFromFile,
+  getFileInfo,
+  createBackup,
+  writeConfigAtomic,
+  readAndMigrateConfig,
+  readAndMigrateSettings
+} = require('./lib/config-store');
 const { configureLogger, readLastLines, getLogPath, logger } = require('./lib/logger');
 const { diffObjects } = require('./lib/diff');
 const { appendAuditEntry, readRecentEntries } = require('./lib/audit');
@@ -42,19 +55,19 @@ const {
 } = require('./lib/history');
 const { renderQuoteHtml } = require('./lib/pdf-template');
 
-// --- Configuración de paths ---
+// --- Path configuration ---
 const SETTINGS_DIR = path.join(app.getPath('userData'));
 const SETTINGS_PATH = path.join(SETTINGS_DIR, 'settings.json');
 const LOG_DIR = path.join(SETTINGS_DIR, 'logs');
 
-// Ruta por defecto donde la app espera (y si hace falta crea) el config.js
-// compartido en el NAS. Se puede cambiar en "Ajustes" en cada PC y queda
-// persistido en el settings.json local.
+// Default path where the app expects (and if needed creates) the
+// shared config.js on the NAS. It can be changed in "Settings" on
+// each PC and is persisted in the local settings.json.
 //
-// Se prueban en orden hasta encontrar una que sea escribible. La primera
-// existente o accesible se usa como ruta inicial; si ninguna existe se
-// crea en la primera viable.
-const RUTAS_CONFIG_CANDIDATAS = [
+// Tried in order until a writable one is found. The first existing
+// or accessible one is used as the initial path; if none exists it
+// is created in the first viable one.
+const CONFIG_PATH_CANDIDATES = [
   '\\\\172.26.0.154\\Paep\\Packs\\config.js',
   'Z:\\Packs\\config.js'
 ];
@@ -62,84 +75,25 @@ const RUTAS_CONFIG_CANDIDATAS = [
 let mainWindow = null;
 
 // ============================================================
-// Funciones auxiliares de filesystem
+// Filesystem helpers
 // ============================================================
 
 /**
- * Lee y parsea config.js sin ejecutarlo como JavaScript.
+ * Checks whether a path is writable. No side effects: it does NOT
+ * create directories, it only reads permissions of the file or its
+ * parent.
  *
- * Históricamente esto usaba `vm.runInNewContext`, pero la doc de
- * Node deja claro que `vm` no es una frontera de seguridad: un
- * config malicioso puede escapar con `this.constructor.constructor(...)`
- * y obtener RCE. Como el archivo vive en el NAS y el usuario puede
- * seleccionar cualquier .js desde el diálogo, era una superficie real.
- *
- * Ahora extraemos el JSON con un escáner de llaves y `JSON.parse`,
- * que es estrictamente declarativo.
+ * IMPORTANT: this can block if the path points to an unreachable
+ * NAS (Windows is slow to exhaust the SMB timeout). Call it only in
+ * response to an explicit user action.
  */
-function leerConfigDesdeArchivo(rutaArchivo) {
-  if (!fs.existsSync(rutaArchivo)) {
-    throw new Error(`No existe el archivo: ${rutaArchivo}`);
-  }
-  const contenido = fs.readFileSync(rutaArchivo, 'utf-8');
-  return extraerJsonDeConfig(contenido);
-}
-
-/**
- * Devuelve mtime + hash sha256 del archivo, para detectar conflictos.
- */
-function obtenerInfoArchivo(rutaArchivo) {
-  if (!fs.existsSync(rutaArchivo)) return null;
-  const stat = fs.statSync(rutaArchivo);
-  const contenido = fs.readFileSync(rutaArchivo);
-  const hash = crypto.createHash('sha256').update(contenido).digest('hex');
-  return {
-    mtimeMs: stat.mtimeMs,
-    size: stat.size,
-    hash
-  };
-}
-
-/**
- * Crea backup automático antes de sobrescribir el config.
- * Lo guarda en una carpeta hermana 'backups/' con timestamp.
- */
-function crearBackup(rutaConfig) {
-  if (!fs.existsSync(rutaConfig)) return null;
-
-  const dir = path.dirname(rutaConfig);
-  const backupsDir = path.join(dir, 'backups');
-
+function isPathWritable(filePath) {
   try {
-    if (!fs.existsSync(backupsDir)) {
-      fs.mkdirSync(backupsDir, { recursive: true });
-    }
-    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const backupPath = path.join(backupsDir, `config-${ts}.js`);
-    fs.copyFileSync(rutaConfig, backupPath);
-    return backupPath;
-  } catch (err) {
-    // No bloqueante: si falla el backup, avisamos pero seguimos.
-    logger.warn('backup failed (non-blocking)', { ruta: rutaConfig, error: err.message });
-    return null;
-  }
-}
-
-/**
- * Comprueba si una ruta es escribible. Sin efectos secundarios:
- * NO crea directorios, solo lee permisos del archivo o del padre.
- *
- * IMPORTANTE: esta función puede bloquear si la ruta apunta a un NAS
- * inaccesible (Windows tarda en agotar el timeout SMB). Llamarla solo
- * en respuesta a una acción explícita del usuario.
- */
-function rutaEscribible(rutaArchivo) {
-  try {
-    if (fs.existsSync(rutaArchivo)) {
-      fs.accessSync(rutaArchivo, fs.constants.W_OK);
+    if (fs.existsSync(filePath)) {
+      fs.accessSync(filePath, fs.constants.W_OK);
       return true;
     }
-    const dir = path.dirname(rutaArchivo);
+    const dir = path.dirname(filePath);
     if (fs.existsSync(dir)) {
       fs.accessSync(dir, fs.constants.W_OK);
       return true;
@@ -151,70 +105,70 @@ function rutaEscribible(rutaArchivo) {
 }
 
 /**
- * Devuelve una ruta candidata SIN probar el filesystem. Es solo una
- * sugerencia para mostrar al usuario en la pantalla de bienvenida.
- * La existencia y escribibilidad reales se verifican cuando el usuario
- * pulsa "Empezar" (en `config:exists` y `config:create-default`).
+ * Returns a candidate path WITHOUT touching the filesystem. It is
+ * only a suggestion to show on the welcome screen. Real existence
+ * and writability are checked when the user clicks "Start" (in
+ * `config:exists` and `config:create-default`).
  *
- * No hacemos `fs.existsSync` aquí porque sobre rutas UNC inaccesibles
- * Windows puede tardar decenas de segundos, y eso bloquearía el
- * arranque de la app.
+ * We do not `fs.existsSync` here because on unreachable UNC paths
+ * Windows can take tens of seconds, which would block the app boot.
  */
-function sugerirRutaCandidata() {
-  return RUTAS_CONFIG_CANDIDATAS[0];
+function suggestCandidatePath() {
+  return CONFIG_PATH_CANDIDATES[0];
 }
 
 /**
- * Crea el archivo config.js con valores por defecto en la ruta indicada.
- * No sobrescribe si ya existe.
+ * Creates the config.js file with default (v3) values at the given
+ * path. Does not overwrite if it already exists.
  *
- * @param {string} rutaArchivo
- * @param {object} [meta] - { modificado_por }
+ * @param {string} filePath
+ * @param {object} [meta] - { modified_by }
  * @returns {object} { creado: boolean, config, ruta, motivo? }
  */
-function crearConfigPorDefecto(rutaArchivo, meta = {}) {
-  if (fs.existsSync(rutaArchivo)) {
-    return { creado: false, motivo: 'ya_existe', ruta: rutaArchivo };
+function createDefaultConfigFile(filePath, meta = {}) {
+  if (fs.existsSync(filePath)) {
+    return { creado: false, motivo: 'ya_existe', ruta: filePath };
   }
 
-  const dir = path.dirname(rutaArchivo);
+  const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
   const config = buildDefaultConfig(meta);
-  const contenido = serializarConfig(config);
-  fs.writeFileSync(rutaArchivo, contenido, 'utf-8');
-  return { creado: true, config, ruta: rutaArchivo };
+  writeConfigAtomic(filePath, config);
+  return { creado: true, config, ruta: filePath };
 }
 
 /**
- * Carga settings locales de %APPDATA%.
- * Devuelve null si no existen (primer arranque).
+ * Loads local settings from %APPDATA%, migrating v2 -> v3 lazily.
+ * Returns null if they do not exist (first boot) or are corrupt.
  */
-function leerSettings() {
-  if (!fs.existsSync(SETTINGS_PATH)) return null;
-  try {
-    const contenido = fs.readFileSync(SETTINGS_PATH, 'utf-8');
-    return JSON.parse(contenido);
-  } catch (err) {
-    logger.warn('corrupt settings.json, ignored', { error: err.message });
-    return null;
-  }
+function readSettings() {
+  return readAndMigrateSettings(SETTINGS_PATH, {
+    onCorrupt: (err) => logger.warn('corrupt settings.json, ignored', { error: err.message }),
+    onMigrate: (info) => logger.info('settings migrated v2→v3', info),
+    onBackupError: (err) => logger.warn('settings backup failed (non-blocking)', { error: err.message })
+  });
 }
 
-function guardarSettings(settings) {
+/**
+ * Persists local settings. Normalizes to v3 so a still-v2 renderer
+ * payload is stored in v3 shape.
+ */
+function writeSettings(settings) {
   if (!fs.existsSync(SETTINGS_DIR)) {
     fs.mkdirSync(SETTINGS_DIR, { recursive: true });
   }
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+  const v3 = migrateSettings(settings);
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(v3, null, 2), 'utf-8');
 }
 
 // ============================================================
-// Ventana principal
+// Main window
 // ============================================================
 
-function crearVentana() {
+function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 860,
@@ -228,11 +182,11 @@ function crearVentana() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false  // necesario porque preload.js usa require
+      sandbox: false  // necessary because preload.js uses require
     }
   });
 
-  // Menú simplificado (oculto por defecto, accesible con Alt)
+  // Simplified menu (hidden by default, reachable with Alt)
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
       label: 'Archivo',
@@ -261,6 +215,27 @@ function crearVentana() {
   });
 }
 
+/**
+ * Reinjects the admin password into a config received from the
+ * renderer (which gets it stripped). The incoming config is
+ * normalized to v3 first. If the on-disk file cannot be read
+ * (degraded case) we fall back to the default password instead of
+ * leaving the config without a valid admin.password.
+ */
+function mergeWithCurrentPassword(filePath, configFromRenderer) {
+  let currentPassword = null;
+  try {
+    const onDisk = migrateConfig(readConfigFromFile(filePath));
+    currentPassword = (onDisk.admin && onDisk.admin.password) || null;
+  } catch (_) {
+    // New or unreadable file: fall back to the default. We don't
+    // silence by habit; it's the only recovery that doesn't break
+    // the in-progress admin edit.
+    currentPassword = buildDefaultConfig().admin.password;
+  }
+  return injectAdminPassword(migrateConfig(configFromRenderer), currentPassword);
+}
+
 // ============================================================
 // IPC handlers
 // ============================================================
@@ -268,62 +243,63 @@ function crearVentana() {
 // --- Settings ---
 
 ipcMain.handle('settings:read', () => {
-  return leerSettings();
+  return readSettings();
 });
 
 ipcMain.handle('settings:write', (event, settings) => {
   try {
-    guardarSettings(settings);
+    writeSettings(settings);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 });
 
-// --- Ruta candidata por defecto (NAS) ---
+// --- Default candidate path (NAS) ---
 
 ipcMain.handle('config:default-path', () => {
-  // Devolución instantánea: sugerencia sin probar filesystem para no
-  // bloquear el arranque cuando el NAS está inaccesible.
+  // Instant return: a suggestion without touching the filesystem so
+  // the boot does not block when the NAS is unreachable.
   return {
-    candidatas: RUTAS_CONFIG_CANDIDATAS.slice(),
-    sugerida:   sugerirRutaCandidata()
+    candidatas: CONFIG_PATH_CANDIDATES.slice(),
+    sugerida:   suggestCandidatePath()
   };
 });
 
-// --- Comprobación de existencia ---
+// --- Existence check ---
 
 ipcMain.handle('config:exists', (event, ruta) => {
   try {
-    return { existe: fs.existsSync(ruta), escribible: rutaEscribible(ruta) };
+    return { existe: fs.existsSync(ruta), escribible: isPathWritable(ruta) };
   } catch (err) {
     return { existe: false, escribible: false, error: err.message };
   }
 });
 
-// --- Creación del config con defaults ---
+// --- Create config with defaults ---
 
-ipcMain.handle('config:create-default', (event, { ruta, modificadoPor }) => {
+ipcMain.handle('config:create-default', (event, payload) => {
+  const filePath = payload.ruta ?? payload.path;
+  const modifiedBy = payload.modificadoPor ?? payload.modifiedBy;
   try {
-    const r = crearConfigPorDefecto(ruta, { modificado_por: modificadoPor });
+    const r = createDefaultConfigFile(filePath, { modified_by: modifiedBy });
     if (!r.creado) {
       return { ok: false, motivo: r.motivo, error: 'El archivo ya existe en esa ruta' };
     }
-    const info = obtenerInfoArchivo(r.ruta);
-    return { ok: true, config: stripAdminClave(r.config), info, ruta: r.ruta };
+    const info = getFileInfo(r.ruta);
+    return { ok: true, config: stripAdminPassword(r.config), info, ruta: r.ruta };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 });
 
-// --- Diálogo de selección de archivo config ---
+// --- Config file selection dialog ---
 
 ipcMain.handle('dialog:select-config', async () => {
-  // No pasamos `defaultPath` apuntando al NAS: si la ruta UNC está
-  // inaccesible, Windows se cuelga intentando resolverla antes de
-  // mostrar el diálogo. Usamos la carpeta del usuario como punto de
-  // partida (siempre instantánea); el explorador recuerda la última
-  // ubicación visitada en posteriores aperturas.
+  // We do not pass `defaultPath` pointing to the NAS: if the UNC
+  // path is unreachable, Windows hangs trying to resolve it before
+  // showing the dialog. We use the user's home folder as the start
+  // (always instant); the explorer remembers the last location.
   const resultado = await dialog.showOpenDialog(mainWindow, {
     title: 'Selecciona el archivo de configuración',
     filters: [
@@ -340,74 +316,66 @@ ipcMain.handle('dialog:select-config', async () => {
   return { cancelado: false, ruta: resultado.filePaths[0] };
 });
 
-// --- Lectura de config ---
-
-ipcMain.handle('config:read', (event, ruta) => {
+// --- Config read (with lazy v2 -> v3 migration) ---
+//
+// The first PC to open an old (v2) config migrates it to v3: backs
+// up the original tagged `pre-v3-migration` and rewrites it
+// atomically. Subsequent reads see v3 and do nothing.
+ipcMain.handle('config:read', (event, payload) => {
+  const filePath = (payload && typeof payload === 'object')
+    ? (payload.path ?? payload.ruta)
+    : payload;
   try {
-    const config = leerConfigDesdeArchivo(ruta);
+    const { config } = readAndMigrateConfig(filePath, {
+      onMigrate: (info) => logger.info('config migrated v2→v3', info),
+      onBackupError: (err) => logger.warn('pre-v3 backup failed (non-blocking)', { error: err.message })
+    });
     // Strict schema validation: fail-fast with a precise message so
-    // the admin sees exactly which field is broken instead of getting
-    // NaNs deep in the calculator.
+    // the admin sees exactly which field is broken instead of NaNs
+    // deep in the calculator.
     validateConfigSchema(config);
-    const info = obtenerInfoArchivo(ruta);
-    return { ok: true, config: stripAdminClave(config), info };
+    const info = getFileInfo(filePath);
+    return { ok: true, config: stripAdminPassword(config), info };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 });
 
-// --- Escritura de config (con detección de conflictos) ---
+// --- Config write (with conflict detection) ---
 //
-// Recibe:
-//   - ruta: la ruta del archivo
-//   - configNuevo: el objeto de configuración a guardar
-//   - infoEsperada: { mtimeMs, hash } que el renderer leyó al abrir admin
-//                    (null si es la primera escritura o no se quiere comprobar)
+// Receives:
+//   - ruta/path: the file path
+//   - configNuevo/newConfig: the configuration object to save
+//   - infoEsperada/expectedInfo: { mtimeMs, hash } the renderer read
+//                    when opening admin (null on first write or to skip)
 //
-// Devuelve:
-//   - { ok: true, info } si se guardó
-//   - { ok: false, conflicto: true, infoActual } si hubo conflicto
-//   - { ok: false, error } si error genérico
-//
-/**
- * Reinyecta la clave admin en un config recibido del renderer
- * (que la recibe stripped). Si el archivo en disco no se puede
- * leer (caso degradado), usamos la clave por defecto en vez de
- * dejar el config sin admin.clave válido.
- */
-function fusionarConClaveActual(ruta, configDelRenderer) {
-  let claveActual = null;
-  try {
-    const cfgDisco = leerConfigDesdeArchivo(ruta);
-    claveActual = (cfgDisco.admin && cfgDisco.admin.clave) || null;
-  } catch (_) {
-    // Archivo nuevo o ilegible: fallback a la default. No silenciamos
-    // por costumbre; lo hacemos porque es la única recuperación posible
-    // sin romper la edición admin en curso.
-    claveActual = buildDefaultConfig().admin.clave;
-  }
-  return reinyectarAdminClave(configDelRenderer, claveActual);
-}
+// Returns:
+//   - { ok: true, info } if saved
+//   - { ok: false, conflicto: true, infoActual } on conflict
+//   - { ok: false, error } on generic error
 
-ipcMain.handle('config:write', (event, { ruta, configNuevo, infoEsperada }) => {
+ipcMain.handle('config:write', (event, payload) => {
+  const filePath = payload.ruta ?? payload.path;
+  const configNuevo = payload.configNuevo ?? payload.newConfig;
+  const infoEsperada = payload.infoEsperada ?? payload.expectedInfo;
   try {
-    // Detección de conflicto: ¿cambió el archivo desde que el admin lo leyó?
+    // Conflict detection: did the file change since the admin read it?
     if (infoEsperada) {
-      const infoActual = obtenerInfoArchivo(ruta);
+      const infoActual = getFileInfo(filePath);
       if (infoActual) {
         const cambio = (infoActual.hash !== infoEsperada.hash);
         if (cambio) {
-          // Intentar leer el config actual para mostrar quién lo modificó
+          // Try to read the current config to show who modified it
           let modificadoPor = 'desconocido';
           let fechaActualizacion = '';
           try {
-            const cfgActual = leerConfigDesdeArchivo(ruta);
-            modificadoPor = cfgActual.modificado_por || 'desconocido';
-            fechaActualizacion = cfgActual.fecha_actualizacion || '';
+            const cfgActual = migrateConfig(readConfigFromFile(filePath));
+            modificadoPor = cfgActual.modified_by || 'desconocido';
+            fechaActualizacion = cfgActual.updated_at || '';
           } catch (_) {}
 
           logger.warn('config:write conflict detected', {
-            ruta, modificadoPor, fechaActualizacion
+            ruta: filePath, modificadoPor, fechaActualizacion
           });
           return {
             ok: false,
@@ -420,81 +388,85 @@ ipcMain.handle('config:write', (event, { ruta, configNuevo, infoEsperada }) => {
       }
     }
 
-    // Snapshot del config previo en disco para calcular el diff
-    // antes de sobrescribir. Si no se puede leer (primer arranque,
-    // archivo corrupto), seguimos: el audit log saldrá con kind:'add'
-    // en cada campo nuevo, lo cual es correcto.
+    // Snapshot of the previous on-disk config to compute the diff
+    // before overwriting. If it cannot be read (first boot, corrupt
+    // file), we continue: the audit log will show kind:'add' for
+    // each new field, which is correct.
     let configPrevio = null;
-    try { configPrevio = leerConfigDesdeArchivo(ruta); } catch (_) {}
+    try { configPrevio = migrateConfig(readConfigFromFile(filePath)); } catch (_) {}
 
-    const configCompleto = fusionarConClaveActual(ruta, configNuevo);
-    validarFormaConfig(configCompleto);
+    const configCompleto = mergeWithCurrentPassword(filePath, configNuevo);
+    validateConfigShape(configCompleto);
     validateConfigSchema(configCompleto);
-    const contenido = serializarConfig(configCompleto);
 
-    // Backup antes de sobrescribir
-    const backupPath = crearBackup(ruta);
+    // Backup before overwriting
+    const backupPath = createBackup(filePath, {
+      onError: (err) => logger.warn('backup failed (non-blocking)', { ruta: filePath, error: err.message })
+    });
 
-    // Escribir
-    fs.writeFileSync(ruta, contenido, 'utf-8');
+    // Atomic write
+    writeConfigAtomic(filePath, configCompleto);
 
-    // Audit AFTER successful write (orden: backup → write → audit).
-    // Si esto falla, no rompemos al usuario: el cambio está hecho y
-    // existe el backup. Solo logueamos.
+    // Audit AFTER successful write (order: backup -> write -> audit).
+    // If this fails, we do not break the user: the change is done
+    // and a backup exists. We only log.
     try {
       const cambios = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
-      appendAuditEntry(ruta, {
-        usuario: configCompleto.modificado_por || 'desconocido',
+      appendAuditEntry(filePath, {
+        usuario: configCompleto.modified_by || 'desconocido',
         app_version: app.getVersion(),
         cambios
       });
       logger.info('config:write success', {
-        ruta, usuario: configCompleto.modificado_por, cambios: cambios.length, backupPath
+        ruta: filePath, usuario: configCompleto.modified_by, cambios: cambios.length, backupPath
       });
     } catch (auditErr) {
       logger.warn('audit append failed (non-blocking)', { error: auditErr.message });
     }
 
-    // Devolver nueva info
-    const infoNueva = obtenerInfoArchivo(ruta);
+    // Return new info
+    const infoNueva = getFileInfo(filePath);
     return { ok: true, info: infoNueva, backupPath };
   } catch (err) {
-    logger.error('config:write failed', { ruta, error: err.message });
+    logger.error('config:write failed', { ruta: filePath, error: err.message });
     return { ok: false, error: err.message };
   }
 });
 
-// --- Forzar escritura (sobrescribir conflicto) ---
-ipcMain.handle('config:force-write', (event, { ruta, configNuevo }) => {
+// --- Force write (overwrite conflict) ---
+ipcMain.handle('config:force-write', (event, payload) => {
+  const filePath = payload.ruta ?? payload.path;
+  const configNuevo = payload.configNuevo ?? payload.newConfig;
   try {
     let configPrevio = null;
-    try { configPrevio = leerConfigDesdeArchivo(ruta); } catch (_) {}
+    try { configPrevio = migrateConfig(readConfigFromFile(filePath)); } catch (_) {}
 
-    const configCompleto = fusionarConClaveActual(ruta, configNuevo);
-    validarFormaConfig(configCompleto);
+    const configCompleto = mergeWithCurrentPassword(filePath, configNuevo);
+    validateConfigShape(configCompleto);
     validateConfigSchema(configCompleto);
-    const contenido = serializarConfig(configCompleto);
-    const backupPath = crearBackup(ruta);
-    fs.writeFileSync(ruta, contenido, 'utf-8');
+    const backupPath = createBackup(filePath, {
+      onError: (err) => logger.warn('backup failed (non-blocking)', { ruta: filePath, error: err.message })
+    });
+    writeConfigAtomic(filePath, configCompleto);
 
     try {
       const cambios = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
-      appendAuditEntry(ruta, {
-        usuario: configCompleto.modificado_por || 'desconocido',
+      appendAuditEntry(filePath, {
+        usuario: configCompleto.modified_by || 'desconocido',
         app_version: app.getVersion(),
         cambios
       });
       logger.info('config:force-write success', {
-        ruta, usuario: configCompleto.modificado_por, cambios: cambios.length, backupPath
+        ruta: filePath, usuario: configCompleto.modified_by, cambios: cambios.length, backupPath
       });
     } catch (auditErr) {
       logger.warn('audit append failed (non-blocking)', { error: auditErr.message });
     }
 
-    const infoNueva = obtenerInfoArchivo(ruta);
+    const infoNueva = getFileInfo(filePath);
     return { ok: true, info: infoNueva };
   } catch (err) {
-    logger.error('config:force-write failed', { ruta, error: err.message });
+    logger.error('config:force-write failed', { ruta: filePath, error: err.message });
     return { ok: false, error: err.message };
   }
 });
@@ -517,8 +489,8 @@ ipcMain.handle('audit:list', (event, { ruta, limit }) => {
 ipcMain.handle('audit:diff-preview', (event, { ruta, configNuevo }) => {
   try {
     let configPrevio = null;
-    try { configPrevio = leerConfigDesdeArchivo(ruta); } catch (_) {}
-    const configCompleto = fusionarConClaveActual(ruta, configNuevo);
+    try { configPrevio = migrateConfig(readConfigFromFile(ruta)); } catch (_) {}
+    const configCompleto = mergeWithCurrentPassword(ruta, configNuevo);
     const cambios = configPrevio ? diffObjects(configPrevio, configCompleto) : [];
     return { ok: true, cambios };
   } catch (err) {
@@ -526,23 +498,22 @@ ipcMain.handle('audit:diff-preview', (event, { ruta, configNuevo }) => {
   }
 });
 
-// --- Verificación de la clave admin (en main, no en renderer) ---
+// --- Admin password verification (in main, not in renderer) ---
 //
-// El renderer recibe el config sin `admin.clave`, así que la
-// comparación de la clave debe ocurrir aquí. Usamos
-// `crypto.timingSafeEqual` para no filtrar por tiempo. Si las
-// longitudes difieren, devolvemos `false` directamente: el
-// timing sigue ligado a la longitud del candidato, no a su
-// contenido, lo cual es aceptable para un "anti-clic-accidental".
+// The renderer receives the config without `admin.password`, so the
+// comparison must happen here. We use `crypto.timingSafeEqual` to
+// avoid leaking by time. If lengths differ we return `false`
+// directly: timing stays tied to the candidate length, not its
+// content, which is acceptable for an "anti-accidental-click".
 ipcMain.handle('auth:verify-admin', (event, { ruta, clave }) => {
   try {
     if (typeof clave !== 'string' || typeof ruta !== 'string') {
       return { ok: false, error: 'Parámetros inválidos' };
     }
-    const cfg = leerConfigDesdeArchivo(ruta);
-    const claveActual = (cfg.admin && cfg.admin.clave) || '';
+    const cfg = migrateConfig(readConfigFromFile(ruta));
+    const currentPassword = (cfg.admin && cfg.admin.password) || '';
     const aBuf = Buffer.from(clave, 'utf-8');
-    const bBuf = Buffer.from(claveActual, 'utf-8');
+    const bBuf = Buffer.from(currentPassword, 'utf-8');
     if (aBuf.length !== bBuf.length) {
       return { ok: true, valida: false };
     }
@@ -553,17 +524,17 @@ ipcMain.handle('auth:verify-admin', (event, { ruta, clave }) => {
   }
 });
 
-// --- Info del archivo (para detectar cambios externos) ---
+// --- File info (to detect external changes) ---
 ipcMain.handle('config:info', (event, ruta) => {
   try {
-    return obtenerInfoArchivo(ruta);
+    return getFileInfo(ruta);
   } catch (err) {
     return null;
   }
 });
 
-// --- Diálogo de confirmación nativa ---
-ipcMain.handle('dialog:confirmar-conflicto', async (event, datos) => {
+// --- Native confirmation dialog ---
+ipcMain.handle('dialog:confirm-conflict', async (event, datos) => {
   const { modificadoPor, fechaActualizacion } = datos;
   const respuesta = await dialog.showMessageBox(mainWindow, {
     type: 'warning',
@@ -581,7 +552,7 @@ ipcMain.handle('dialog:confirmar-conflicto', async (event, datos) => {
   return respuesta.response; // 0, 1 o 2
 });
 
-ipcMain.handle('dialog:confirmar', async (event, { titulo, mensaje, detalle, botones, defaultId }) => {
+ipcMain.handle('dialog:confirm', async (event, { titulo, mensaje, detalle, botones, defaultId }) => {
   const respuesta = await dialog.showMessageBox(mainWindow, {
     type: 'question',
     title: titulo,
@@ -736,7 +707,7 @@ ipcMain.handle('pdf:export', async (event, payload) => {
 });
 
 // ============================================================
-// Ciclo de vida de la app
+// App lifecycle
 // ============================================================
 
 app.whenReady().then(() => {
@@ -754,10 +725,10 @@ app.whenReady().then(() => {
     logger.error('unhandledRejection', { reason: String(reason) });
   });
 
-  crearVentana();
+  createMainWindow();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) crearVentana();
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
 });
 

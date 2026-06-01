@@ -37,8 +37,8 @@ contextBridge.exposeInMainWorld('packprice', {
   verificarAdmin:    (datos) => ipcRenderer.invoke('auth:verify-admin', datos),
 
   // --- Diálogos nativos ---
-  confirmarConflicto: (d) => ipcRenderer.invoke('dialog:confirmar-conflicto', d),
-  confirmar:          (d) => ipcRenderer.invoke('dialog:confirmar', d),
+  confirmarConflicto: (d) => ipcRenderer.invoke('dialog:confirm-conflict', d),
+  confirmar:          (d) => ipcRenderer.invoke('dialog:confirm', d),
   mostrarInfo:        (d) => ipcRenderer.invoke('dialog:info', d),
   mostrarError:       (d) => ipcRenderer.invoke('dialog:error', d),
 
