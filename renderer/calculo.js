@@ -102,11 +102,19 @@ export function calculateCrewPack(cfg, opt) {
   }
 
   const tier = getTier(cfg, quantity);
+  if (!tier) {
+    return { error: 'No hay un tramo de precio definido para esa cantidad.' };
+  }
+
+  const totalGarments = quantity * 2;
+  if ((qty_4xl || 0) + (qty_5xl || 0) > totalGarments) {
+    return { error: 'Las tallas grandes (4XL/5XL) no pueden superar el número de prendas del pedido.' };
+  }
+
   const sidesKey = (sides === 2) ? 'two_sides' : 'one_side';
   const hoodKey  = (hood === 'with') ? 'with_hood' : 'without_hood';
   const unitPrice = pack.prices[hoodKey][sidesKey][tier.id];
 
-  const totalGarments = quantity * 2;
   const hoodieModel = (hood === 'with') ? 'URBAN' : 'CLASICA';
   const tshirtCost = calculateGarmentCost(cfg, 'BEAGLE', sides, tier, totalGarments);
   const hoodieCost = calculateGarmentCost(cfg, hoodieModel, sides, tier, totalGarments);
@@ -133,6 +141,13 @@ export function calculateSinglePack(cfg, packId, opt) {
   }
 
   const tier = getTier(cfg, quantity);
+  if (!tier) {
+    return { error: 'No hay un tramo de precio definido para esa cantidad.' };
+  }
+  if ((qty_4xl || 0) + (qty_5xl || 0) > quantity) {
+    return { error: 'Las tallas grandes (4XL/5XL) no pueden superar el número de prendas del pedido.' };
+  }
+
   const sidesKey = (sides === 2) ? 'two_sides' : 'one_side';
   const unitPrice = pack.prices[sidesKey][tier.id];
 
@@ -163,6 +178,13 @@ export function calculateMixedPack(cfg, opt) {
   }
 
   const tier = getTier(cfg, total);
+  if (!tier) {
+    return { error: 'No hay un tramo de precio definido para esa cantidad.' };
+  }
+  if ((qty_4xl || 0) + (qty_5xl || 0) > total) {
+    return { error: 'Las tallas grandes (4XL/5XL) no pueden superar el número de prendas del pedido.' };
+  }
+
   const sidesKey = (sides === 2) ? 'two_sides' : 'one_side';
 
   const priceClassic = cfg.packs[pack.reference_packs.CLASICA].prices[sidesKey][tier.id];
@@ -181,7 +203,7 @@ export function calculateMixedPack(cfg, opt) {
   const saleBase = totalVatInc / (1 + cfg.parameters.vat);
   const vat = totalVatInc - saleBase;
   const margin = saleBase - totalCost;
-  const marginPct = totalVatInc > 0 ? (margin / totalVatInc) : 0;
+  const marginPct = saleBase > 0 ? (margin / saleBase) : 0;
 
   return {
     pack: pack.name, tier: tier.label, is_mixed: true,
@@ -224,6 +246,9 @@ export function calculateCustomPack(cfg, opt) {
   if (!tier) {
     return { error: `No hay tramo definido para ${total} unidades.` };
   }
+  if ((qty_4xl || 0) + (qty_5xl || 0) > total) {
+    return { error: 'Las tallas grandes (4XL/5XL) no pueden superar el número de prendas del pedido.' };
+  }
 
   const breakdown = [];
   let subtotal = 0;
@@ -265,7 +290,7 @@ export function calculateCustomPack(cfg, opt) {
   const saleBase = totalVatInc / (1 + cfg.parameters.vat);
   const vat = totalVatInc - saleBase;
   const margin = saleBase - totalCost;
-  const marginPct = totalVatInc > 0 ? (margin / totalVatInc) : 0;
+  const marginPct = saleBase > 0 ? (margin / saleBase) : 0;
 
   return {
     pack: pack.name, tier: tier.label, is_mixed: true, is_custom: true,
@@ -293,7 +318,7 @@ export function calculateTotals(cfg, data) {
   const vat = totalVatInc - saleBase;
   const totalCost = data.quantity * data.unit_cost;
   const margin = saleBase - totalCost;
-  const marginPct = totalVatInc > 0 ? (margin / totalVatInc) : 0;
+  const marginPct = saleBase > 0 ? (margin / saleBase) : 0;
 
   return {
     pack: data.pack, tier: data.tier, quantity: data.quantity,

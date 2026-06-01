@@ -205,6 +205,109 @@ describe('calculateCustomPack', () => {
   });
 });
 
+describe('bug 1 — getTier null guard (no crash below first tier)', () => {
+  // Lower pack.min below the first tier's `from` so a quantity can pass
+  // the min check yet resolve to no tier. getTier must not be dereferenced.
+  function cfgWithLowMins() {
+    const c = buildDefaultConfig();
+    c.packs.crew_full.min = 5;
+    c.packs.tshirts_only.min = 5;
+    c.packs.hoodies_mixed.min_total = 5;
+    return c;
+  }
+
+  test('crew returns an error instead of crashing', () => {
+    const c = cfgWithLowMins();
+    const r = calculateCrewPack(c, {
+      quantity: 7, hood: 'without', sides: 2, qty_4xl: 0, qty_5xl: 0
+    });
+    expect(r.error).toBeDefined();
+  });
+
+  test('single returns an error instead of crashing', () => {
+    const c = cfgWithLowMins();
+    const r = calculateSinglePack(c, 'tshirts_only', {
+      quantity: 7, sides: 2, qty_4xl: 0, qty_5xl: 0
+    });
+    expect(r.error).toBeDefined();
+  });
+
+  test('mixed returns an error instead of crashing', () => {
+    const c = cfgWithLowMins();
+    const r = calculateMixedPack(c, {
+      qty_classic: 3, qty_urban: 4, sides: 2, qty_4xl: 0, qty_5xl: 0
+    });
+    expect(r.error).toBeDefined();
+  });
+});
+
+describe('bug 2 — margin_pct over net sale base', () => {
+  test('crew: margin_pct equals margin / sale_base', () => {
+    const r = calculateCrewPack(CFG, {
+      quantity: 30, hood: 'with', sides: 2, qty_4xl: 0, qty_5xl: 0
+    });
+    expect(r.margin_pct).toBeCloseTo(r.margin / r.sale_base, 6);
+  });
+
+  test('mixed: margin_pct equals margin / sale_base', () => {
+    const r = calculateMixedPack(CFG, {
+      qty_classic: 5, qty_urban: 7, sides: 2, qty_4xl: 0, qty_5xl: 0
+    });
+    expect(r.margin_pct).toBeCloseTo(r.margin / r.sale_base, 6);
+  });
+
+  test('custom: margin_pct equals margin / sale_base', () => {
+    const r = calculateCustomPack(CFG, {
+      lines: [
+        { model: 'BEAGLE',  quantity: 5, sides: 2 },
+        { model: 'CLASICA', quantity: 3, sides: 2 },
+        { model: 'URBAN',   quantity: 2, sides: 1 }
+      ],
+      qty_4xl: 0, qty_5xl: 0
+    });
+    expect(r.margin_pct).toBeCloseTo(r.margin / r.sale_base, 6);
+  });
+});
+
+describe('bug 3 — 4XL/5XL quantities bounded by order size', () => {
+  test('crew: surcharge quantities exceeding the order error out', () => {
+    // 12 packs → 24 garments; 100 large sizes is impossible.
+    const r = calculateCrewPack(CFG, {
+      quantity: 12, hood: 'without', sides: 2, qty_4xl: 100, qty_5xl: 0
+    });
+    expect(r.error).toBeDefined();
+  });
+
+  test('crew: large sizes within the order are accepted', () => {
+    const r = calculateCrewPack(CFG, {
+      quantity: 12, hood: 'without', sides: 2, qty_4xl: 2, qty_5xl: 1
+    });
+    expect(r.error).toBeUndefined();
+  });
+
+  test('custom: surcharge quantities exceeding the order error out', () => {
+    const r = calculateCustomPack(CFG, {
+      lines: [{ model: 'BEAGLE', quantity: 10, sides: 2 }],
+      qty_4xl: 6, qty_5xl: 6 // 12 > 10
+    });
+    expect(r.error).toBeDefined();
+  });
+
+  test('single: surcharge quantities exceeding the order error out', () => {
+    const r = calculateSinglePack(CFG, 'tshirts_only', {
+      quantity: 10, sides: 2, qty_4xl: 20, qty_5xl: 0
+    });
+    expect(r.error).toBeDefined();
+  });
+
+  test('mixed: surcharge quantities exceeding the order error out', () => {
+    const r = calculateMixedPack(CFG, {
+      qty_classic: 5, qty_urban: 7, sides: 2, qty_4xl: 50, qty_5xl: 0
+    });
+    expect(r.error).toBeDefined();
+  });
+});
+
 describe('calculateGarmentCost', () => {
   test('BEAGLE 2 sides T1, batch 10', () => {
     const t1 = getTier(CFG, 10);
