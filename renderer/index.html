@@ -148,7 +148,7 @@
           <div class="stat"><strong>3</strong><span>Modelos Roly</span></div>
           <div class="stat"><strong>4</strong><span>Tramos por volumen</span></div>
         </div>
-        <p class="split__foot-line text-mono" style="margin-top: 16px;">v2.0.0 · uso interno taller</p>
+        <p class="split__foot-line text-mono" style="margin-top: 16px;">v3.0.0-beta · uso interno taller</p>
       </div>
     </aside>
 
@@ -306,13 +306,13 @@
               <div class="tallas-row">
                 <div class="field">
                   <label class="field__label" for="cant_4xl">
-                    4XL <span class="field__hint">(+<span data-cfg="recargo_4xl_eur">3</span> €/prenda)</span>
+                    4XL <span class="field__hint">(+<span data-cfg="surcharge_4xl_eur">3</span> €/prenda)</span>
                   </label>
                   <input type="number" id="cant_4xl" min="0" value="0">
                 </div>
                 <div class="field">
                   <label class="field__label" for="cant_5xl">
-                    5XL+ <span class="field__hint">(+<span data-cfg="recargo_5xl_eur">5</span> €/prenda)</span>
+                    5XL+ <span class="field__hint">(+<span data-cfg="surcharge_5xl_eur">5</span> €/prenda)</span>
                   </label>
                   <input type="number" id="cant_5xl" min="0" value="0">
                 </div>
@@ -333,19 +333,19 @@
               <div class="form-grid-3">
                 <div class="field">
                   <label class="field__label" for="cant_nombres">
-                    Nombre <span class="field__hint">(+<span data-cfg="extra_nombre_eur">1.5</span> €/ud)</span>
+                    Nombre <span class="field__hint">(+<span data-cfg="extra_name_eur">1.5</span> €/ud)</span>
                   </label>
                   <input type="number" id="cant_nombres" min="0" value="0">
                 </div>
                 <div class="field">
                   <label class="field__label" for="cant_mangas_cortas">
-                    Mangas cortas <span class="field__hint">(+<span data-cfg="extra_manga_corta_eur">1.5</span> €/manga)</span>
+                    Mangas cortas <span class="field__hint">(+<span data-cfg="extra_short_sleeve_eur">1.5</span> €/manga)</span>
                   </label>
                   <input type="number" id="cant_mangas_cortas" min="0" value="0">
                 </div>
                 <div class="field">
                   <label class="field__label" for="cant_mangas_largas">
-                    Manga larga <span class="field__hint">(+<span data-cfg="extra_manga_larga_eur">3</span> €/manga)</span>
+                    Manga larga <span class="field__hint">(+<span data-cfg="extra_long_sleeve_eur">3</span> €/manga)</span>
                   </label>
                   <input type="number" id="cant_mangas_largas" min="0" value="0">
                 </div>
@@ -453,19 +453,19 @@
 
         <div class="modal__body">
           <nav class="admin-nav" id="admin-nav">
-            <button class="admin-nav__item is-active" data-tab="parametros" type="button">
+            <button class="admin-nav__item is-active" data-tab="parameters" type="button">
               <svg class="icon"><use href="#i-sliders"/></svg> Parámetros
             </button>
-            <button class="admin-nav__item" data-tab="modelos" type="button">
+            <button class="admin-nav__item" data-tab="models" type="button">
               <svg class="icon"><use href="#i-shirt"/></svg> Modelos Roly
             </button>
-            <button class="admin-nav__item" data-tab="tramos" type="button">
+            <button class="admin-nav__item" data-tab="tiers" type="button">
               <svg class="icon"><use href="#i-trend"/></svg> Tramos por volumen
             </button>
             <button class="admin-nav__item" data-tab="packs" type="button">
               <svg class="icon"><use href="#i-tag"/></svg> Packs (PVP)
             </button>
-            <button class="admin-nav__item" data-tab="auditoria" type="button">
+            <button class="admin-nav__item" data-tab="audit" type="button">
               <svg class="icon"><use href="#i-clock"/></svg> Auditoría
             </button>
           </nav>

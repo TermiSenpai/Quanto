@@ -1,10 +1,10 @@
 // ============================================================
-// Preload - puente seguro entre el proceso main y el renderer
+// Preload - secure bridge between the main process and renderer
 // ============================================================
-// Expone APIs limitadas en window.packprice vía contextBridge.
-// El renderer NO tiene acceso directo a Node, fs, ipcRenderer,
-// ni nada similar. Solo puede llamar a las funciones aquí
-// expuestas, que internamente usan IPC para hablar con main.
+// Exposes a limited API on window.packprice via contextBridge.
+// The renderer has NO direct access to Node, fs, ipcRenderer, or
+// anything similar. It can only call the functions exposed here,
+// which internally use IPC to talk to main.
 // ============================================================
 
 'use strict';
@@ -13,41 +13,41 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('packprice', {
 
-  // --- Settings locales (%APPDATA%) ---
-  leerSettings:    ()        => ipcRenderer.invoke('settings:read'),
-  guardarSettings: (s)       => ipcRenderer.invoke('settings:write', s),
+  // --- Local settings (%APPDATA%) ---
+  readSettings:    ()        => ipcRenderer.invoke('settings:read'),
+  writeSettings:   (s)       => ipcRenderer.invoke('settings:write', s),
 
-  // --- Selección de archivo via diálogo nativo ---
-  seleccionarConfig: ()      => ipcRenderer.invoke('dialog:select-config'),
+  // --- File selection via native dialog ---
+  selectConfigFile: ()       => ipcRenderer.invoke('dialog:select-config'),
 
-  // --- Ruta candidata por defecto (NAS) ---
-  rutaConfigPorDefecto: ()   => ipcRenderer.invoke('config:default-path'),
+  // --- Default candidate path (NAS) ---
+  getDefaultConfigPath: ()   => ipcRenderer.invoke('config:default-path'),
 
-  // --- Comprobación / creación del config ---
-  existeConfig:      (ruta)  => ipcRenderer.invoke('config:exists', ruta),
-  crearConfigDefault: (datos) => ipcRenderer.invoke('config:create-default', datos),
+  // --- Config existence / creation ---
+  configExists:        (path)  => ipcRenderer.invoke('config:exists', path),
+  createDefaultConfig: (data)  => ipcRenderer.invoke('config:create-default', data),
 
-  // --- Lectura/escritura del config en NAS ---
-  leerConfig:        (ruta)  => ipcRenderer.invoke('config:read', ruta),
-  infoConfig:        (ruta)  => ipcRenderer.invoke('config:info', ruta),
-  guardarConfig:     (datos) => ipcRenderer.invoke('config:write', datos),
-  guardarConfigForzado: (datos) => ipcRenderer.invoke('config:force-write', datos),
+  // --- Read/write the config on the NAS ---
+  readConfig:        (path)  => ipcRenderer.invoke('config:read', path),
+  getConfigInfo:     (path)  => ipcRenderer.invoke('config:info', path),
+  writeConfig:       (data)  => ipcRenderer.invoke('config:write', data),
+  forceWriteConfig:  (data)  => ipcRenderer.invoke('config:force-write', data),
 
-  // --- Verificación de clave admin (la comparación ocurre en main) ---
-  verificarAdmin:    (datos) => ipcRenderer.invoke('auth:verify-admin', datos),
+  // --- Admin password verification (the comparison happens in main) ---
+  verifyAdminPassword: (data) => ipcRenderer.invoke('auth:verify-admin', data),
 
-  // --- Diálogos nativos ---
-  confirmarConflicto: (d) => ipcRenderer.invoke('dialog:confirm-conflict', d),
-  confirmar:          (d) => ipcRenderer.invoke('dialog:confirm', d),
-  mostrarInfo:        (d) => ipcRenderer.invoke('dialog:info', d),
-  mostrarError:       (d) => ipcRenderer.invoke('dialog:error', d),
+  // --- Native dialogs ---
+  confirmConflict:    (d) => ipcRenderer.invoke('dialog:confirm-conflict', d),
+  confirm:            (d) => ipcRenderer.invoke('dialog:confirm', d),
+  showInfo:           (d) => ipcRenderer.invoke('dialog:info', d),
+  showError:          (d) => ipcRenderer.invoke('dialog:error', d),
 
   // --- Logs (electron-log) ---
   readLogs:           (lineLimit) => ipcRenderer.invoke('logs:read-last', lineLimit),
 
   // --- Audit log (admin config changes) ---
-  listAuditEntries:   (datos) => ipcRenderer.invoke('audit:list', datos),
-  previewConfigDiff:  (datos) => ipcRenderer.invoke('audit:diff-preview', datos),
+  listAuditEntries:   (data) => ipcRenderer.invoke('audit:list', data),
+  previewConfigDiff:  (data) => ipcRenderer.invoke('audit:diff-preview', data),
 
   // --- Quote history (local, per-PC) ---
   saveQuote:          (draft) => ipcRenderer.invoke('quotes:save', draft),

@@ -1,28 +1,32 @@
 // ============================================================
-// PackPrice · Renderer (orquestación)
+// PackPrice · Renderer (orchestration)
 // ============================================================
-// - Bootstrap y enrutado entre pantallas
-// - Eventos del DOM
-// - Llamadas IPC al proceso principal vía window.packprice
+// - Bootstrap and screen routing
+// - DOM events
+// - IPC calls to the main process via window.packprice
 //
-// La lógica pura vive en:
-//   - calculo.js  (cálculo de packs)
-//   - admin.js    (renderizado del editor admin)
-//   - format.js   (utilidades de DOM/formato)
+// Pure logic lives in:
+//   - calculo.js  (pack calculation)
+//   - admin.js    (admin editor rendering)
+//   - format.js   (DOM/format helpers)
+//
+// Config and result data are v3 (English keys). HTML element IDs
+// and CSS class names stay in their kebab-case form (CLAUDE.md
+// §5.2/§5.3); user-facing strings stay in Spanish (§4.5).
 // ============================================================
 
-import { el, show, hide, intDe, fmtEur, fmtPct, deepClone } from './format.js';
+import { el, show, hide, intFromInput, formatEur, formatPct, deepClone } from './format.js';
 import {
-  calcularPackPena,
-  calcularPackIndividual,
-  calcularPackMixto,
-  calcularPackPersonalizado,
-  getTramo
+  calculateCrewPack,
+  calculateSinglePack,
+  calculateMixedPack,
+  calculateCustomPack,
+  getTier
 } from './calculo.js';
 import {
   renderAdminTabContent,
-  actualizarConfigDesdeInput,
-  ejecutarAccionAdmin
+  applyConfigInput,
+  runAdminAction
 } from './admin.js';
 import {
   renderAuditTab,
@@ -35,353 +39,353 @@ import {
 } from './history.js';
 
 // ============================================================
-// Estado del módulo
+// Module state
 // ============================================================
-let CFG = null;                    // configuración actual cargada del NAS
-let SETTINGS = null;                // ruta_config + nombre_usuario
-let infoConfigAlAbrirAdmin = null;  // mtime + hash al abrir admin (conflictos)
-let CFG_BACKUP = null;              // copia para "Cancelar cambios"
-let eventosBindeados = false;
-let ultimoResultado = null;         // útil para "Copiar resumen"
+let CFG = null;                  // current config loaded from the NAS
+let SETTINGS = null;             // config_path + user_name
+let adminConfigInfoAtOpen = null; // mtime + hash when admin opened (conflicts)
+let CFG_BACKUP = null;           // copy for "Cancel changes"
+let eventsBound = false;
+let lastResult = null;           // useful for "Copy summary"
 
-const estado = {
+const state = {
   packId: null,
-  esAdmin: false,
-  adminTab: 'parametros',
-  mostrarCostes: false      // atajo secreto: 3 × "." alterna la vista
+  isAdmin: false,
+  adminTab: 'parameters',
+  showCosts: false      // secret shortcut: 3 × "." toggles the view
 };
 
 // ============================================================
-// Metadatos visuales por pack (icono y descripción de tarjeta)
+// Visual metadata per pack (card icon and description)
 // ============================================================
-// Se mapean por id; si entra un pack nuevo en el config sin entrada
-// aquí, usa los defaults seguros.
+// Mapped by id; if a new pack enters the config without an entry
+// here, it uses the safe defaults.
 const PACK_META = {
-  pena_completa: {
+  crew_full: {
     icon: 'i-pack',
     desc: 'Camiseta + sudadera por persona. Hasta 4 caras de impresión.'
   },
-  solo_camisetas: {
+  tshirts_only: {
     icon: 'i-shirt',
     desc: 'Pack ligero. Una camiseta por persona, hasta 2 caras.'
   },
-  solo_clasica: {
+  classic_only: {
     icon: 'i-hoodie',
     desc: 'Sudaderas sin capucha (CLASICA). Una por persona.'
   },
-  solo_urban: {
+  urban_only: {
     icon: 'i-hoodie',
     desc: 'Sudaderas con capucha (URBAN). Una por persona.'
   },
-  sudaderas_mixto: {
+  hoodies_mixed: {
     icon: 'i-layers',
     desc: 'CLASICA + URBAN combinadas en el mismo pedido.'
   },
-  personalizado: {
+  custom: {
     icon: 'i-plus',
     desc: 'Combina manualmente cualquier cantidad de cada modelo Roly.'
   }
 };
 
 const ADMIN_TAB_META = {
-  parametros: { titulo: 'Parámetros de cálculo', desc: 'Variables que afectan al coste interno y al recargo de tallas grandes.' },
-  modelos:    { titulo: 'Modelos Roly',          desc: 'Precio base de cada prenda Roly. No incluye DTF ni mano de obra.' },
-  tramos:     { titulo: 'Tramos por volumen',    desc: 'Rangos de unidades que activan cada tramo y su reducción de tiempo.' },
-  packs:      { titulo: 'Packs (PVP)',           desc: 'PVP final IVA incluido por tramo, capucha y caras.' },
-  auditoria:  { titulo: 'Auditoría',              desc: 'Quién cambió qué y cuándo, leído desde audit.log junto al config.' }
+  parameters: { title: 'Parámetros de cálculo', desc: 'Variables que afectan al coste interno y al recargo de tallas grandes.' },
+  models:     { title: 'Modelos Roly',          desc: 'Precio base de cada prenda Roly. No incluye DTF ni mano de obra.' },
+  tiers:      { title: 'Tramos por volumen',    desc: 'Rangos de unidades que activan cada tramo y su reducción de tiempo.' },
+  packs:      { title: 'Packs (PVP)',           desc: 'PVP final IVA incluido por tramo, capucha y caras.' },
+  audit:      { title: 'Auditoría',              desc: 'Quién cambió qué y cuándo, leído desde audit.log junto al config.' }
 };
 
 // ============================================================
-// Arranque: decidir pantalla a mostrar
+// Bootstrap: decide which screen to show
 // ============================================================
 
-async function arrancar() {
-  SETTINGS = await window.packprice.leerSettings();
+async function bootstrap() {
+  SETTINGS = await window.packprice.readSettings();
 
-  if (!SETTINGS || !SETTINGS.ruta_config || !SETTINGS.nombre_usuario) {
-    mostrarBienvenida();
+  if (!SETTINGS || !SETTINGS.config_path || !SETTINGS.user_name) {
+    showWelcome();
     return;
   }
 
-  await cargarConfigYMostrarApp();
+  await loadConfigAndShowApp();
 }
 
-function mostrarBienvenida() {
+function showWelcome() {
   hide('pantalla-app');
   hide('pantalla-error');
   show('pantalla-bienvenida');
 
   el('btn-bv-explorar').addEventListener('click', async () => {
-    const r = await window.packprice.seleccionarConfig();
+    const r = await window.packprice.selectConfigFile();
     if (!r.cancelado) {
       el('bv-ruta').value = r.ruta;
-      validarFormBienvenida();
+      validateWelcomeForm();
     }
   });
 
-  el('bv-nombre').addEventListener('input', validarFormBienvenida);
-  el('bv-ruta').addEventListener('input', validarFormBienvenida);
-  el('btn-bv-empezar').addEventListener('click', empezarPrimeraVez);
+  el('bv-nombre').addEventListener('input', validateWelcomeForm);
+  el('bv-ruta').addEventListener('input', validateWelcomeForm);
+  el('btn-bv-empezar').addEventListener('click', startFirstTime);
 
-  validarFormBienvenida();
+  validateWelcomeForm();
   setTimeout(() => el('bv-nombre').focus(), 50);
 
-  window.packprice.rutaConfigPorDefecto()
-    .then((sugerencia) => {
+  window.packprice.getDefaultConfigPath()
+    .then((suggestion) => {
       const input = el('bv-ruta');
-      if (!input.value && sugerencia && sugerencia.sugerida) {
-        input.value = sugerencia.sugerida;
-        validarFormBienvenida();
+      if (!input.value && suggestion && suggestion.sugerida) {
+        input.value = suggestion.sugerida;
+        validateWelcomeForm();
       }
     })
-    .catch(() => { /* no bloqueamos la UI por una sugerencia */ });
+    .catch(() => { /* do not block the UI for a suggestion */ });
 }
 
-function validarFormBienvenida() {
-  const nombre = el('bv-nombre').value.trim();
-  const ruta = el('bv-ruta').value.trim();
-  el('btn-bv-empezar').disabled = !(nombre && ruta);
+function validateWelcomeForm() {
+  const name = el('bv-nombre').value.trim();
+  const filePath = el('bv-ruta').value.trim();
+  el('btn-bv-empezar').disabled = !(name && filePath);
 }
 
-async function empezarPrimeraVez() {
-  const nombre = el('bv-nombre').value.trim();
-  const ruta = el('bv-ruta').value.trim();
+async function startFirstTime() {
+  const name = el('bv-nombre').value.trim();
+  const filePath = el('bv-ruta').value.trim();
   hide('bv-error');
 
   const btn = el('btn-bv-empezar');
-  const textoOriginal = btn.innerHTML;
+  const originalText = btn.innerHTML;
   btn.disabled = true;
   btn.textContent = 'Comprobando ruta…';
   try {
-    await empezarPrimeraVezImpl(nombre, ruta);
+    await startFirstTimeImpl(name, filePath);
   } finally {
-    btn.innerHTML = textoOriginal;
-    validarFormBienvenida();
+    btn.innerHTML = originalText;
+    validateWelcomeForm();
   }
 }
 
-async function empezarPrimeraVezImpl(nombre, ruta) {
-  const exist = await window.packprice.existeConfig(ruta);
+async function startFirstTimeImpl(name, filePath) {
+  const exist = await window.packprice.configExists(filePath);
   if (!exist.existe) {
     if (!exist.escribible) {
-      mostrarErrorBienvenida(
+      showWelcomeError(
         'No se puede crear el archivo en esa ruta. Comprueba que el NAS está accesible y tienes permisos de escritura.'
       );
       return;
     }
-    const opcion = await window.packprice.confirmar({
+    const option = await window.packprice.confirm({
       titulo: 'Archivo no encontrado',
       mensaje: '¿Crear config.js con los valores por defecto?',
-      detalle: `No se encontró un archivo de configuración en:\n${ruta}\n\nSe creará uno nuevo con los valores por defecto del plan.`,
+      detalle: `No se encontró un archivo de configuración en:\n${filePath}\n\nSe creará uno nuevo con los valores por defecto del plan.`,
       botones: ['Crear con valores por defecto', 'Cancelar'],
       defaultId: 0
     });
-    if (opcion !== 0) return;
+    if (option !== 0) return;
 
-    const creado = await window.packprice.crearConfigDefault({ ruta, modificadoPor: nombre });
-    if (!creado.ok) {
-      mostrarErrorBienvenida(`No se pudo crear el archivo: ${creado.error}`);
+    const created = await window.packprice.createDefaultConfig({ ruta: filePath, modificadoPor: name });
+    if (!created.ok) {
+      showWelcomeError(`No se pudo crear el archivo: ${created.error}`);
       return;
     }
   } else {
-    const r = await window.packprice.leerConfig(ruta);
+    const r = await window.packprice.readConfig(filePath);
     if (!r.ok) {
-      mostrarErrorBienvenida(`No se pudo leer el archivo: ${r.error}`);
+      showWelcomeError(`No se pudo leer el archivo: ${r.error}`);
       return;
     }
   }
 
-  SETTINGS = { ruta_config: ruta, nombre_usuario: nombre };
-  const guardado = await window.packprice.guardarSettings(SETTINGS);
-  if (!guardado.ok) {
-    mostrarErrorBienvenida(`No se pudo guardar la configuración local: ${guardado.error}`);
+  SETTINGS = { config_path: filePath, user_name: name };
+  const saved = await window.packprice.writeSettings(SETTINGS);
+  if (!saved.ok) {
+    showWelcomeError(`No se pudo guardar la configuración local: ${saved.error}`);
     return;
   }
 
   hide('pantalla-bienvenida');
-  await cargarConfigYMostrarApp();
+  await loadConfigAndShowApp();
 }
 
-function mostrarErrorBienvenida(mensaje) {
-  el('bv-error').textContent = mensaje;
+function showWelcomeError(message) {
+  el('bv-error').textContent = message;
   show('bv-error');
 }
 
-async function cargarConfigYMostrarApp() {
-  const r = await window.packprice.leerConfig(SETTINGS.ruta_config);
+async function loadConfigAndShowApp() {
+  const r = await window.packprice.readConfig(SETTINGS.config_path);
   if (!r.ok) {
-    await mostrarPantallaError(r.error);
+    await showErrorScreen(r.error);
     return;
   }
 
   CFG = r.config;
-  garantizarPacksPorDefecto(CFG);
+  ensureDefaultPacks(CFG);
   hide('pantalla-bienvenida');
   hide('pantalla-error');
   show('pantalla-app');
-  inicializarApp();
+  initApp();
 }
 
 /**
- * Asegura que el config en memoria tiene los packs y parámetros
- * introducidos en versiones posteriores al archivo del NAS. Solo añade
- * campos que faltan con defaults seguros; no toca el archivo hasta que
- * un admin guarde.
+ * Ensures the in-memory config has the packs and parameters
+ * introduced in versions later than the NAS file. Only adds missing
+ * fields with safe defaults; it does not touch the file until an
+ * admin saves.
  */
-function garantizarPacksPorDefecto(cfg) {
+function ensureDefaultPacks(cfg) {
   if (!cfg.packs) cfg.packs = {};
-  if (!cfg.packs.personalizado) {
-    cfg.packs.personalizado = {
-      tipo: 'personalizado',
-      nombre: 'Pack personalizado',
+  if (!cfg.packs.custom) {
+    cfg.packs.custom = {
+      type: 'custom',
+      name: 'Pack personalizado',
       min_total: 10,
-      modelos_referencia: {
-        BEAGLE:  'solo_camisetas',
-        CLASICA: 'solo_clasica',
-        URBAN:   'solo_urban'
+      reference_models: {
+        BEAGLE:  'tshirts_only',
+        CLASICA: 'classic_only',
+        URBAN:   'urban_only'
       }
     };
   }
 
-  if (!cfg.parametros) cfg.parametros = {};
-  if (cfg.parametros.extra_nombre_eur      === undefined) cfg.parametros.extra_nombre_eur      = 1.5;
-  if (cfg.parametros.extra_manga_corta_eur === undefined) cfg.parametros.extra_manga_corta_eur = 1.5;
-  if (cfg.parametros.extra_manga_larga_eur === undefined) cfg.parametros.extra_manga_larga_eur = 3;
+  if (!cfg.parameters) cfg.parameters = {};
+  if (cfg.parameters.extra_name_eur         === undefined) cfg.parameters.extra_name_eur         = 1.5;
+  if (cfg.parameters.extra_short_sleeve_eur === undefined) cfg.parameters.extra_short_sleeve_eur = 1.5;
+  if (cfg.parameters.extra_long_sleeve_eur  === undefined) cfg.parameters.extra_long_sleeve_eur  = 3;
 }
 
-async function mostrarPantallaError(detalle) {
+async function showErrorScreen(detail) {
   hide('pantalla-app');
   hide('pantalla-bienvenida');
   show('pantalla-error');
-  el('error-detalle').textContent = detalle;
+  el('error-detalle').textContent = detail;
 
-  const exist = await window.packprice.existeConfig(SETTINGS.ruta_config);
-  const btnCrear = el('btn-error-crear-default');
-  if (btnCrear) {
+  const exist = await window.packprice.configExists(SETTINGS.config_path);
+  const btnCreate = el('btn-error-crear-default');
+  if (btnCreate) {
     if (!exist.existe && exist.escribible) {
-      btnCrear.classList.remove('hidden');
+      btnCreate.classList.remove('hidden');
     } else {
-      btnCrear.classList.add('hidden');
+      btnCreate.classList.add('hidden');
     }
-    btnCrear.onclick = async () => {
-      const opcion = await window.packprice.confirmar({
+    btnCreate.onclick = async () => {
+      const option = await window.packprice.confirm({
         titulo: 'Crear config por defecto',
         mensaje: '¿Crear config.js con los valores por defecto?',
-        detalle: `Ruta: ${SETTINGS.ruta_config}`,
+        detalle: `Ruta: ${SETTINGS.config_path}`,
         botones: ['Crear', 'Cancelar'],
         defaultId: 0
       });
-      if (opcion !== 0) return;
+      if (option !== 0) return;
 
-      const creado = await window.packprice.crearConfigDefault({
-        ruta: SETTINGS.ruta_config,
-        modificadoPor: SETTINGS.nombre_usuario
+      const created = await window.packprice.createDefaultConfig({
+        ruta: SETTINGS.config_path,
+        modificadoPor: SETTINGS.user_name
       });
-      if (!creado.ok) {
-        await window.packprice.mostrarError({
+      if (!created.ok) {
+        await window.packprice.showError({
           titulo: 'Error',
           mensaje: 'No se pudo crear el archivo',
-          detalle: creado.error
+          detalle: created.error
         });
         return;
       }
-      await cargarConfigYMostrarApp();
+      await loadConfigAndShowApp();
     };
   }
 
   el('btn-error-reintentar').onclick = async () => {
-    await cargarConfigYMostrarApp();
+    await loadConfigAndShowApp();
   };
   el('btn-error-cambiar-ruta').onclick = async () => {
-    const r = await window.packprice.seleccionarConfig();
+    const r = await window.packprice.selectConfigFile();
     if (!r.cancelado) {
-      SETTINGS.ruta_config = r.ruta;
-      await window.packprice.guardarSettings(SETTINGS);
-      await cargarConfigYMostrarApp();
+      SETTINGS.config_path = r.ruta;
+      await window.packprice.writeSettings(SETTINGS);
+      await loadConfigAndShowApp();
     }
   };
 }
 
 // ============================================================
-// Inicialización de la app principal
+// Main app initialization
 // ============================================================
 
-function inicializarApp() {
-  el('info-usuario').textContent = SETTINGS.nombre_usuario;
-  el('info-fecha-cfg').textContent = abreviarFechaCfg(CFG.fecha_actualizacion);
+function initApp() {
+  el('info-usuario').textContent = SETTINGS.user_name;
+  el('info-fecha-cfg').textContent = shortConfigDate(CFG.updated_at);
   el('cfg-version').textContent = CFG.version || '?';
 
-  // Sustituir spans con valores de config
+  // Replace spans with config values
   document.querySelectorAll('[data-cfg]').forEach(span => {
     const key = span.dataset.cfg;
-    if (CFG.parametros && CFG.parametros[key] !== undefined) {
-      span.textContent = CFG.parametros[key];
+    if (CFG.parameters && CFG.parameters[key] !== undefined) {
+      span.textContent = CFG.parameters[key];
     }
   });
 
-  renderListaPacks();
+  renderPackList();
 
-  if (!eventosBindeados) {
-    bindearEventos();
-    eventosBindeados = true;
+  if (!eventsBound) {
+    bindEvents();
+    eventsBound = true;
   }
 }
 
-function abreviarFechaCfg(fecha) {
-  if (!fecha) return 'sin fecha';
+function shortConfigDate(date) {
+  if (!date) return 'sin fecha';
   // "28/4/2026, 15:32:10" → "28/4 · 15:32"
-  const [fechaPart, horaPart = ''] = fecha.split(',');
-  const horaCorta = horaPart.trim().split(':').slice(0, 2).join(':');
-  const fechaCorta = fechaPart.split('/').slice(0, 2).join('/');
-  return horaCorta ? `${fechaCorta} · ${horaCorta}` : fechaCorta;
+  const [datePart, timePart = ''] = date.split(',');
+  const shortTime = timePart.trim().split(':').slice(0, 2).join(':');
+  const shortDate = datePart.split('/').slice(0, 2).join('/');
+  return shortTime ? `${shortDate} · ${shortTime}` : shortDate;
 }
 
-function bindearEventos() {
-  el('btn-calcular').addEventListener('click', ejecutarCalculo);
-  el('btn-reset').addEventListener('click', resetear);
-  el('btn-cambiar-pack').addEventListener('click', volverASeleccion);
-  const btnCambiarPack2 = el('btn-cambiar-pack-2');
-  if (btnCambiarPack2) btnCambiarPack2.addEventListener('click', volverASeleccion);
-  const btnEditar = el('btn-editar-pedido');
-  if (btnEditar) btnEditar.addEventListener('click', volverAEditar);
+function bindEvents() {
+  el('btn-calcular').addEventListener('click', runCalculation);
+  el('btn-reset').addEventListener('click', resetForm);
+  el('btn-cambiar-pack').addEventListener('click', backToSelection);
+  const btnChangePack2 = el('btn-cambiar-pack-2');
+  if (btnChangePack2) btnChangePack2.addEventListener('click', backToSelection);
+  const btnEdit = el('btn-editar-pedido');
+  if (btnEdit) btnEdit.addEventListener('click', backToEdit);
 
-  el('btn-recargar').addEventListener('click', recargarConfig);
-  el('btn-ajustes').addEventListener('click', abrirAjustes);
+  el('btn-recargar').addEventListener('click', reloadConfig);
+  el('btn-ajustes').addEventListener('click', openSettings);
 
-  el('btn-admin-toggle').addEventListener('click', abrirAdmin);
-  el('btn-cerrar-admin').addEventListener('click', cerrarAdmin);
-  el('btn-admin-login').addEventListener('click', loginAdmin);
+  el('btn-admin-toggle').addEventListener('click', openAdmin);
+  el('btn-cerrar-admin').addEventListener('click', closeAdmin);
+  el('btn-admin-login').addEventListener('click', adminLogin);
   el('admin-clave').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') loginAdmin();
+    if (e.key === 'Enter') adminLogin();
   });
-  el('btn-guardar-config').addEventListener('click', guardarConfigEnNAS);
-  el('btn-cancelar-admin').addEventListener('click', cancelarCambiosAdmin);
+  el('btn-guardar-config').addEventListener('click', saveConfigToNas);
+  el('btn-cancelar-admin').addEventListener('click', cancelAdminChanges);
 
   // Logs viewer (admin footer)
-  const btnVerLogs = el('btn-ver-logs');
-  if (btnVerLogs) btnVerLogs.addEventListener('click', abrirLogs);
-  const btnLogsCerrar = el('btn-logs-cerrar');
-  if (btnLogsCerrar) btnLogsCerrar.addEventListener('click', cerrarLogs);
-  const btnLogsClose = el('btn-cerrar-logs');
-  if (btnLogsClose) btnLogsClose.addEventListener('click', cerrarLogs);
+  const btnViewLogs = el('btn-ver-logs');
+  if (btnViewLogs) btnViewLogs.addEventListener('click', openLogs);
+  const btnLogsClose = el('btn-logs-cerrar');
+  if (btnLogsClose) btnLogsClose.addEventListener('click', closeLogs);
+  const btnLogsClose2 = el('btn-cerrar-logs');
+  if (btnLogsClose2) btnLogsClose2.addEventListener('click', closeLogs);
   const logsOverlay = el('logs-overlay');
   if (logsOverlay) {
     logsOverlay.addEventListener('click', (e) => {
-      if (e.target.id === 'logs-overlay') cerrarLogs();
+      if (e.target.id === 'logs-overlay') closeLogs();
     });
   }
 
   // History
-  const btnHistorial = el('btn-historial');
-  if (btnHistorial) btnHistorial.addEventListener('click', abrirHistorial);
-  const btnHistoryCerrar = el('btn-history-cerrar');
-  if (btnHistoryCerrar) btnHistoryCerrar.addEventListener('click', cerrarHistorial);
-  const btnHistoryClose = el('btn-cerrar-history');
-  if (btnHistoryClose) btnHistoryClose.addEventListener('click', cerrarHistorial);
+  const btnHistory = el('btn-historial');
+  if (btnHistory) btnHistory.addEventListener('click', openHistory);
+  const btnHistoryClose = el('btn-history-cerrar');
+  if (btnHistoryClose) btnHistoryClose.addEventListener('click', closeHistory);
+  const btnHistoryClose2 = el('btn-cerrar-history');
+  if (btnHistoryClose2) btnHistoryClose2.addEventListener('click', closeHistory);
   const historyOverlay = el('history-overlay');
   if (historyOverlay) {
     historyOverlay.addEventListener('click', (e) => {
-      if (e.target.id === 'history-overlay') cerrarHistorial();
+      if (e.target.id === 'history-overlay') closeHistory();
     });
   }
   const searchInput = el('history-search');
@@ -389,57 +393,56 @@ function bindearEventos() {
     let searchTimer = null;
     searchInput.addEventListener('input', () => {
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(refrescarHistorial, 150);
+      searchTimer = setTimeout(refreshHistory, 150);
     });
   }
-  const btnGuardarPresupuesto = el('btn-guardar-presupuesto');
-  if (btnGuardarPresupuesto) btnGuardarPresupuesto.addEventListener('click', guardarPresupuesto);
-  const btnExportarPdf = el('btn-exportar-pdf');
-  if (btnExportarPdf) btnExportarPdf.addEventListener('click', exportarPresupuestoPdf);
+  const btnSaveQuote = el('btn-guardar-presupuesto');
+  if (btnSaveQuote) btnSaveQuote.addEventListener('click', saveCurrentQuote);
+  const btnExportPdf = el('btn-exportar-pdf');
+  if (btnExportPdf) btnExportPdf.addEventListener('click', exportQuotePdf);
 
   document.querySelectorAll('.admin-nav__item, .admin-tab').forEach(tab => {
-    tab.addEventListener('click', () => mostrarAdminTab(tab.dataset.tab));
+    tab.addEventListener('click', () => showAdminTab(tab.dataset.tab));
   });
 
   el('admin-overlay').addEventListener('click', (e) => {
-    if (e.target.id === 'admin-overlay') cerrarAdmin();
+    if (e.target.id === 'admin-overlay') closeAdmin();
   });
 
-  // Modal ajustes
-  el('btn-cerrar-ajustes').addEventListener('click', cerrarAjustes);
-  el('btn-aj-cancelar').addEventListener('click', cerrarAjustes);
-  el('btn-aj-guardar').addEventListener('click', guardarAjustes);
+  // Settings modal
+  el('btn-cerrar-ajustes').addEventListener('click', closeSettings);
+  el('btn-aj-cancelar').addEventListener('click', closeSettings);
+  el('btn-aj-guardar').addEventListener('click', saveSettings);
   el('btn-aj-explorar').addEventListener('click', async () => {
-    const r = await window.packprice.seleccionarConfig();
+    const r = await window.packprice.selectConfigFile();
     if (!r.cancelado) {
       el('aj-ruta').value = r.ruta;
     }
   });
   el('ajustes-overlay').addEventListener('click', (e) => {
-    if (e.target.id === 'ajustes-overlay') cerrarAjustes();
+    if (e.target.id === 'ajustes-overlay') closeSettings();
   });
 
-  // Acciones del resultado: copia un resumen al portapapeles. PDF queda
-  // como placeholder hasta tener implementación.
-  const btnCopiar = el('btn-copiar-resumen');
-  if (btnCopiar) btnCopiar.addEventListener('click', copiarResumen);
+  // Result actions: copies a summary to the clipboard.
+  const btnCopy = el('btn-copiar-resumen');
+  if (btnCopy) btnCopy.addEventListener('click', copySummary);
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      cerrarAdmin();
-      cerrarAjustes();
+      closeAdmin();
+      closeSettings();
       return;
     }
 
     if (e.key === 'Enter') {
-      const paso2 = el('seccion-paso2');
-      if (paso2.classList.contains('hidden')) return;
+      const step2 = el('seccion-paso2');
+      if (step2.classList.contains('hidden')) return;
       if (!el('admin-overlay').classList.contains('hidden')) return;
       if (!el('ajustes-overlay').classList.contains('hidden')) return;
-      if (!(e.target instanceof HTMLElement) || !paso2.contains(e.target)) return;
+      if (!(e.target instanceof HTMLElement) || !step2.contains(e.target)) return;
 
       e.preventDefault();
-      ejecutarCalculo();
+      runCalculation();
     }
   });
 
@@ -456,67 +459,67 @@ function bindearEventos() {
     }
   }, { passive: true });
 
-  bindearAtajoSecretoCostes();
+  bindSecretCostShortcut();
 }
 
 /**
- * Atajo secreto: 3 pulsaciones de "." (numpad o no) en menos de 800 ms
- * alternan la visualización de costes y márgenes en el resultado. Útil
- * para ocultar datos internos cuando el cliente está mirando la pantalla.
+ * Secret shortcut: 3 presses of "." (numpad or not) within 800 ms
+ * toggle the display of costs and margins in the result. Useful to
+ * hide internal data when the customer is looking at the screen.
  *
- * Se ignora si el foco está en un input/textarea/select para no romper
- * la introducción de decimales (numpad "." o coma decimal).
+ * Ignored when the focus is in an input/textarea/select so it does
+ * not break entering decimals (numpad "." or decimal comma).
  */
-function bindearAtajoSecretoCostes() {
-  const VENTANA_MS = 800;
-  let pulsaciones = 0;
+function bindSecretCostShortcut() {
+  const WINDOW_MS = 800;
+  let presses = 0;
   let timer = null;
 
   const reset = () => {
-    pulsaciones = 0;
+    presses = 0;
     if (timer) { clearTimeout(timer); timer = null; }
   };
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== '.') {
-      // Cualquier otra tecla rompe la cadena.
-      if (pulsaciones > 0) reset();
+      // Any other key breaks the chain.
+      if (presses > 0) reset();
       return;
     }
 
     const t = e.target;
-    const enCampo = t instanceof HTMLElement
+    const inField = t instanceof HTMLElement
       && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
-    if (enCampo) return;
+    if (inField) return;
 
-    pulsaciones++;
+    presses++;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(reset, VENTANA_MS);
+    timer = setTimeout(reset, WINDOW_MS);
 
-    if (pulsaciones >= 3) {
+    if (presses >= 3) {
       reset();
-      estado.mostrarCostes = !estado.mostrarCostes;
-      // Re-render solo si la pantalla del resultado está visible.
-      const resultadoVisible = !el('seccion-resultado').classList.contains('hidden');
-      if (resultadoVisible && ultimoResultado) {
-        renderResultado(ultimoResultado);
+      state.showCosts = !state.showCosts;
+      // Re-render only if the result screen is visible.
+      const resultVisible = !el('seccion-resultado').classList.contains('hidden');
+      if (resultVisible && lastResult) {
+        renderResult(lastResult);
       }
     }
   });
 }
 
 // ============================================================
-// UI: selección de pack
+// UI: pack selection
 // ============================================================
 
-function renderListaPacks() {
+function renderPackList() {
   const container = el('lista-packs');
   container.innerHTML = '';
 
   for (const [id, pack] of Object.entries(CFG.packs)) {
     const meta = PACK_META[id] || { icon: 'i-pack', desc: '' };
-    const desde = calcularDesde(pack);
-    const minTexto = pack.tipo === 'mixto'
+    const fromPrice = computeFromPrice(pack);
+    const minText = pack.type === 'mixed'
       ? `Mín. ${pack.min_total} unidades en total`
       : `Mín. ${pack.min} unidades`;
 
@@ -529,42 +532,42 @@ function renderListaPacks() {
         <span class="pack-card__icon"><svg class="icon icon--lg"><use href="#${meta.icon}"/></svg></span>
         <span class="pack-card__arrow"><svg class="icon"><use href="#i-arrow-right"/></svg></span>
       </div>
-      <span class="pack-card__title">${escapeHTML(pack.nombre)}</span>
-      <span class="pack-card__desc">${escapeHTML(meta.desc || minTexto)}</span>
+      <span class="pack-card__title">${escapeHTML(pack.name)}</span>
+      <span class="pack-card__desc">${escapeHTML(meta.desc || minText)}</span>
       <div class="pack-card__foot">
-        ${desde !== null ? `<span class="badge badge--accent">Desde ${fmtEur(desde)}</span>` : ''}
-        <span class="badge badge--neutral">${minTexto}</span>
+        ${fromPrice !== null ? `<span class="badge badge--accent">Desde ${formatEur(fromPrice)}</span>` : ''}
+        <span class="badge badge--neutral">${minText}</span>
       </div>
     `;
-    btn.addEventListener('click', () => seleccionarPack(id));
+    btn.addEventListener('click', () => selectPack(id));
     container.appendChild(btn);
   }
 }
 
 /**
- * "Desde X €" para la tarjeta del pack: cogemos el PVP del primer tramo
- * (T1) con la combinación por defecto (2 caras, sin capucha si aplica).
- * Es el precio de referencia más comprensible para el usuario.
+ * "From X €" for the pack card: we take the price of the first tier
+ * (T1) with the default combination (2 sides, without hood if it
+ * applies). It is the most understandable reference price.
  */
-function calcularDesde(pack) {
-  if (pack.tipo === 'pena' && pack.pvp && pack.pvp.sin_capucha) {
-    const t1 = CFG.tramos[0]?.id;
-    return pack.pvp.sin_capucha.dos_caras?.[t1] ?? null;
+function computeFromPrice(pack) {
+  if (pack.type === 'crew' && pack.prices && pack.prices.without_hood) {
+    const t1 = CFG.tiers[0]?.id;
+    return pack.prices.without_hood.two_sides?.[t1] ?? null;
   }
-  if (pack.tipo === 'individual' && pack.pvp && pack.pvp.dos_caras) {
-    const t1 = CFG.tramos[0]?.id;
-    return pack.pvp.dos_caras[t1] ?? null;
+  if (pack.type === 'single' && pack.prices && pack.prices.two_sides) {
+    const t1 = CFG.tiers[0]?.id;
+    return pack.prices.two_sides[t1] ?? null;
   }
-  if (pack.tipo === 'mixto' && pack.packs_referencia) {
-    const refClasica = CFG.packs[pack.packs_referencia.CLASICA];
-    if (refClasica) return calcularDesde(refClasica);
+  if (pack.type === 'mixed' && pack.reference_packs) {
+    const refClassic = CFG.packs[pack.reference_packs.CLASICA];
+    if (refClassic) return computeFromPrice(refClassic);
   }
-  if (pack.tipo === 'personalizado' && pack.modelos_referencia) {
-    // El más barato de las referencias en T1 con 2 caras: orienta al usuario.
+  if (pack.type === 'custom' && pack.reference_models) {
+    // The cheapest of the references at T1 with 2 sides: orients the user.
     let min = null;
-    for (const refId of Object.values(pack.modelos_referencia)) {
+    for (const refId of Object.values(pack.reference_models)) {
       const ref = CFG.packs[refId];
-      const v = ref ? calcularDesde(ref) : null;
+      const v = ref ? computeFromPrice(ref) : null;
       if (v !== null && (min === null || v < min)) min = v;
     }
     return min;
@@ -572,54 +575,54 @@ function calcularDesde(pack) {
   return null;
 }
 
-function seleccionarPack(packId) {
-  estado.packId = packId;
+function selectPack(packId) {
+  state.packId = packId;
   hide('error-msg');
 
   const pack = CFG.packs[packId];
   const meta = PACK_META[packId] || { icon: 'i-pack', desc: '' };
 
-  // Marcar tarjeta seleccionada visualmente (se ve al volver a paso 1)
+  // Mark the selected card visually (visible when returning to step 1)
   document.querySelectorAll('.pack-card').forEach(card => {
     card.classList.toggle('is-selected', card.dataset.packId === packId);
   });
 
-  el('pack-titulo').textContent = pack.nombre;
-  el('pack-subtitulo').textContent = meta.desc || (pack.tipo === 'mixto'
+  el('pack-titulo').textContent = pack.name;
+  el('pack-subtitulo').textContent = meta.desc || (pack.type === 'mixed'
     ? `Mín. ${pack.min_total} unidades en total`
     : `Mín. ${pack.min} unidades`);
 
-  // Icono de la cabecera del paso 2
+  // Icon in the step 2 header
   const iconWrap = document.querySelector('#seccion-paso2 .section-card__icon');
   if (iconWrap) {
     iconWrap.innerHTML = `<svg class="icon icon--lg"><use href="#${meta.icon}"/></svg>`;
   }
 
-  renderInputsPack(packId);
-  irAPantalla('paso2');
+  renderPackInputs(packId);
+  goToScreen('paso2');
   hookPreviewListeners();
-  recalcularPreview();
+  recomputePreview();
 }
 
 /**
- * Navegación tipo "una pantalla a la vez": muestra la sección indicada
- * y oculta las demás. Hace scroll al inicio para que cada paso empiece
- * desde arriba, no desde donde estabas en la pantalla anterior.
+ * "One screen at a time" navigation: shows the given section and
+ * hides the rest. Scrolls to the top so each step starts from the
+ * top, not from where you were on the previous screen.
  */
-function irAPantalla(pantalla) {
-  const mapeo = {
+function goToScreen(screen) {
+  const mapping = {
     paso1:     'seccion-paso1',
     paso2:     'seccion-paso2',
     resultado: 'seccion-resultado'
   };
-  for (const [clave, id] of Object.entries(mapeo)) {
-    if (clave === pantalla) {
+  for (const [key, id] of Object.entries(mapping)) {
+    if (key === screen) {
       show(id);
     } else {
       hide(id);
     }
   }
-  // Reset del scroll al cambiar de pantalla.
+  // Reset scroll when switching screens.
   const scroller = document.querySelector('.app-body') || window;
   if (scroller && typeof scroller.scrollTo === 'function') {
     scroller.scrollTo({ top: 0, behavior: 'instant' });
@@ -627,11 +630,11 @@ function irAPantalla(pantalla) {
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
-function renderInputsPack(packId) {
+function renderPackInputs(packId) {
   const pack = CFG.packs[packId];
   const container = el('inputs-pack');
 
-  if (pack.tipo === 'pena') {
+  if (pack.type === 'crew') {
     container.innerHTML = `
       <div class="form-grid-2">
         <div class="field">
@@ -642,8 +645,8 @@ function renderInputsPack(packId) {
         <div class="field">
           <span class="field__label">Caras de impresión (cada prenda)</span>
           <div class="radio-cards radio-cards--inline">
-            <label class="radio-card"><input type="radio" name="caras" value="1"> 1 cara</label>
-            <label class="radio-card"><input type="radio" name="caras" value="2" checked> 2 caras</label>
+            <label class="radio-card"><input type="radio" name="sides" value="1"> 1 cara</label>
+            <label class="radio-card"><input type="radio" name="sides" value="2" checked> 2 caras</label>
           </div>
         </div>
       </div>
@@ -651,36 +654,36 @@ function renderInputsPack(packId) {
         <span class="field__label">Modelo de sudadera</span>
         <div class="radio-cards">
           <label class="radio-card">
-            <input type="radio" name="capucha" value="sin" checked>
+            <input type="radio" name="hood" value="without" checked>
             <span><strong>CLASICA</strong> · sin capucha</span>
           </label>
           <label class="radio-card">
-            <input type="radio" name="capucha" value="con">
+            <input type="radio" name="hood" value="with">
             <span><strong>URBAN</strong> · con capucha</span>
           </label>
         </div>
         <span class="field__hint">El modelo afecta al PVP del pack.</span>
       </div>
     `;
-  } else if (pack.tipo === 'individual') {
-    const m = CFG.modelos_roly[pack.modelo];
+  } else if (pack.type === 'single') {
+    const m = CFG.roly_models[pack.model];
     container.innerHTML = `
       <div class="form-grid-2">
         <div class="field">
-          <label class="field__label" for="in_cantidad">Cantidad de ${m.nombre.toLowerCase()}</label>
+          <label class="field__label" for="in_cantidad">Cantidad de ${m.name.toLowerCase()}</label>
           ${numStep('in_cantidad', pack.min, pack.min)}
           <span class="field__hint">Mínimo ${pack.min} unidades.</span>
         </div>
         <div class="field">
           <span class="field__label">Caras de impresión</span>
           <div class="radio-cards radio-cards--inline">
-            <label class="radio-card"><input type="radio" name="caras" value="1"> 1 cara</label>
-            <label class="radio-card"><input type="radio" name="caras" value="2" checked> 2 caras</label>
+            <label class="radio-card"><input type="radio" name="sides" value="1"> 1 cara</label>
+            <label class="radio-card"><input type="radio" name="sides" value="2" checked> 2 caras</label>
           </div>
         </div>
       </div>
     `;
-  } else if (pack.tipo === 'mixto') {
+  } else if (pack.type === 'mixed') {
     container.innerHTML = `
       <div class="form-grid-2">
         <div class="field">
@@ -695,14 +698,14 @@ function renderInputsPack(packId) {
       <div class="field">
         <span class="field__label">Caras de impresión</span>
         <div class="radio-cards radio-cards--inline">
-          <label class="radio-card"><input type="radio" name="caras" value="1"> 1 cara</label>
-          <label class="radio-card"><input type="radio" name="caras" value="2" checked> 2 caras</label>
+          <label class="radio-card"><input type="radio" name="sides" value="1"> 1 cara</label>
+          <label class="radio-card"><input type="radio" name="sides" value="2" checked> 2 caras</label>
         </div>
         <span class="field__hint">Total mínimo: ${pack.min_total} sudaderas. Cada sudadera factura a su PVP según el tramo del total.</span>
       </div>
     `;
-  } else if (pack.tipo === 'personalizado') {
-    const modelosDisponibles = Object.keys(pack.modelos_referencia || {});
+  } else if (pack.type === 'custom') {
+    const availableModels = Object.keys(pack.reference_models || {});
     container.innerHTML = `
       <div id="lineas-personalizado" class="lineas-personalizado"></div>
       <div class="lineas-personalizado__add">
@@ -714,31 +717,31 @@ function renderInputsPack(packId) {
         </span>
       </div>
     `;
-    // Línea inicial con el primer modelo disponible
+    // Initial line with the first available model
     const cont = el('lineas-personalizado');
-    cont.appendChild(crearLineaPersonalizado(modelosDisponibles, modelosDisponibles[0], 1, 2));
+    cont.appendChild(createCustomLine(availableModels, availableModels[0], 1, 2));
 
     el('btn-anadir-linea').addEventListener('click', () => {
       const idx = cont.children.length;
-      cont.appendChild(crearLineaPersonalizado(modelosDisponibles, modelosDisponibles[0], 1, 2, idx));
-      recalcularPreview();
+      cont.appendChild(createCustomLine(availableModels, availableModels[0], 1, 2, idx));
+      recomputePreview();
     });
 
     cont.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-accion-linea="eliminar"]');
       if (!btn) return;
-      const linea = btn.closest('.linea-personalizado');
-      if (!linea) return;
+      const line = btn.closest('.linea-personalizado');
+      if (!line) return;
       if (cont.children.length === 1) {
-        // Mantener al menos una línea: limpiamos cantidad en lugar de borrar.
-        const input = linea.querySelector('[data-linea-cantidad]');
+        // Keep at least one line: clear the quantity instead of deleting.
+        const input = line.querySelector('[data-linea-cantidad]');
         if (input) input.value = '0';
-        recalcularPreview();
+        recomputePreview();
         return;
       }
-      linea.remove();
-      reindexarLineasPersonalizado(cont);
-      recalcularPreview();
+      line.remove();
+      reindexCustomLines(cont);
+      recomputePreview();
     });
   }
 
@@ -747,40 +750,40 @@ function renderInputsPack(packId) {
 }
 
 /**
- * Crea una <div.linea-personalizado> con select de modelo, cantidad y caras.
- * Los radios de caras necesitan un nombre único por línea para que cada
- * grupo sea independiente.
+ * Creates a <div.linea-personalizado> with a model select, quantity
+ * and sides. The sides radios need a unique name per line so each
+ * group is independent.
  */
-function crearLineaPersonalizado(modelosDisponibles, modeloSel, cantidad, caras, idx = 0) {
+function createCustomLine(availableModels, selectedModel, quantity, sides, idx = 0) {
   const wrap = document.createElement('div');
   wrap.className = 'linea-personalizado';
   wrap.dataset.idx = String(idx);
 
-  const opciones = modelosDisponibles.map(id => {
-    const m = CFG.modelos_roly[id];
-    const nombre = m ? `${m.nombre} (${id})` : id;
-    return `<option value="${id}" ${id === modeloSel ? 'selected' : ''}>${escapeHTML(nombre)}</option>`;
+  const options = availableModels.map(id => {
+    const m = CFG.roly_models[id];
+    const name = m ? `${m.name} (${id})` : id;
+    return `<option value="${id}" ${id === selectedModel ? 'selected' : ''}>${escapeHTML(name)}</option>`;
   }).join('');
 
-  const carasName = `caras_linea_${idx}_${Math.random().toString(36).slice(2, 7)}`;
+  const sidesName = `sides_line_${idx}_${Math.random().toString(36).slice(2, 7)}`;
   wrap.innerHTML = `
     <div class="linea-personalizado__grid">
       <div class="field">
         <label class="field__label">Modelo</label>
-        <select class="input" data-linea-modelo>${opciones}</select>
+        <select class="input" data-linea-modelo>${options}</select>
       </div>
       <div class="field">
         <label class="field__label">Cantidad</label>
-        <input type="number" class="input" min="0" step="1" value="${cantidad}" data-linea-cantidad>
+        <input type="number" class="input" min="0" step="1" value="${quantity}" data-linea-cantidad>
       </div>
       <div class="field">
         <span class="field__label">Caras</span>
         <div class="radio-cards radio-cards--inline">
           <label class="radio-card">
-            <input type="radio" name="${carasName}" value="1" data-linea-caras ${caras === 1 ? 'checked' : ''}> 1 cara
+            <input type="radio" name="${sidesName}" value="1" data-linea-caras ${sides === 1 ? 'checked' : ''}> 1 cara
           </label>
           <label class="radio-card">
-            <input type="radio" name="${carasName}" value="2" data-linea-caras ${caras === 2 ? 'checked' : ''}> 2 caras
+            <input type="radio" name="${sidesName}" value="2" data-linea-caras ${sides === 2 ? 'checked' : ''}> 2 caras
           </label>
         </div>
       </div>
@@ -793,9 +796,9 @@ function crearLineaPersonalizado(modelosDisponibles, modeloSel, cantidad, caras,
   return wrap;
 }
 
-function reindexarLineasPersonalizado(cont) {
-  Array.from(cont.children).forEach((linea, idx) => {
-    linea.dataset.idx = String(idx);
+function reindexCustomLines(cont) {
+  Array.from(cont.children).forEach((line, idx) => {
+    line.dataset.idx = String(idx);
   });
 }
 
@@ -824,138 +827,138 @@ function wireNumStep(stepEl) {
   });
 }
 
-function recogerInputs() {
-  const pack = CFG.packs[estado.packId];
-  const cant_4xl = intDe('cant_4xl');
-  const cant_5xl = intDe('cant_5xl');
+function collectInputs() {
+  const pack = CFG.packs[state.packId];
+  const qty_4xl = intFromInput('cant_4xl');
+  const qty_5xl = intFromInput('cant_5xl');
   const extras = {
-    nombres:        intDe('cant_nombres'),
-    mangas_cortas:  intDe('cant_mangas_cortas'),
-    mangas_largas:  intDe('cant_mangas_largas')
+    names:         intFromInput('cant_nombres'),
+    short_sleeves: intFromInput('cant_mangas_cortas'),
+    long_sleeves:  intFromInput('cant_mangas_largas')
   };
 
-  if (pack.tipo === 'pena') {
+  if (pack.type === 'crew') {
     return {
-      cantidad: intDe('in_cantidad'),
-      capucha: document.querySelector('input[name="capucha"]:checked').value,
-      caras: parseInt(document.querySelector('input[name="caras"]:checked').value, 10),
-      cant_4xl, cant_5xl, extras
+      quantity: intFromInput('in_cantidad'),
+      hood: document.querySelector('input[name="hood"]:checked').value,
+      sides: parseInt(document.querySelector('input[name="sides"]:checked').value, 10),
+      qty_4xl, qty_5xl, extras
     };
   }
-  if (pack.tipo === 'individual') {
+  if (pack.type === 'single') {
     return {
-      cantidad: intDe('in_cantidad'),
-      caras: parseInt(document.querySelector('input[name="caras"]:checked').value, 10),
-      cant_4xl, cant_5xl, extras
+      quantity: intFromInput('in_cantidad'),
+      sides: parseInt(document.querySelector('input[name="sides"]:checked').value, 10),
+      qty_4xl, qty_5xl, extras
     };
   }
-  if (pack.tipo === 'mixto') {
+  if (pack.type === 'mixed') {
     return {
-      cant_clasica: intDe('in_cant_clasica'),
-      cant_urban: intDe('in_cant_urban'),
-      caras: parseInt(document.querySelector('input[name="caras"]:checked').value, 10),
-      cant_4xl, cant_5xl, extras
+      qty_classic: intFromInput('in_cant_clasica'),
+      qty_urban: intFromInput('in_cant_urban'),
+      sides: parseInt(document.querySelector('input[name="sides"]:checked').value, 10),
+      qty_4xl, qty_5xl, extras
     };
   }
-  if (pack.tipo === 'personalizado') {
-    const lineas = [];
+  if (pack.type === 'custom') {
+    const lines = [];
     document.querySelectorAll('.linea-personalizado').forEach(row => {
-      const modelo = row.querySelector('[data-linea-modelo]')?.value || '';
-      const cantidad = parseInt(row.querySelector('[data-linea-cantidad]')?.value, 10) || 0;
-      const carasInput = row.querySelector('input[data-linea-caras]:checked');
-      const caras = carasInput ? parseInt(carasInput.value, 10) : 2;
-      lineas.push({ modelo, cantidad, caras });
+      const model = row.querySelector('[data-linea-modelo]')?.value || '';
+      const quantity = parseInt(row.querySelector('[data-linea-cantidad]')?.value, 10) || 0;
+      const sidesInput = row.querySelector('input[data-linea-caras]:checked');
+      const sides = sidesInput ? parseInt(sidesInput.value, 10) : 2;
+      lines.push({ model, quantity, sides });
     });
-    return { lineas, cant_4xl, cant_5xl, extras };
+    return { lines, qty_4xl, qty_5xl, extras };
   }
   return null;
 }
 
 // ============================================================
-// Preview en vivo (sideCol del paso 2)
+// Live preview (side column of step 2)
 // ============================================================
 
 let previewListenersAttached = false;
 function hookPreviewListeners() {
   if (previewListenersAttached) return;
-  const paso2 = el('seccion-paso2');
-  if (!paso2) return;
-  // Delegación: cualquier cambio en el formulario recalcula el preview.
-  // Se engancha una sola vez (los inputs internos cambian al cambiar
-  // de pack, pero la sección contenedora persiste).
-  paso2.addEventListener('input', recalcularPreview);
-  paso2.addEventListener('change', recalcularPreview);
+  const step2 = el('seccion-paso2');
+  if (!step2) return;
+  // Delegation: any change in the form recomputes the preview.
+  // Hooked once (the inner inputs change when switching packs, but
+  // the container section persists).
+  step2.addEventListener('input', recomputePreview);
+  step2.addEventListener('change', recomputePreview);
   previewListenersAttached = true;
 }
 
-function recalcularPreview() {
-  if (!estado.packId) return;
+function recomputePreview() {
+  if (!state.packId) return;
 
-  const pack = CFG.packs[estado.packId];
-  const opt = recogerInputsSafe();
-  const r = opt ? calcularPackTipo(pack.tipo, opt) : null;
+  const pack = CFG.packs[state.packId];
+  const opt = collectInputsSafe();
+  const r = opt ? calculateByType(pack.type, opt) : null;
 
   const elTotal = el('preview-total');
-  const elTramo = el('preview-tramo');
+  const elTier = el('preview-tramo');
   const elMeta = el('preview-meta');
   const elRows = el('preview-rows');
 
   if (!r || r.error) {
     elTotal.textContent = '—';
-    elTramo.textContent = '—';
+    elTier.textContent = '—';
     elMeta.textContent = r && r.error ? r.error : 'Rellena los campos para ver el precio';
     elRows.innerHTML = '';
-    renderTramoBar(opt ? cantidadTotalDe(pack, opt) : 0);
+    renderTierBar(opt ? totalQuantityOf(pack, opt) : 0);
     return;
   }
 
-  ultimoResultado = r;
-  elTotal.textContent = fmtEur(r.total_iva_inc);
-  elTramo.textContent = `Tramo ${tramoIdDeEtiqueta(r.tramo)}`;
+  lastResult = r;
+  elTotal.textContent = formatEur(r.total_vat_inc);
+  elTier.textContent = `Tramo ${tierIdFromLabel(r.tier)}`;
 
-  const cantidad = r.es_mixto ? r.cantidad_total : r.cantidad;
-  const unidadLabel = r.es_personalizado ? 'prendas' : 'sudaderas';
-  const pvpTexto = r.es_mixto
-    ? `${cantidad} ${unidadLabel}`
-    : `${cantidad} × ${fmtEur(r.pvp_unitario)}`;
-  elMeta.textContent = pvpTexto;
+  const quantity = r.is_mixed ? r.total_quantity : r.quantity;
+  const unitLabel = r.is_custom ? 'prendas' : 'sudaderas';
+  const priceText = r.is_mixed
+    ? `${quantity} ${unitLabel}`
+    : `${quantity} × ${formatEur(r.unit_price)}`;
+  elMeta.textContent = priceText;
 
-  // Filas de desglose breve
+  // Short breakdown rows
   let rowsHtml = '';
-  if (r.es_mixto) {
-    for (const d of r.desglose) {
-      if (d.cantidad === 0) continue;
-      rowsHtml += `<div class="preview__row"><span>${escapeHTML(d.modelo)} × ${d.cantidad}</span><strong>${fmtEur(d.subtotal)}</strong></div>`;
+  if (r.is_mixed) {
+    for (const d of r.breakdown) {
+      if (d.quantity === 0) continue;
+      rowsHtml += `<div class="preview__row"><span>${escapeHTML(d.model)} × ${d.quantity}</span><strong>${formatEur(d.subtotal)}</strong></div>`;
     }
   } else {
-    rowsHtml += `<div class="preview__row"><span>Subtotal pack</span><strong>${fmtEur(r.subtotal)}</strong></div>`;
+    rowsHtml += `<div class="preview__row"><span>Subtotal pack</span><strong>${formatEur(r.subtotal)}</strong></div>`;
   }
-  if (r.recargos > 0) {
-    rowsHtml += `<div class="preview__row"><span>Recargo tallas grandes</span><strong>${fmtEur(r.recargos)}</strong></div>`;
+  if (r.surcharges > 0) {
+    rowsHtml += `<div class="preview__row"><span>Recargo tallas grandes</span><strong>${formatEur(r.surcharges)}</strong></div>`;
   }
-  if (r.extras_sin_iva > 0) {
-    const e = r.extras_detalle || {};
-    const partes = [];
-    if (e.nombres)        partes.push(`${e.nombres} nombre${e.nombres > 1 ? 's' : ''}`);
-    if (e.mangas_cortas)  partes.push(`${e.mangas_cortas} mc`);
-    if (e.mangas_largas)  partes.push(`${e.mangas_largas} ml`);
-    rowsHtml += `<div class="preview__row"><span>Extras (${partes.join(' · ')}) <em style="font-style: normal; opacity: 0.7;">sin IVA</em></span><strong>${fmtEur(r.extras_sin_iva)}</strong></div>`;
+  if (r.extras_no_vat > 0) {
+    const e = r.extras_detail || {};
+    const parts = [];
+    if (e.names)         parts.push(`${e.names} nombre${e.names > 1 ? 's' : ''}`);
+    if (e.short_sleeves) parts.push(`${e.short_sleeves} mc`);
+    if (e.long_sleeves)  parts.push(`${e.long_sleeves} ml`);
+    rowsHtml += `<div class="preview__row"><span>Extras (${parts.join(' · ')}) <em style="font-style: normal; opacity: 0.7;">sin IVA</em></span><strong>${formatEur(r.extras_no_vat)}</strong></div>`;
   }
-  rowsHtml += `<div class="preview__row"><span>IVA (${fmtPct(CFG.parametros.iva)})</span><strong>${fmtEur(r.iva)}</strong></div>`;
-  rowsHtml += `<div class="preview__row preview__row--total"><span>Total</span><strong>${fmtEur(r.total_iva_inc)}</strong></div>`;
+  rowsHtml += `<div class="preview__row"><span>IVA (${formatPct(CFG.parameters.vat)})</span><strong>${formatEur(r.vat)}</strong></div>`;
+  rowsHtml += `<div class="preview__row preview__row--total"><span>Total</span><strong>${formatEur(r.total_vat_inc)}</strong></div>`;
   elRows.innerHTML = rowsHtml;
 
-  renderTramoBar(cantidad);
+  renderTierBar(quantity);
 }
 
-function recogerInputsSafe() {
+function collectInputsSafe() {
   try {
-    const opt = recogerInputs();
+    const opt = collectInputs();
     if (!opt) return null;
-    if ('cantidad' in opt && (isNaN(opt.cantidad) || opt.cantidad <= 0)) return null;
-    if ('cant_clasica' in opt && (opt.cant_clasica + opt.cant_urban) <= 0) return null;
-    if ('lineas' in opt) {
-      const total = (opt.lineas || []).reduce((s, l) => s + (l.cantidad || 0), 0);
+    if ('quantity' in opt && (isNaN(opt.quantity) || opt.quantity <= 0)) return null;
+    if ('qty_classic' in opt && (opt.qty_classic + opt.qty_urban) <= 0) return null;
+    if ('lines' in opt) {
+      const total = (opt.lines || []).reduce((s, l) => s + (l.quantity || 0), 0);
       if (total <= 0) return null;
     }
     return opt;
@@ -964,55 +967,55 @@ function recogerInputsSafe() {
   }
 }
 
-function calcularPackTipo(tipo, opt) {
+function calculateByType(type, opt) {
   try {
-    if (tipo === 'pena')          return calcularPackPena(CFG, opt);
-    if (tipo === 'individual')    return calcularPackIndividual(CFG, estado.packId, opt);
-    if (tipo === 'mixto')         return calcularPackMixto(CFG, opt);
-    if (tipo === 'personalizado') return calcularPackPersonalizado(CFG, opt);
+    if (type === 'crew')   return calculateCrewPack(CFG, opt);
+    if (type === 'single') return calculateSinglePack(CFG, state.packId, opt);
+    if (type === 'mixed')  return calculateMixedPack(CFG, opt);
+    if (type === 'custom') return calculateCustomPack(CFG, opt);
   } catch (e) {
     return { error: e.message || String(e) };
   }
   return null;
 }
 
-function cantidadTotalDe(pack, opt) {
-  if (pack.tipo === 'mixto') return (opt.cant_clasica || 0) + (opt.cant_urban || 0);
-  if (pack.tipo === 'personalizado') {
-    return (opt.lineas || []).reduce((s, l) => s + (l.cantidad || 0), 0);
+function totalQuantityOf(pack, opt) {
+  if (pack.type === 'mixed') return (opt.qty_classic || 0) + (opt.qty_urban || 0);
+  if (pack.type === 'custom') {
+    return (opt.lines || []).reduce((s, l) => s + (l.quantity || 0), 0);
   }
-  return opt.cantidad || 0;
+  return opt.quantity || 0;
 }
 
-function tramoIdDeEtiqueta(etiqueta) {
-  const t = CFG.tramos.find(x => x.etiqueta === etiqueta);
+function tierIdFromLabel(label) {
+  const t = CFG.tiers.find(x => x.label === label);
   return t ? t.id : '—';
 }
 
-function renderTramoBar(cantidad) {
+function renderTierBar(quantity) {
   const bar = el('tramo-bar');
   const tip = el('tramo-tip');
   if (!bar) return;
 
-  const total = CFG.tramos.length;
-  const tramoActual = getTramo(CFG, cantidad);
-  const idxActual = tramoActual ? CFG.tramos.indexOf(tramoActual) : -1;
+  const total = CFG.tiers.length;
+  const currentTier = getTier(CFG, quantity);
+  const currentIdx = currentTier ? CFG.tiers.indexOf(currentTier) : -1;
 
   let html = '';
   for (let i = 0; i < total; i++) {
-    const cls = (i < idxActual)
+    const cls = (i < currentIdx)
       ? 'is-active'
-      : (i === idxActual ? 'is-current' : '');
+      : (i === currentIdx ? 'is-current' : '');
     html += `<span class="tramo-bar__seg ${cls}"></span>`;
   }
   bar.innerHTML = html;
 
-  // Tip al siguiente tramo si existe y mejora el PVP
+  // Tip to the next tier if it exists and improves the price
   if (tip) {
-    const siguiente = CFG.tramos[idxActual + 1];
-    if (siguiente && tramoActual && estado.packId) {
-      const dif = siguiente.desde - cantidad;
-      tip.textContent = `Si llegas a ${siguiente.desde} unidades pasas al ${siguiente.id} (${siguiente.etiqueta.toLowerCase()}). Te faltan ${dif}.`;
+    const next = CFG.tiers[currentIdx + 1];
+    if (next && currentTier && state.packId) {
+      const diff = next.from - quantity;
+      tip.textContent = `Si llegas a ${next.from} unidades pasas al ${next.id} (${next.label.toLowerCase()}). Te faltan ${diff}.`;
       tip.style.display = 'flex';
     } else {
       tip.style.display = 'none';
@@ -1021,92 +1024,92 @@ function renderTramoBar(cantidad) {
 }
 
 // ============================================================
-// Cálculo final
+// Final calculation
 // ============================================================
 
-function ejecutarCalculo() {
+function runCalculation() {
   hide('error-msg');
-  const pack = CFG.packs[estado.packId];
-  const opt = recogerInputs();
+  const pack = CFG.packs[state.packId];
+  const opt = collectInputs();
 
-  const resultado = calcularPackTipo(pack.tipo, opt);
+  const result = calculateByType(pack.type, opt);
 
-  if (!resultado || resultado.error) {
-    el('error-msg').textContent = (resultado && resultado.error) || 'No se pudo calcular el precio.';
+  if (!result || result.error) {
+    el('error-msg').textContent = (result && result.error) || 'No se pudo calcular el precio.';
     show('error-msg');
     hide('seccion-resultado');
     return;
   }
 
-  ultimoResultado = resultado;
-  renderResultado(resultado);
-  irAPantalla('resultado');
+  lastResult = result;
+  renderResult(result);
+  goToScreen('resultado');
 }
 
 /**
- * Vuelve a la pantalla del paso 2 desde el resultado, manteniendo los
- * inputs como estaban.
+ * Returns to the step 2 screen from the result, keeping the inputs
+ * as they were.
  */
-function volverAEditar() {
-  if (!estado.packId) {
-    irAPantalla('paso1');
+function backToEdit() {
+  if (!state.packId) {
+    goToScreen('paso1');
     return;
   }
-  irAPantalla('paso2');
-  recalcularPreview();
+  goToScreen('paso2');
+  recomputePreview();
 }
 
-function renderResultado(r) {
+function renderResult(r) {
   const c = el('resultado-content');
-  const cantidad = r.es_mixto ? r.cantidad_total : r.cantidad;
-  const tramoId = tramoIdDeEtiqueta(r.tramo);
-  const baseSinIva = r.base_venta;
+  const quantity = r.is_mixed ? r.total_quantity : r.quantity;
+  const tierId = tierIdFromLabel(r.tier);
+  const baseNoVat = r.sale_base;
 
   // Hero stats
-  const tiempoTotal = calcularTiempoTotal(r);
-  const tiempoFmt = formatearTiempo(tiempoTotal);
-  const verCostes = estado.esAdmin || estado.mostrarCostes;
-  const pvpPorPack = r.es_mixto
-    ? fmtEur(r.subtotal / Math.max(1, r.cantidad_total))
-    : fmtEur(r.pvp_unitario);
-  const labelCantidad = r.es_personalizado ? 'Prendas' : 'Packs';
-  const labelPvp = r.es_personalizado ? 'PVP medio' : 'PVP por pack';
+  const totalTime = estimateTotalTime(r);
+  const timeFmt = formatTime(totalTime);
+  const showCosts = state.isAdmin || state.showCosts;
+  const pricePerPack = r.is_mixed
+    ? formatEur(r.subtotal / Math.max(1, r.total_quantity))
+    : formatEur(r.unit_price);
+  const quantityLabel = r.is_custom ? 'Prendas' : 'Packs';
+  const priceLabel = r.is_custom ? 'PVP medio' : 'PVP por pack';
   const stats = [
-    { label: labelCantidad,     value: cantidad,    mono: true },
-    { label: labelPvp,          value: pvpPorPack,  mono: true },
-    { label: 'Tiempo estimado', value: tiempoFmt,   mono: true }
+    { label: quantityLabel,     value: quantity,    mono: true },
+    { label: priceLabel,        value: pricePerPack, mono: true },
+    { label: 'Tiempo estimado', value: timeFmt,     mono: true }
   ];
-  if (verCostes) {
+  if (showCosts) {
     stats.push({
       label: 'Margen bruto',
-      value: fmtPct(r.margen_pct),
+      value: formatPct(r.margin_pct),
       mono: true,
-      accent: r.margen_pct >= 0.30
+      accent: r.margin_pct >= 0.30
     });
   }
 
-  // Composición por tallas
-  const totalPrendas = r.es_mixto ? cantidad : (CFG.packs[estado.packId].tipo === 'pena' ? cantidad * 2 : cantidad);
-  const tallasGrandes = r.cant_4xl + r.cant_5xl;
-  const tallasNormales = Math.max(0, totalPrendas - tallasGrandes);
-  const pctNormales = totalPrendas > 0 ? (tallasNormales / totalPrendas * 100) : 100;
-  const pct4xl = totalPrendas > 0 ? (r.cant_4xl / totalPrendas * 100) : 0;
-  const pct5xl = totalPrendas > 0 ? (r.cant_5xl / totalPrendas * 100) : 0;
+  // Composition by size
+  const totalGarments = r.is_mixed ? quantity : (CFG.packs[state.packId].type === 'crew' ? quantity * 2 : quantity);
+  const bigSizes = r.qty_4xl + r.qty_5xl;
+  const normalSizes = Math.max(0, totalGarments - bigSizes);
+  const pctNormal = totalGarments > 0 ? (normalSizes / totalGarments * 100) : 100;
+  const pct4xl = totalGarments > 0 ? (r.qty_4xl / totalGarments * 100) : 0;
+  const pct5xl = totalGarments > 0 ? (r.qty_5xl / totalGarments * 100) : 0;
 
-  const breakdownRows = construirBreakdownRows(r);
-  const composicionMeta = construirComposicionMeta(r);
+  const breakdownRows = buildBreakdownRows(r);
+  const compositionMeta = buildCompositionMeta(r);
 
   c.innerHTML = `
     <div class="resultado-grid">
       <article class="dark-card result-hero">
         <div class="preview__head">
-          <span class="badge badge--inverse"><svg class="icon"><use href="#i-check"/></svg> Cálculo guardado · Tramo ${tramoId}</span>
+          <span class="badge badge--inverse"><svg class="icon"><use href="#i-check"/></svg> Cálculo guardado · Tramo ${tierId}</span>
           <span class="text-mono" style="color: var(--fg-inverse-muted); font-size: 11px;">PASO 3 DE 3</span>
         </div>
         <div>
           <p style="color: var(--fg-inverse-muted); font-size: 13px;">Total a facturar</p>
-          <h2 class="result-hero__total">${fmtEur(r.total_iva_inc)}</h2>
-          <p class="result-hero__sub">con ${fmtPct(CFG.parametros.iva)} IVA · ${fmtEur(baseSinIva)} sin IVA</p>
+          <h2 class="result-hero__total">${formatEur(r.total_vat_inc)}</h2>
+          <p class="result-hero__sub">con ${formatPct(CFG.parameters.vat)} IVA · ${formatEur(baseNoVat)} sin IVA</p>
         </div>
         <div class="result-hero__stats">
           ${stats.map(s => `
@@ -1126,7 +1129,7 @@ function renderResultado(r) {
         <div class="next-steps">
           <button class="next-steps__item" type="button" disabled title="Próximamente">
             <span class="next-steps__icon"><svg class="icon"><use href="#i-clock"/></svg></span>
-            <span class="next-steps__body"><strong>Programar producción</strong><span>Estimación: ${tiempoFmt}</span></span>
+            <span class="next-steps__body"><strong>Programar producción</strong><span>Estimación: ${timeFmt}</span></span>
             <svg class="icon"><use href="#i-arrow-right"/></svg>
           </button>
           <button class="next-steps__item" type="button" disabled title="Próximamente">
@@ -1162,25 +1165,25 @@ function renderResultado(r) {
             ${breakdownRows.map(row => `
               <tr class="${row.cls || ''}">
                 <td class="concept">
-                  <strong>${escapeHTML(row.concepto)}</strong>
-                  ${row.detalle ? `<span>${escapeHTML(row.detalle)}</span>` : ''}
+                  <strong>${escapeHTML(row.concept)}</strong>
+                  ${row.detail ? `<span>${escapeHTML(row.detail)}</span>` : ''}
                 </td>
-                <td class="num">${row.unit !== undefined ? fmtEur(row.unit) : '—'}</td>
+                <td class="num">${row.unit !== undefined ? formatEur(row.unit) : '—'}</td>
                 <td class="num">${row.qty !== undefined ? row.qty : '—'}</td>
-                <td class="num">${fmtEur(row.subtotal)}</td>
+                <td class="num">${formatEur(row.subtotal)}</td>
               </tr>
             `).join('')}
             <tr class="subtotal">
               <td colspan="3">Subtotal sin IVA</td>
-              <td class="num">${fmtEur(baseSinIva)}</td>
+              <td class="num">${formatEur(baseNoVat)}</td>
             </tr>
             <tr>
-              <td colspan="3">IVA (${fmtPct(CFG.parametros.iva)})</td>
-              <td class="num">${fmtEur(r.iva)}</td>
+              <td colspan="3">IVA (${formatPct(CFG.parameters.vat)})</td>
+              <td class="num">${formatEur(r.vat)}</td>
             </tr>
             <tr class="total">
               <td colspan="3">TOTAL A FACTURAR</td>
-              <td class="num">${fmtEur(r.total_iva_inc)}</td>
+              <td class="num">${formatEur(r.total_vat_inc)}</td>
             </tr>
           </tbody>
         </table>
@@ -1189,33 +1192,33 @@ function renderResultado(r) {
       <article class="section-card">
         <div>
           <h3 class="h-card">Composición del pedido</h3>
-          <p class="text-secondary" style="font-size: 12px; margin-top: 2px;">Distribución por talla · ${totalPrendas} prendas</p>
+          <p class="text-secondary" style="font-size: 12px; margin-top: 2px;">Distribución por talla · ${totalGarments} prendas</p>
         </div>
         <div>
           <div class="composition__bar">
-            <span class="composition__seg" style="width: ${pctNormales.toFixed(1)}%; background: var(--accent-primary);"></span>
+            <span class="composition__seg" style="width: ${pctNormal.toFixed(1)}%; background: var(--accent-primary);"></span>
             <span class="composition__seg" style="width: ${pct4xl.toFixed(1)}%; background: var(--warning);"></span>
             <span class="composition__seg" style="width: ${pct5xl.toFixed(1)}%; background: var(--danger);"></span>
           </div>
           <div class="composition__legend">
-            <span><i style="background: var(--accent-primary);"></i>S–3XL · ${tallasNormales}</span>
-            <span><i style="background: var(--warning);"></i>4XL · ${r.cant_4xl}</span>
-            <span><i style="background: var(--danger);"></i>5XL+ · ${r.cant_5xl}</span>
+            <span><i style="background: var(--accent-primary);"></i>S–3XL · ${normalSizes}</span>
+            <span><i style="background: var(--warning);"></i>4XL · ${r.qty_4xl}</span>
+            <span><i style="background: var(--danger);"></i>5XL+ · ${r.qty_5xl}</span>
           </div>
         </div>
         <hr class="divider">
         <div class="kv-list">
-          ${composicionMeta.map(m => `<div class="kv-list__row"><span>${escapeHTML(m.label)}</span><span>${escapeHTML(m.value)}</span></div>`).join('')}
+          ${compositionMeta.map(m => `<div class="kv-list__row"><span>${escapeHTML(m.label)}</span><span>${escapeHTML(m.value)}</span></div>`).join('')}
         </div>
-        ${verCostes ? `
+        ${showCosts ? `
           <hr class="divider">
           <div>
-            <h4 class="h-card" style="font-size: 13px; margin-bottom: 8px;">Datos internos${estado.esAdmin ? ' (admin)' : ''}</h4>
+            <h4 class="h-card" style="font-size: 13px; margin-bottom: 8px;">Datos internos${state.isAdmin ? ' (admin)' : ''}</h4>
             <div class="kv-list">
-              <div class="kv-list__row"><span>Coste total</span><span class="text-mono">${fmtEur(r.coste_total)}</span></div>
-              <div class="kv-list__row"><span>Margen €</span><span class="text-mono">${fmtEur(r.margen)}</span></div>
-              <div class="kv-list__row"><span>Margen %</span><span class="text-mono" style="color: ${r.margen_pct >= 0.30 ? 'var(--success)' : 'var(--warning)'};">${fmtPct(r.margen_pct)}</span></div>
-              ${r.coste_unitario !== undefined ? `<div class="kv-list__row"><span>Coste unitario</span><span class="text-mono">${fmtEur(r.coste_unitario)}</span></div>` : ''}
+              <div class="kv-list__row"><span>Coste total</span><span class="text-mono">${formatEur(r.total_cost)}</span></div>
+              <div class="kv-list__row"><span>Margen €</span><span class="text-mono">${formatEur(r.margin)}</span></div>
+              <div class="kv-list__row"><span>Margen %</span><span class="text-mono" style="color: ${r.margin_pct >= 0.30 ? 'var(--success)' : 'var(--warning)'};">${formatPct(r.margin_pct)}</span></div>
+              ${r.unit_cost !== undefined ? `<div class="kv-list__row"><span>Coste unitario</span><span class="text-mono">${formatEur(r.unit_cost)}</span></div>` : ''}
             </div>
           </div>
         ` : ''}
@@ -1224,156 +1227,156 @@ function renderResultado(r) {
   `;
 }
 
-function construirBreakdownRows(r) {
+function buildBreakdownRows(r) {
   const rows = [];
-  if (r.es_mixto) {
-    for (const d of r.desglose) {
-      if (d.cantidad === 0) continue;
-      // En personalizado cada línea trae sus propias caras; en mixto
-      // clásico todas comparten r.caras.
-      const caras = d.caras ?? r.caras;
+  if (r.is_mixed) {
+    for (const d of r.breakdown) {
+      if (d.quantity === 0) continue;
+      // In custom each line carries its own sides; in classic mixed
+      // they all share r.sides.
+      const sides = d.sides ?? r.sides;
       rows.push({
-        concepto: `${d.nombre}`,
-        detalle: `${d.modelo} · ${caras} cara${caras > 1 ? 's' : ''} · modelo Roly`,
-        unit: d.pvp,
-        qty: d.cantidad,
+        concept: `${d.name}`,
+        detail: `${d.model} · ${sides} cara${sides > 1 ? 's' : ''} · modelo Roly`,
+        unit: d.price,
+        qty: d.quantity,
         subtotal: d.subtotal
       });
     }
   } else {
-    const pack = CFG.packs[estado.packId];
-    const detalle = pack.tipo === 'pena'
-      ? `Camiseta + sudadera por persona · ${r.extra?.caras ?? 2} cara(s)`
-      : `${r.extra?.caras ?? 2} cara(s) de impresión`;
+    const pack = CFG.packs[state.packId];
+    const detail = pack.type === 'crew'
+      ? `Camiseta + sudadera por persona · ${r.extra?.sides ?? 2} cara(s)`
+      : `${r.extra?.sides ?? 2} cara(s) de impresión`;
     rows.push({
-      concepto: r.pack,
-      detalle,
-      unit: r.pvp_unitario,
-      qty: r.cantidad,
+      concept: r.pack,
+      detail,
+      unit: r.unit_price,
+      qty: r.quantity,
       subtotal: r.subtotal
     });
   }
-  if (r.recargos > 0) {
-    const partes = [];
-    if (r.cant_4xl > 0) partes.push(`${r.cant_4xl} × 4XL`);
-    if (r.cant_5xl > 0) partes.push(`${r.cant_5xl} × 5XL+`);
+  if (r.surcharges > 0) {
+    const parts = [];
+    if (r.qty_4xl > 0) parts.push(`${r.qty_4xl} × 4XL`);
+    if (r.qty_5xl > 0) parts.push(`${r.qty_5xl} × 5XL+`);
     rows.push({
       cls: 'surcharge',
-      concepto: 'Recargo tallas grandes',
-      detalle: partes.join(' · ') + ' · facturado al cliente',
-      subtotal: r.recargos
+      concept: 'Recargo tallas grandes',
+      detail: parts.join(' · ') + ' · facturado al cliente',
+      subtotal: r.surcharges
     });
   }
-  if (r.extras_sin_iva > 0) {
-    const e = r.extras_detalle || {};
-    const iva = CFG.parametros.iva || 0;
+  if (r.extras_no_vat > 0) {
+    const e = r.extras_detail || {};
+    const vat = CFG.parameters.vat || 0;
     const items = [
-      { k: 'nombres',       label: 'Nombre',        unit: CFG.parametros.extra_nombre_eur,      uniLabel: 'ud'    },
-      { k: 'mangas_cortas', label: 'Manga corta',   unit: CFG.parametros.extra_manga_corta_eur, uniLabel: 'manga' },
-      { k: 'mangas_largas', label: 'Manga larga',   unit: CFG.parametros.extra_manga_larga_eur, uniLabel: 'manga' }
+      { k: 'names',         label: 'Nombre',      unit: CFG.parameters.extra_name_eur,         unitLabel: 'ud'    },
+      { k: 'short_sleeves', label: 'Manga corta', unit: CFG.parameters.extra_short_sleeve_eur, unitLabel: 'manga' },
+      { k: 'long_sleeves',  label: 'Manga larga', unit: CFG.parameters.extra_long_sleeve_eur,  unitLabel: 'manga' }
     ];
     for (const it of items) {
-      const cant = e[it.k] || 0;
-      if (cant === 0) continue;
-      const unitInc = (it.unit || 0) * (1 + iva);
+      const qty = e[it.k] || 0;
+      if (qty === 0) continue;
+      const unitInc = (it.unit || 0) * (1 + vat);
       rows.push({
-        concepto: it.label,
-        detalle: `${fmtEur(it.unit || 0)}/${it.uniLabel} sin IVA · extra opcional`,
+        concept: it.label,
+        detail: `${formatEur(it.unit || 0)}/${it.unitLabel} sin IVA · extra opcional`,
         unit: unitInc,
-        qty: cant,
-        subtotal: cant * unitInc
+        qty,
+        subtotal: qty * unitInc
       });
     }
   }
   return rows;
 }
 
-function construirComposicionMeta(r) {
-  const pack = CFG.packs[estado.packId];
+function buildCompositionMeta(r) {
+  const pack = CFG.packs[state.packId];
   const meta = [
     { label: 'Pack', value: r.pack }
   ];
-  if (pack.tipo === 'pena') {
-    const cap = r.extra?.capucha === 'con_capucha' ? 'URBAN (con capucha)' : 'CLASICA (sin capucha)';
-    meta.push({ label: 'Modelo sudadera', value: cap });
-    meta.push({ label: 'Caras impresión', value: `${r.extra?.caras ?? 2} cara${(r.extra?.caras ?? 2) > 1 ? 's' : ''}` });
-  } else if (pack.tipo === 'individual') {
-    const m = CFG.modelos_roly[pack.modelo];
-    meta.push({ label: 'Modelo', value: `${m.nombre} (${pack.modelo})` });
-    meta.push({ label: 'Caras impresión', value: `${r.extra?.caras ?? 2} cara${(r.extra?.caras ?? 2) > 1 ? 's' : ''}` });
-  } else if (pack.tipo === 'mixto') {
-    meta.push({ label: 'CLASICA / URBAN', value: `${r.desglose[0].cantidad} / ${r.desglose[1].cantidad}` });
-    meta.push({ label: 'Caras impresión', value: `${r.caras} cara${r.caras > 1 ? 's' : ''}` });
-  } else if (pack.tipo === 'personalizado') {
-    const lineasResumen = r.desglose
-      .filter(d => d.cantidad > 0)
-      .map(d => `${d.cantidad} × ${d.modelo} (${d.caras}c)`)
+  if (pack.type === 'crew') {
+    const hood = r.extra?.hood === 'with_hood' ? 'URBAN (con capucha)' : 'CLASICA (sin capucha)';
+    meta.push({ label: 'Modelo sudadera', value: hood });
+    meta.push({ label: 'Caras impresión', value: `${r.extra?.sides ?? 2} cara${(r.extra?.sides ?? 2) > 1 ? 's' : ''}` });
+  } else if (pack.type === 'single') {
+    const m = CFG.roly_models[pack.model];
+    meta.push({ label: 'Modelo', value: `${m.name} (${pack.model})` });
+    meta.push({ label: 'Caras impresión', value: `${r.extra?.sides ?? 2} cara${(r.extra?.sides ?? 2) > 1 ? 's' : ''}` });
+  } else if (pack.type === 'mixed') {
+    meta.push({ label: 'CLASICA / URBAN', value: `${r.breakdown[0].quantity} / ${r.breakdown[1].quantity}` });
+    meta.push({ label: 'Caras impresión', value: `${r.sides} cara${r.sides > 1 ? 's' : ''}` });
+  } else if (pack.type === 'custom') {
+    const lineSummary = r.breakdown
+      .filter(d => d.quantity > 0)
+      .map(d => `${d.quantity} × ${d.model} (${d.sides}c)`)
       .join(' · ');
-    meta.push({ label: 'Líneas', value: lineasResumen || '—' });
-    meta.push({ label: 'Total prendas', value: String(r.cantidad_total) });
+    meta.push({ label: 'Líneas', value: lineSummary || '—' });
+    meta.push({ label: 'Total prendas', value: String(r.total_quantity) });
   }
-  meta.push({ label: 'Tallas con recargo', value: `${r.cant_4xl + r.cant_5xl} (${r.cant_4xl} × 4XL · ${r.cant_5xl} × 5XL+)` });
-  meta.push({ label: 'Tramo aplicado', value: r.tramo });
+  meta.push({ label: 'Tallas con recargo', value: `${r.qty_4xl + r.qty_5xl} (${r.qty_4xl} × 4XL · ${r.qty_5xl} × 5XL+)` });
+  meta.push({ label: 'Tramo aplicado', value: r.tier });
   return meta;
 }
 
-function calcularTiempoTotal(r) {
-  // Reconstruimos el tiempo a partir de minutos base × cantidad × tramo.
-  // No es exacto al cálculo interno pero da una estimación útil al usuario.
-  const p = CFG.parametros;
-  const tramo = CFG.tramos.find(t => t.etiqueta === r.tramo);
-  const reduc = tramo ? tramo.reduccion_tiempo : 0;
+function estimateTotalTime(r) {
+  // We reconstruct the time from base minutes × quantity × tier.
+  // Not exact to the internal calculation but a useful estimate.
+  const p = CFG.parameters;
+  const tier = CFG.tiers.find(t => t.label === r.tier);
+  const reduction = tier ? tier.time_reduction : 0;
 
-  // En personalizado cada línea puede tener caras distintas.
-  if (r.es_personalizado) {
+  // In custom each line can have different sides.
+  if (r.is_custom) {
     let total = 0;
-    for (const d of r.desglose || []) {
-      const base = d.caras === 2 ? p.minutos_2caras_base : p.minutos_1cara_base;
-      total += d.cantidad * base * (1 - reduc);
+    for (const d of r.breakdown || []) {
+      const base = d.sides === 2 ? p.minutes_two_sides_base : p.minutes_one_side_base;
+      total += d.quantity * base * (1 - reduction);
     }
     return total;
   }
 
-  const cantidad = r.es_mixto ? r.cantidad_total : r.cantidad;
-  // Para pena son dos prendas por pack
-  const pack = CFG.packs[estado.packId];
-  const prendas = pack && pack.tipo === 'pena' ? cantidad * 2 : cantidad;
-  const caras = r.es_mixto ? r.caras : (r.extra?.caras ?? 2);
-  const base = caras === 2 ? p.minutos_2caras_base : p.minutos_1cara_base;
-  return prendas * base * (1 - reduc);
+  const quantity = r.is_mixed ? r.total_quantity : r.quantity;
+  // For crew there are two garments per pack
+  const pack = CFG.packs[state.packId];
+  const garments = pack && pack.type === 'crew' ? quantity * 2 : quantity;
+  const sides = r.is_mixed ? r.sides : (r.extra?.sides ?? 2);
+  const base = sides === 2 ? p.minutes_two_sides_base : p.minutes_one_side_base;
+  return garments * base * (1 - reduction);
 }
 
-function formatearTiempo(minutos) {
-  if (!minutos || isNaN(minutos)) return '—';
-  const h = Math.floor(minutos / 60);
-  const m = Math.round(minutos % 60);
+function formatTime(minutes) {
+  if (!minutes || isNaN(minutes)) return '—';
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
   if (h <= 0) return `${m}m`;
   return `${h}h ${m}m`;
 }
 
-function copiarResumen() {
-  const r = ultimoResultado;
+function copySummary() {
+  const r = lastResult;
   if (!r) return;
-  const cantidad = r.es_mixto ? r.cantidad_total : r.cantidad;
-  const lineas = [
-    `${r.pack} · ${r.tramo}`,
-    `Cantidad: ${cantidad}`,
-    `Total IVA inc.: ${fmtEur(r.total_iva_inc)}`,
-    `Base sin IVA: ${fmtEur(r.base_venta)}`,
-    `IVA (${fmtPct(CFG.parametros.iva)}): ${fmtEur(r.iva)}`
+  const quantity = r.is_mixed ? r.total_quantity : r.quantity;
+  const lines = [
+    `${r.pack} · ${r.tier}`,
+    `Cantidad: ${quantity}`,
+    `Total IVA inc.: ${formatEur(r.total_vat_inc)}`,
+    `Base sin IVA: ${formatEur(r.sale_base)}`,
+    `IVA (${formatPct(CFG.parameters.vat)}): ${formatEur(r.vat)}`
   ];
-  if (r.recargos > 0) {
-    lineas.push(`Recargo tallas grandes: ${fmtEur(r.recargos)} (${r.cant_4xl} × 4XL · ${r.cant_5xl} × 5XL+)`);
+  if (r.surcharges > 0) {
+    lines.push(`Recargo tallas grandes: ${formatEur(r.surcharges)} (${r.qty_4xl} × 4XL · ${r.qty_5xl} × 5XL+)`);
   }
-  if (r.extras_sin_iva > 0) {
-    const e = r.extras_detalle || {};
-    const partes = [];
-    if (e.nombres)        partes.push(`${e.nombres} nombre${e.nombres > 1 ? 's' : ''}`);
-    if (e.mangas_cortas)  partes.push(`${e.mangas_cortas} manga${e.mangas_cortas > 1 ? 's' : ''} corta${e.mangas_cortas > 1 ? 's' : ''}`);
-    if (e.mangas_largas)  partes.push(`${e.mangas_largas} manga${e.mangas_largas > 1 ? 's' : ''} larga${e.mangas_largas > 1 ? 's' : ''}`);
-    lineas.push(`Extras opcionales (sin IVA): ${fmtEur(r.extras_sin_iva)} (${partes.join(' · ')})`);
+  if (r.extras_no_vat > 0) {
+    const e = r.extras_detail || {};
+    const parts = [];
+    if (e.names)         parts.push(`${e.names} nombre${e.names > 1 ? 's' : ''}`);
+    if (e.short_sleeves) parts.push(`${e.short_sleeves} manga${e.short_sleeves > 1 ? 's' : ''} corta${e.short_sleeves > 1 ? 's' : ''}`);
+    if (e.long_sleeves)  parts.push(`${e.long_sleeves} manga${e.long_sleeves > 1 ? 's' : ''} larga${e.long_sleeves > 1 ? 's' : ''}`);
+    lines.push(`Extras opcionales (sin IVA): ${formatEur(r.extras_no_vat)} (${parts.join(' · ')})`);
   }
-  navigator.clipboard.writeText(lineas.join('\n')).catch(() => {});
+  navigator.clipboard.writeText(lines.join('\n')).catch(() => {});
 }
 
 function escapeHTML(s) {
@@ -1382,45 +1385,45 @@ function escapeHTML(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function resetear() {
-  if (estado.packId) renderInputsPack(estado.packId);
+function resetForm() {
+  if (state.packId) renderPackInputs(state.packId);
   el('cant_4xl').value = '0';
   el('cant_5xl').value = '0';
   el('cant_nombres').value = '0';
   el('cant_mangas_cortas').value = '0';
   el('cant_mangas_largas').value = '0';
   hide('error-msg');
-  recalcularPreview();
+  recomputePreview();
 }
 
-function volverASeleccion() {
-  estado.packId = null;
+function backToSelection() {
+  state.packId = null;
   hide('error-msg');
   document.querySelectorAll('.pack-card').forEach(card => card.classList.remove('is-selected'));
-  irAPantalla('paso1');
+  goToScreen('paso1');
 }
 
 // ============================================================
-// Recargar config desde NAS
+// Reload config from the NAS
 // ============================================================
 
-async function recargarConfig() {
-  if (estado.esAdmin) {
+async function reloadConfig() {
+  if (state.isAdmin) {
     const ok = confirm('Tienes el modo admin abierto con cambios sin guardar. ¿Recargar de todos modos? Se perderán tus cambios.');
     if (!ok) return;
-    cerrarAdmin();
+    closeAdmin();
   }
-  await cargarConfigYMostrarApp();
+  await loadConfigAndShowApp();
 }
 
 // ============================================================
-// Modo administrador
+// Admin mode
 // ============================================================
 
-async function abrirAdmin() {
+async function openAdmin() {
   show('admin-overlay');
-  if (estado.esAdmin) {
-    await mostrarEditorAdmin();
+  if (state.isAdmin) {
+    await showAdminEditor();
   } else {
     show('admin-login');
     hide('admin-editor');
@@ -1428,54 +1431,55 @@ async function abrirAdmin() {
   }
 }
 
-function cerrarAdmin() {
+function closeAdmin() {
   hide('admin-overlay');
   hide('admin-login-error');
   el('admin-clave').value = '';
 }
 
-async function loginAdmin() {
-  const clave = el('admin-clave').value;
-  // La clave admin no viaja al renderer: la verificación ocurre en main
-  // (timing-safe). Así DevTools no puede leer la clave del CFG cargado.
-  const r = await window.packprice.verificarAdmin({
-    ruta: SETTINGS.ruta_config,
-    clave
+async function adminLogin() {
+  const password = el('admin-clave').value;
+  // The admin password never travels to the renderer: verification
+  // happens in main (timing-safe). So DevTools cannot read the
+  // password from the loaded CFG.
+  const r = await window.packprice.verifyAdminPassword({
+    ruta: SETTINGS.config_path,
+    clave: password
   });
   if (r && r.ok && r.valida) {
-    estado.esAdmin = true;
+    state.isAdmin = true;
     el('btn-admin-toggle').innerHTML = '<svg class="icon"><use href="#i-lock"/></svg> Admin activo';
     el('btn-admin-toggle').classList.remove('btn-secondary');
     el('btn-admin-toggle').classList.add('btn-primary');
     hide('admin-login-error');
     el('admin-clave').value = '';
-    await mostrarEditorAdmin();
+    await showAdminEditor();
   } else {
     show('admin-login-error');
   }
 }
 
-async function mostrarEditorAdmin() {
+async function showAdminEditor() {
   hide('admin-login');
   show('admin-editor');
 
   CFG_BACKUP = deepClone(CFG);
-  infoConfigAlAbrirAdmin = await window.packprice.infoConfig(SETTINGS.ruta_config);
-  actualizarFooterAdmin();
+  adminConfigInfoAtOpen = await window.packprice.getConfigInfo(SETTINGS.config_path);
+  updateAdminFooter();
 
-  mostrarAdminTab(estado.adminTab);
+  showAdminTab(state.adminTab);
 }
 
-function actualizarFooterAdmin() {
+function updateAdminFooter() {
   const info = el('admin-foot-info');
   if (!info) return;
-  const fecha = CFG.fecha_actualizacion || '—';
-  const por = CFG.modificado_por || '—';
-  info.textContent = `Última escritura: ${fecha} · por ${por}`;
+  const date = CFG.updated_at || '—';
+  const by = CFG.modified_by || '—';
+  info.textContent = `Última escritura: ${date} · por ${by}`;
 }
 
-function mostrarAdminTab(tab, opts = {}) {
-  estado.adminTab = tab;
+function showAdminTab(tab, opts = {}) {
+  state.adminTab = tab;
   document.querySelectorAll('.admin-nav__item').forEach(t => {
     t.classList.toggle('is-active', t.dataset.tab === tab);
   });
@@ -1485,23 +1489,23 @@ function mostrarAdminTab(tab, opts = {}) {
 
   const meta = ADMIN_TAB_META[tab];
   if (meta) {
-    const titulo = el('admin-form-title');
+    const title = el('admin-form-title');
     const desc = el('admin-form-desc');
-    if (titulo) titulo.textContent = meta.titulo;
+    if (title) title.textContent = meta.title;
     if (desc) desc.textContent = meta.desc;
   }
 
-  // Preservar scroll al re-renderizar tras una acción (añadir/eliminar
-  // fila): si no, el contenedor del modal salta arriba en cada cambio.
+  // Preserve scroll when re-rendering after an action (add/remove
+  // row): otherwise the modal container jumps to the top each time.
   const scroller = document.querySelector('.modal__body');
   const scrollPrev = (opts.preserveScroll && scroller) ? scroller.scrollTop : null;
 
   const cont = el('admin-tab-content');
 
-  // Auditoría: contenido async, lo cargamos por IPC.
-  if (tab === 'auditoria') {
+  // Audit: async content, loaded via IPC.
+  if (tab === 'audit') {
     cont.innerHTML = '<p class="hint">Cargando auditoría…</p>';
-    window.packprice.listAuditEntries({ ruta: SETTINGS.ruta_config, limit: 200 })
+    window.packprice.listAuditEntries({ ruta: SETTINGS.config_path, limit: 200 })
       .then((r) => {
         cont.innerHTML = (r && r.ok)
           ? renderAuditTab(r.entries || [])
@@ -1517,23 +1521,23 @@ function mostrarAdminTab(tab, opts = {}) {
   cont.innerHTML = renderAdminTabContent(CFG, tab);
 
   cont.querySelectorAll('input[data-cfg-path]').forEach(input => {
-    input.addEventListener('change', () => actualizarConfigDesdeInput(CFG, input));
+    input.addEventListener('change', () => applyConfigInput(CFG, input));
   });
 
-  // Acciones de fila (añadir/eliminar tramo o modelo). Tras la mutación
-  // re-renderizamos manteniendo la pestaña y el scroll.
-  cont.querySelectorAll('[data-accion]').forEach(btn => {
+  // Row actions (add/remove tier or model). After the mutation we
+  // re-render keeping the tab and the scroll.
+  cont.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const result = ejecutarAccionAdmin(CFG, btn.dataset);
+      const result = runAdminAction(CFG, btn.dataset);
       if (result && result.error) {
-        await window.packprice.mostrarError({
+        await window.packprice.showError({
           titulo: 'Acción no permitida',
           mensaje: result.error
         });
         return;
       }
       if (result && result.dirty) {
-        mostrarAdminTab(tab, { preserveScroll: true });
+        showAdminTab(tab, { preserveScroll: true });
       }
     });
   });
@@ -1543,98 +1547,98 @@ function mostrarAdminTab(tab, opts = {}) {
   }
 }
 
-// Pequeño escape sólo para inyectar mensajes de error en el HTML
-// asíncrono. No depende de format.js para no introducir importaciones
-// circulares en una función defensiva.
+// Small escape just to inject error messages into the async HTML.
+// Does not depend on format.js to avoid circular imports in a
+// defensive function.
 function escAttr(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-async function guardarConfigEnNAS() {
-  CFG.fecha_actualizacion = new Date().toLocaleString('es-ES');
-  CFG.modificado_por = SETTINGS.nombre_usuario;
+async function saveConfigToNas() {
+  CFG.updated_at = new Date().toLocaleString('es-ES');
+  CFG.modified_by = SETTINGS.user_name;
 
-  const datos = {
-    ruta: SETTINGS.ruta_config,
+  const payload = {
+    ruta: SETTINGS.config_path,
     configNuevo: CFG,
-    infoEsperada: infoConfigAlAbrirAdmin
+    infoEsperada: adminConfigInfoAtOpen
   };
 
-  // Diff preview: muestra al admin exactamente qué va a cambiar antes
-  // de escribir. Si no hay cambios reales, avisa y aborta.
-  const confirmado = await mostrarDiffPreview(datos);
-  if (!confirmado) return;
+  // Diff preview: shows the admin exactly what will change before
+  // writing. If there are no real changes, warn and abort.
+  const confirmed = await showDiffPreview(payload);
+  if (!confirmed) return;
 
-  const r = await window.packprice.guardarConfig(datos);
+  const r = await window.packprice.writeConfig(payload);
 
   if (r.ok) {
-    infoConfigAlAbrirAdmin = r.info;
+    adminConfigInfoAtOpen = r.info;
     CFG_BACKUP = deepClone(CFG);
-    await window.packprice.mostrarInfo({
+    await window.packprice.showInfo({
       titulo: 'Guardado',
       mensaje: 'Cambios guardados correctamente en el NAS',
       detalle: r.backupPath ? `Backup creado en:\n${r.backupPath}` : ''
     });
-    inicializarApp();
-    actualizarFooterAdmin();
+    initApp();
+    updateAdminFooter();
     return;
   }
 
   if (r.conflicto) {
-    await resolverConflictoAdmin(r);
+    await resolveAdminConflict(r);
     return;
   }
 
-  await window.packprice.mostrarError({
+  await window.packprice.showError({
     titulo: 'Error al guardar',
     mensaje: 'No se pudo guardar el archivo',
     detalle: r.error || 'Error desconocido'
   });
 }
 
-async function resolverConflictoAdmin(respuestaConflicto) {
-  const respuesta = await window.packprice.confirmarConflicto({
-    modificadoPor: respuestaConflicto.modificadoPor,
-    fechaActualizacion: respuestaConflicto.fechaActualizacion
+async function resolveAdminConflict(conflictResponse) {
+  const response = await window.packprice.confirmConflict({
+    modificadoPor: conflictResponse.modificadoPor,
+    fechaActualizacion: conflictResponse.fechaActualizacion
   });
 
-  if (respuesta === 0) {
-    const r2 = await window.packprice.guardarConfigForzado({
-      ruta: SETTINGS.ruta_config,
+  if (response === 0) {
+    const r2 = await window.packprice.forceWriteConfig({
+      ruta: SETTINGS.config_path,
       configNuevo: CFG
     });
     if (r2.ok) {
-      infoConfigAlAbrirAdmin = r2.info;
+      adminConfigInfoAtOpen = r2.info;
       CFG_BACKUP = deepClone(CFG);
-      await window.packprice.mostrarInfo({
+      await window.packprice.showInfo({
         titulo: 'Guardado (forzado)',
         mensaje: 'Cambios guardados sobrescribiendo la versión del compañero.'
       });
-      inicializarApp();
+      initApp();
     } else {
-      await window.packprice.mostrarError({
+      await window.packprice.showError({
         titulo: 'Error',
         mensaje: 'No se pudo guardar',
         detalle: r2.error
       });
     }
-  } else if (respuesta === 1) {
-    cerrarAdmin();
-    estado.esAdmin = false;
+  } else if (response === 1) {
+    closeAdmin();
+    state.isAdmin = false;
     el('btn-admin-toggle').innerHTML = '<svg class="icon"><use href="#i-lock"/></svg> Admin';
     el('btn-admin-toggle').classList.remove('btn-primary');
     el('btn-admin-toggle').classList.add('btn-secondary');
-    await cargarConfigYMostrarApp();
+    await loadConfigAndShowApp();
   }
 }
 
-function cancelarCambiosAdmin() {
+function cancelAdminChanges() {
   if (CFG_BACKUP) {
     CFG = deepClone(CFG_BACKUP);
-    mostrarAdminTab(estado.adminTab);
-    inicializarApp();
+    showAdminTab(state.adminTab);
+    initApp();
   }
 }
 
@@ -1646,15 +1650,15 @@ function cancelarCambiosAdmin() {
 // cancel or there are no changes. Always reuses the same overlay
 // element; the actual buttons are wired here for each call so the
 // promise resolves cleanly.
-async function mostrarDiffPreview(datos) {
+async function showDiffPreview(payload) {
   let preview;
   try {
     preview = await window.packprice.previewConfigDiff({
-      ruta: datos.ruta,
-      configNuevo: datos.configNuevo
+      ruta: payload.ruta,
+      configNuevo: payload.configNuevo
     });
   } catch (err) {
-    await window.packprice.mostrarError({
+    await window.packprice.showError({
       titulo: 'No se pudo generar la previsualización',
       mensaje: err.message || 'Error desconocido'
     });
@@ -1662,23 +1666,23 @@ async function mostrarDiffPreview(datos) {
   }
 
   if (!preview || !preview.ok) {
-    await window.packprice.mostrarError({
+    await window.packprice.showError({
       titulo: 'No se pudo generar la previsualización',
       mensaje: (preview && preview.error) || 'Error desconocido'
     });
     return false;
   }
 
-  const cambios = preview.cambios || [];
-  if (cambios.length === 0) {
-    await window.packprice.mostrarInfo({
+  const changes = preview.changes || [];
+  if (changes.length === 0) {
+    await window.packprice.showInfo({
       titulo: 'Sin cambios',
       mensaje: 'No hay nada que guardar: el config actual ya coincide con el del NAS.'
     });
     return false;
   }
 
-  el('diff-body').innerHTML = renderDiffPreview(cambios);
+  el('diff-body').innerHTML = renderDiffPreview(changes);
   show('diff-overlay');
 
   return new Promise((resolve) => {
@@ -1711,7 +1715,7 @@ async function mostrarDiffPreview(datos) {
 // ============================================================
 // Logs viewer modal
 // ============================================================
-async function abrirLogs() {
+async function openLogs() {
   el('logs-body').innerHTML = '<p class="hint">Cargando…</p>';
   show('logs-overlay');
   try {
@@ -1726,25 +1730,25 @@ async function abrirLogs() {
   }
 }
 
-function cerrarLogs() {
+function closeLogs() {
   hide('logs-overlay');
 }
 
 // ============================================================
 // Quote history modal
 // ============================================================
-async function abrirHistorial() {
+async function openHistory() {
   show('history-overlay');
   const search = el('history-search');
   if (search) search.value = '';
-  await refrescarHistorial();
+  await refreshHistory();
 }
 
-function cerrarHistorial() {
+function closeHistory() {
   hide('history-overlay');
 }
 
-async function refrescarHistorial() {
+async function refreshHistory() {
   const body = el('history-body');
   const search = el('history-search');
   const query = search ? search.value : '';
@@ -1770,7 +1774,7 @@ async function refrescarHistorial() {
 
 async function onHistoryAction(action, id) {
   if (action === 'delete') {
-    const ok = await window.packprice.confirmar({
+    const ok = await window.packprice.confirm({
       titulo: 'Eliminar presupuesto',
       mensaje: `¿Eliminar el presupuesto ${id}?`,
       detalle: 'Esta acción no se puede deshacer.',
@@ -1779,18 +1783,18 @@ async function onHistoryAction(action, id) {
     });
     if (ok !== 0) return;
     await window.packprice.deleteQuote(id);
-    await refrescarHistorial();
+    await refreshHistory();
     return;
   }
   if (action === 'open') {
     const r = await window.packprice.getQuote(id);
     if (!r || !r.ok || !r.quote) return;
-    ultimoResultado = r.quote.resultado || r.quote;
-    cerrarHistorial();
-    if (typeof renderResultado === 'function') {
-      try { renderResultado(ultimoResultado); } catch (_) {}
+    lastResult = r.quote.result || r.quote;
+    closeHistory();
+    if (typeof renderResult === 'function') {
+      try { renderResult(lastResult); } catch (_) {}
     }
-    await window.packprice.mostrarInfo({
+    await window.packprice.showInfo({
       titulo: 'Presupuesto cargado',
       mensaje: `Presupuesto ${id} reabierto en pantalla.`
     });
@@ -1801,145 +1805,145 @@ async function onHistoryAction(action, id) {
     if (!r || !r.ok || !r.quote) return;
     const out = await window.packprice.exportPdf({
       quote: r.quote,
-      empresa: CFG && CFG.empresa,
-      presupuesto: CFG && CFG.presupuesto,
+      company: CFG && CFG.company,
+      quote_settings: CFG && CFG.quote_settings,
       defaultName: `${r.quote.id}.pdf`
     });
     if (out && out.cancelado) return;
     if (!out || !out.ok) {
-      await window.packprice.mostrarError({
+      await window.packprice.showError({
         titulo: 'Error al exportar',
         mensaje: (out && out.error) || 'Error desconocido'
       });
       return;
     }
-    await window.packprice.mostrarInfo({
+    await window.packprice.showInfo({
       titulo: 'PDF exportado',
       mensaje: `Guardado en:\n${out.ruta}`
     });
   }
 }
 
-async function guardarPresupuesto() {
-  if (!ultimoResultado) {
-    await window.packprice.mostrarError({
+async function saveCurrentQuote() {
+  if (!lastResult) {
+    await window.packprice.showError({
       titulo: 'Nada que guardar',
       mensaje: 'Calcula un presupuesto antes de guardarlo.'
     });
     return;
   }
-  const draft = buildQuoteDraft(ultimoResultado, {
-    usuario: SETTINGS.nombre_usuario,
+  const draft = buildQuoteDraft(lastResult, {
+    user: SETTINGS.user_name,
     configVersion: CFG && CFG.version,
-    packId: estado.packId
+    packId: state.packId
   });
   const r = await window.packprice.saveQuote(draft);
   if (!r || !r.ok) {
-    await window.packprice.mostrarError({
+    await window.packprice.showError({
       titulo: 'No se pudo guardar',
       mensaje: (r && r.error) || 'Error desconocido'
     });
     return;
   }
-  await window.packprice.mostrarInfo({
+  await window.packprice.showInfo({
     titulo: 'Presupuesto guardado',
     mensaje: `Asignado el ID ${r.quote.id}.`,
     detalle: 'Disponible en el botón “Historial” del menú superior.'
   });
 }
 
-async function exportarPresupuestoPdf() {
-  if (!ultimoResultado) {
-    await window.packprice.mostrarError({
+async function exportQuotePdf() {
+  if (!lastResult) {
+    await window.packprice.showError({
       titulo: 'Nada que exportar',
       mensaje: 'Calcula un presupuesto antes de exportarlo.'
     });
     return;
   }
 
-  // The PDF needs a quote object with id + fecha. If the user hasn't
+  // The PDF needs a quote object with id + date. If the user hasn't
   // saved it yet, persist it now so the PDF and the history are
   // consistent (same id printed on the document and stored locally).
   let quote;
-  if (ultimoResultado.id && ultimoResultado.fecha) {
-    quote = ultimoResultado;
+  if (lastResult.id && lastResult.date) {
+    quote = lastResult;
   } else {
-    const draft = buildQuoteDraft(ultimoResultado, {
-      usuario: SETTINGS.nombre_usuario,
+    const draft = buildQuoteDraft(lastResult, {
+      user: SETTINGS.user_name,
       configVersion: CFG && CFG.version,
-      packId: estado.packId
+      packId: state.packId
     });
     const r = await window.packprice.saveQuote(draft);
     if (!r || !r.ok) {
-      await window.packprice.mostrarError({
+      await window.packprice.showError({
         titulo: 'No se pudo preparar el PDF',
         mensaje: (r && r.error) || 'Error al guardar el presupuesto previo a exportar.'
       });
       return;
     }
     quote = r.quote;
-    // Replace ultimoResultado so subsequent clicks reuse the saved id.
-    ultimoResultado = quote;
+    // Replace lastResult so subsequent clicks reuse the saved id.
+    lastResult = quote;
   }
 
   const r = await window.packprice.exportPdf({
     quote,
-    empresa: CFG && CFG.empresa,
-    presupuesto: CFG && CFG.presupuesto,
+    company: CFG && CFG.company,
+    quote_settings: CFG && CFG.quote_settings,
     defaultName: `${quote.id}.pdf`
   });
   if (r && r.cancelado) return;
   if (!r || !r.ok) {
-    await window.packprice.mostrarError({
+    await window.packprice.showError({
       titulo: 'Error al exportar',
       mensaje: (r && r.error) || 'Error desconocido'
     });
     return;
   }
-  await window.packprice.mostrarInfo({
+  await window.packprice.showInfo({
     titulo: 'PDF exportado',
     mensaje: `Guardado en:\n${r.ruta}`
   });
 }
 
 // ============================================================
-// Modal Ajustes locales
+// Local settings modal
 // ============================================================
 
-function abrirAjustes() {
-  el('aj-nombre').value = SETTINGS.nombre_usuario || '';
-  el('aj-ruta').value = SETTINGS.ruta_config || '';
-  // Toggles: persistencia local en localStorage como placeholder hasta
-  // tener el campo oficial en settings.json (ver PLAN_UI §9).
-  const recordar = localStorage.getItem('pp:recordar-pack') === '1';
-  const mostrarIva = localStorage.getItem('pp:mostrar-iva') !== '0'; // por defecto sí
-  const tRec = el('aj-recordar-pack');
-  const tIva = el('aj-mostrar-iva');
-  if (tRec) tRec.checked = recordar;
-  if (tIva) tIva.checked = mostrarIva;
+function openSettings() {
+  el('aj-nombre').value = SETTINGS.user_name || '';
+  el('aj-ruta').value = SETTINGS.config_path || '';
+  // Toggles: local persistence in localStorage as a placeholder
+  // until there is an official field in settings.json (see PLAN_UI §9).
+  const remember = localStorage.getItem('pp:recordar-pack') === '1';
+  const showVat = localStorage.getItem('pp:mostrar-iva') !== '0'; // default yes
+  const tRemember = el('aj-recordar-pack');
+  const tVat = el('aj-mostrar-iva');
+  if (tRemember) tRemember.checked = remember;
+  if (tVat) tVat.checked = showVat;
   show('ajustes-overlay');
 }
 
-function cerrarAjustes() {
+function closeSettings() {
   hide('ajustes-overlay');
 }
 
-async function guardarAjustes() {
-  const nombre = el('aj-nombre').value.trim();
-  const ruta = el('aj-ruta').value.trim();
+async function saveSettings() {
+  const name = el('aj-nombre').value.trim();
+  const filePath = el('aj-ruta').value.trim();
 
-  if (!nombre || !ruta) {
-    await window.packprice.mostrarError({
+  if (!name || !filePath) {
+    await window.packprice.showError({
       titulo: 'Datos incompletos',
       mensaje: 'Indica nombre y ruta del config'
     });
     return;
   }
 
-  if (ruta !== SETTINGS.ruta_config) {
-    const r = await window.packprice.leerConfig(ruta);
+  if (filePath !== SETTINGS.config_path) {
+    const r = await window.packprice.readConfig(filePath);
     if (!r.ok) {
-      await window.packprice.mostrarError({
+      await window.packprice.showError({
         titulo: 'No se puede leer el archivo',
         mensaje: r.error
       });
@@ -1951,14 +1955,14 @@ async function guardarAjustes() {
   localStorage.setItem('pp:recordar-pack', el('aj-recordar-pack').checked ? '1' : '0');
   localStorage.setItem('pp:mostrar-iva',  el('aj-mostrar-iva').checked ? '1' : '0');
 
-  SETTINGS = { nombre_usuario: nombre, ruta_config: ruta };
-  await window.packprice.guardarSettings(SETTINGS);
-  cerrarAjustes();
-  await cargarConfigYMostrarApp();
+  SETTINGS = { user_name: name, config_path: filePath };
+  await window.packprice.writeSettings(SETTINGS);
+  closeSettings();
+  await loadConfigAndShowApp();
 }
 
 // ============================================================
 // Bootstrap
 // ============================================================
 
-document.addEventListener('DOMContentLoaded', arrancar);
+document.addEventListener('DOMContentLoaded', bootstrap);

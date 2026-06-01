@@ -1401,7 +1401,7 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
   color: color-mix(in srgb, var(--pack-color, var(--accent-primary)) 70%, var(--fg-secondary));
 }
 
-/* Filas editables (tramos / modelos) con botón eliminar */
+/* Editable rows (tiers / models) with a remove button */
 .admin-row {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);

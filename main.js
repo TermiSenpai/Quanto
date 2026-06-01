@@ -600,7 +600,7 @@ ipcMain.handle('logs:read-last', (event, lineLimit) => {
 ipcMain.handle('quotes:save', (event, draft) => {
   try {
     const saved = saveQuoteToHistory(SETTINGS_DIR, draft);
-    logger.info('quote saved', { id: saved.id, total: saved.total_iva_inc });
+    logger.info('quote saved', { id: saved.id, total: saved.totals && saved.totals.total_vat_inc });
     return { ok: true, quote: saved };
   } catch (err) {
     logger.error('quote save failed', { error: err.message });
