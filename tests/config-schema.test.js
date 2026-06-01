@@ -1,5 +1,5 @@
 // ============================================================
-// Tests · lib/config-schema.js (strict validator) — v3
+// Tests · lib/config-schema.js (strict validator) — v4
 // ============================================================
 // Goal: every "broken config" we worry about must produce a
 // message that names the offending field. Pure module — no fs,
@@ -53,6 +53,15 @@ describe('top-level shape', () => {
     expect(errors[0]).toMatch(/v2/);
     expect(errors[0]).toMatch(/migr/i);
   });
+
+  test('a v3 config is rejected up front (must migrate first)', () => {
+    const cfg = makeConfig();
+    cfg.version = '3.0.0';
+    const errors = collectConfigErrors(cfg);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/v3/);
+    expect(errors[0]).toMatch(/migr/i);
+  });
 });
 
 describe('parameters', () => {
@@ -61,6 +70,11 @@ describe('parameters', () => {
     delete cfg.parameters[key];
     const errors = collectConfigErrors(cfg);
     expect(errors.some(e => e.includes(`parameters.${key}`))).toBe(true);
+  });
+
+  test('default_target_margin and price_rounding_ending are required', () => {
+    expect(REQUIRED_PARAMETERS).toContain('default_target_margin');
+    expect(REQUIRED_PARAMETERS).toContain('price_rounding_ending');
   });
 
   test('rejects negative parameters', () => {
@@ -84,35 +98,94 @@ describe('parameters', () => {
     expect(errors.some(e => e.includes('labor_eur_hour') && /número/.test(e))).toBe(true);
   });
 
-  test('accepts a config without optional extras', () => {
+  test('rejects price_rounding_ending >= 1', () => {
     const cfg = makeConfig();
-    delete cfg.parameters.extra_name_eur;
-    delete cfg.parameters.extra_short_sleeve_eur;
-    delete cfg.parameters.extra_long_sleeve_eur;
-    expect(collectConfigErrors(cfg)).toEqual([]);
+    cfg.parameters.price_rounding_ending = 1.5;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /price_rounding_ending/.test(e))).toBe(true);
   });
 });
 
-describe('Roly models', () => {
-  test('reports missing required model', () => {
+describe('suppliers', () => {
+  test('rejects a missing suppliers section', () => {
     const cfg = makeConfig();
-    delete cfg.roly_models.URBAN;
+    delete cfg.suppliers;
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => e.includes('roly_models.URBAN'))).toBe(true);
+    expect(errors.some(e => /suppliers/.test(e))).toBe(true);
   });
 
-  test('rejects negative price', () => {
+  test('rejects a supplier without name', () => {
     const cfg = makeConfig();
-    cfg.roly_models.BEAGLE.price = -1;
+    cfg.suppliers.ROLY.name = '';
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => e.includes('BEAGLE.price') && /negativo/.test(e))).toBe(true);
+    expect(errors.some(e => /suppliers.ROLY.name/.test(e))).toBe(true);
+  });
+});
+
+describe('products', () => {
+  test('reports a product without suppliers', () => {
+    const cfg = makeConfig();
+    cfg.products.BEAGLE.suppliers = [];
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /products.BEAGLE.suppliers/.test(e))).toBe(true);
   });
 
-  test('rejects non-string ref', () => {
+  test('requires exactly one default supplier', () => {
     const cfg = makeConfig();
-    cfg.roly_models.BEAGLE.ref = 12345;
+    cfg.products.BEAGLE.suppliers[0].is_default = false;
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => e.includes('BEAGLE.ref'))).toBe(true);
+    expect(errors.some(e => /is_default/.test(e))).toBe(true);
+  });
+
+  test('rejects more than one default supplier', () => {
+    const cfg = makeConfig();
+    cfg.products.BEAGLE.suppliers.push({ supplier: 'ROLY', ref: 'Z', price: 2, min_order: 0, is_default: true });
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /is_default/.test(e))).toBe(true);
+  });
+
+  test('rejects a non-finite supplier price', () => {
+    const cfg = makeConfig();
+    cfg.products.BEAGLE.suppliers[0].price = 'free';
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /price/.test(e))).toBe(true);
+  });
+
+  test('reports a missing price entry per tier', () => {
+    const cfg = makeConfig();
+    delete cfg.products.BEAGLE.prices.two_sides.T1;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /products.BEAGLE.prices.two_sides.T1/.test(e))).toBe(true);
+  });
+
+  test('rejects a supplier referencing an unknown provider', () => {
+    const cfg = makeConfig();
+    cfg.products.BEAGLE.suppliers[0].supplier = 'GHOST';
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /GHOST/.test(e))).toBe(true);
+  });
+});
+
+describe('addons', () => {
+  test('rejects an addon without label', () => {
+    const cfg = makeConfig();
+    cfg.addons.name.label = '';
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /addons.name.label/.test(e))).toBe(true);
+  });
+
+  test('rejects a negative addon price', () => {
+    const cfg = makeConfig();
+    cfg.addons.name.price = -1;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /addons.name.price/.test(e))).toBe(true);
+  });
+
+  test('rejects applies_to that is not an array', () => {
+    const cfg = makeConfig();
+    cfg.addons.name.applies_to = 'all';
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /applies_to/.test(e))).toBe(true);
   });
 });
 
@@ -121,7 +194,7 @@ describe('tiers', () => {
     const cfg = makeConfig();
     cfg.tiers = [];
     const errors = collectConfigErrors(cfg);
-    expect(errors[0]).toMatch(/tiers/);
+    expect(errors.some(e => /tiers/.test(e))).toBe(true);
   });
 
   test('rejects overlapping tiers (descending order)', () => {
@@ -162,42 +235,49 @@ describe('packs', () => {
     const cfg = makeConfig();
     cfg.packs = {};
     const errors = collectConfigErrors(cfg);
-    expect(errors[0]).toMatch(/packs/);
+    expect(errors.some(e => /packs/.test(e))).toBe(true);
   });
 
-  test('reports missing price entry per tier on crew pack', () => {
+  test('rejects an invalid pricing_mode', () => {
     const cfg = makeConfig();
-    delete cfg.packs.crew_full.prices.without_hood.two_sides.T1;
+    cfg.packs.tshirts_only.pricing_mode = 'banana';
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /crew_full.prices.without_hood.two_sides.T1/.test(e))).toBe(true);
+    expect(errors.some(e => /banana/.test(e))).toBe(true);
   });
 
-  test('single pack with unknown model is flagged', () => {
+  test('reports a bundle price missing for a combo × tier', () => {
     const cfg = makeConfig();
-    cfg.packs.tshirts_only.model = 'UFO';
+    delete cfg.packs.crew_full.bundle_prices['without_hood|two_sides'].T1;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /crew_full.bundle_prices.without_hood\|two_sides.T1/.test(e))).toBe(true);
+  });
+
+  test('reports a missing bundle combo entirely', () => {
+    const cfg = makeConfig();
+    delete cfg.packs.crew_full.bundle_prices['with_hood|one_side'];
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /with_hood\|one_side/.test(e))).toBe(true);
+  });
+
+  test('components pack referencing an unknown product is flagged', () => {
+    const cfg = makeConfig();
+    cfg.packs.tshirts_only.components[0].product = 'UFO';
     const errors = collectConfigErrors(cfg);
     expect(errors.some(e => /UFO/.test(e))).toBe(true);
   });
 
-  test('mixed pack with broken reference_packs', () => {
+  test('maps_product pointing to an unknown product is flagged', () => {
     const cfg = makeConfig();
-    cfg.packs.hoodies_mixed.reference_packs.URBAN = 'no_existe';
+    cfg.packs.crew_full.options[0].maps_product.with_hood = 'NOPE';
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /no_existe/.test(e))).toBe(true);
+    expect(errors.some(e => /NOPE/.test(e))).toBe(true);
   });
 
-  test('custom pack with broken model reference', () => {
+  test('missing min_total is flagged', () => {
     const cfg = makeConfig();
-    cfg.packs.custom.reference_models.BEAGLE = 'fake_pack';
+    delete cfg.packs.tshirts_only.min_total;
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /fake_pack/.test(e))).toBe(true);
-  });
-
-  test('unknown pack type is flagged', () => {
-    const cfg = makeConfig();
-    cfg.packs.tshirts_only.type = 'banana';
-    const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /banana/.test(e))).toBe(true);
+    expect(errors.some(e => /min_total/.test(e))).toBe(true);
   });
 });
 
