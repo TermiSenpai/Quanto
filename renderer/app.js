@@ -1127,9 +1127,10 @@ function renderTierBar(quantity) {
 
 function runCalculation() {
   hide('error-msg');
-  const opt = collectInputs();
-
-  const result = calculate(opt);
+  // Use the safe collector (same as the live preview): a malformed or
+  // partial pack config yields null instead of an uncaught throw.
+  const opt = collectInputsSafe();
+  const result = opt ? calculate(opt) : null;
 
   if (!result || result.error) {
     el('error-msg').textContent = (result && result.error) || 'No se pudo calcular el precio.';
@@ -1320,7 +1321,6 @@ function renderResult(r) {
               <div class="kv-list__row"><span>Coste total</span><span class="text-mono">${formatEur(r.total_cost)}</span></div>
               <div class="kv-list__row"><span>Margen €</span><span class="text-mono">${formatEur(r.margin)}</span></div>
               <div class="kv-list__row"><span>Margen %</span><span class="text-mono" style="color: ${r.margin_pct >= 0.30 ? 'var(--success)' : 'var(--warning)'};">${formatPct(r.margin_pct)}</span></div>
-              ${r.unit_cost !== undefined ? `<div class="kv-list__row"><span>Coste unitario</span><span class="text-mono">${formatEur(r.unit_cost)}</span></div>` : ''}
             </div>
           </div>
         ` : ''}
