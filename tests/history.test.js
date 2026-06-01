@@ -13,7 +13,8 @@ import {
   getQuote,
   nextIdForYear,
   historyPathFor,
-  HISTORY_FILE_NAME
+  HISTORY_FILE_NAME,
+  MAX_QUOTE_BYTES
 } from '../lib/history.js';
 
 const dirs = [];
@@ -84,6 +85,23 @@ describe('saveQuote', () => {
     const dir = makeUserData();
     expect(() => saveQuote(dir, null)).toThrow();
     expect(() => saveQuote(dir, 'oops')).toThrow();
+    expect(() => saveQuote(dir, [])).toThrow();
+  });
+
+  test('rejects oversized drafts and does not write them', () => {
+    const dir = makeUserData();
+    const huge = { blob: 'x'.repeat(MAX_QUOTE_BYTES + 1) };
+    expect(() => saveQuote(dir, huge)).toThrow(/demasiado grande/);
+    // nothing was persisted
+    expect(listQuotes(dir)).toEqual([]);
+  });
+
+  test('saves a normal-sized draft right under the cap', () => {
+    const dir = makeUserData();
+    const ok = { note: 'y'.repeat(1000) };
+    const saved = saveQuote(dir, ok);
+    expect(saved.id).toBeDefined();
+    expect(listQuotes(dir)).toHaveLength(1);
   });
 
   test('correlative ids reset per year', () => {
