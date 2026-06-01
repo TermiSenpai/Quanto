@@ -1341,9 +1341,16 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
   color: var(--fg-muted);
   font-weight: 400;
 }
-.admin-grid input {
+.admin-grid input,
+.admin-grid select {
   width: 100%;
   margin-top: auto;   /* alinea inputs al borde inferior aunque la etiqueta tenga hint */
+}
+/* Casillas/radios dentro del grid no deben estirarse al 100% */
+.admin-grid input[type="checkbox"],
+.admin-grid input[type="radio"] {
+  width: auto;
+  margin-top: 0;
 }
 
 .admin-subhead {

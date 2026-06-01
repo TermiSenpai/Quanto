@@ -27,8 +27,8 @@ import {
 } from './calculo.js';
 import {
   renderAdminTabContent,
-  applyConfigInput,
-  runAdminAction
+  updateConfigFromInput,
+  executeAdminAction
 } from './admin.js';
 import {
   renderAuditTab,
@@ -72,10 +72,12 @@ function packMeta(pack) {
 }
 
 const ADMIN_TAB_META = {
-  parameters: { title: 'Parámetros de cálculo', desc: 'Variables que afectan al coste interno y al recargo de tallas grandes.' },
-  models:     { title: 'Modelos Roly',          desc: 'Precio base de cada prenda Roly. No incluye DTF ni mano de obra.' },
+  parameters: { title: 'Parámetros de cálculo', desc: 'Variables que afectan al coste interno, al recargo de tallas grandes y al PVP recomendado.' },
+  suppliers:  { title: 'Proveedores',           desc: 'Registro de proveedores que abastecen los productos.' },
+  products:   { title: 'Productos',             desc: 'Prendas del catálogo: proveedores, coste, margen y tabla de PVP.' },
+  addons:     { title: 'Complementos',          desc: 'Extras opcionales (nombre, mangas…) con su precio y a qué categorías aplican.' },
   tiers:      { title: 'Tramos por volumen',    desc: 'Rangos de unidades que activan cada tramo y su reducción de tiempo.' },
-  packs:      { title: 'Packs (PVP)',           desc: 'PVP final IVA incluido por tramo, capucha y caras.' },
+  packs:      { title: 'Packs',                 desc: 'Crea y edita packs: opciones, componentes y PVP por unidad o por componentes.' },
   audit:      { title: 'Auditoría',              desc: 'Quién cambió qué y cuándo, leído desde audit.log junto al config.' }
 };
 
@@ -1619,25 +1621,48 @@ function showAdminTab(tab, opts = {}) {
 
   cont.innerHTML = renderAdminTabContent(CFG, tab);
 
-  cont.querySelectorAll('input[data-cfg-path]').forEach(input => {
-    input.addEventListener('change', () => applyConfigInput(CFG, input));
+  // Plain field edits: inputs, selects and checkboxes carrying a
+  // data-cfg-path. These do not re-render (preserve cursor/scroll);
+  // the value is written straight into CFG.
+  cont.querySelectorAll('[data-cfg-path]').forEach(input => {
+    input.addEventListener('change', () => updateConfigFromInput(CFG, input));
   });
 
-  // Row actions (add/remove tier or model). After the mutation we
-  // re-render keeping the tab and the scroll.
+  // Builder actions: buttons (data-action) and live controls
+  // (data-action-change on radios/checkboxes/selects) that mutate the
+  // config structurally and need a re-render afterwards.
+  const runAction = async (dataset) => {
+    const result = executeAdminAction(CFG, dataset);
+    if (result && result.error) {
+      await window.packprice.showError({
+        titulo: 'Acción no permitida',
+        mensaje: result.error
+      });
+      // Re-render so a rejected toggle (e.g. a radio) snaps back.
+      showAdminTab(tab, { preserveScroll: true });
+      return;
+    }
+    if (result && result.dirty) {
+      showAdminTab(tab, { preserveScroll: true });
+    }
+  };
+
   cont.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const result = runAdminAction(CFG, btn.dataset);
-      if (result && result.error) {
-        await window.packprice.showError({
-          titulo: 'Acción no permitida',
-          mensaje: result.error
-        });
-        return;
-      }
-      if (result && result.dirty) {
-        showAdminTab(tab, { preserveScroll: true });
-      }
+    btn.addEventListener('click', () => runAction(btn.dataset));
+  });
+
+  cont.querySelectorAll('[data-action-change]').forEach(ctrl => {
+    ctrl.addEventListener('change', () => {
+      // Normalize into the dataset shape executeAdminAction expects.
+      runAction({
+        action: ctrl.dataset.actionChange,
+        id: ctrl.dataset.id,
+        idx: ctrl.dataset.idx,
+        vidx: ctrl.dataset.vidx,
+        cat: ctrl.dataset.cat,
+        value: ctrl.value,
+        checked: ctrl.type === 'checkbox' ? ctrl.checked : undefined
+      });
     });
   });
 
