@@ -113,7 +113,7 @@ that touch the same file.
 1. Read `PLAN_Calculadora.md` for the exact rule and a worked numeric example.
 2. Write/extend `tests/calculo.test.js` with the expected euro amount **first**.
 3. Implement as a **pure function** `(cfg, input) → result` — no DOM, no globals.
-4. Run `npm test`. Then smoke `npm run dev` with one case per pack type.
+4. Run `pnpm test`. Then smoke `pnpm dev` with one case per pack type.
 5. If you renamed identifiers, follow the English glossary in
    `planes/migracion-codigo-ingles.md` §4 — don't free-style names.
 
@@ -153,8 +153,8 @@ finishing a wave.
 
 A change is done only when **all** hold:
 
-- [ ] `npm test` is green (and new tests exist for calc/schema changes).
-- [ ] `npm run dev` smoke-tested per `CLAUDE.md` §12 (first run, crew pack T1
+- [ ] `pnpm test` is green (and new tests exist for calc/schema changes).
+- [ ] `pnpm dev` smoke-tested per `CLAUDE.md` §12 (first run, crew pack T1
       with/without hood, mixed pack two quantities, admin conflict).
 - [ ] No security invariant weakened (§1).
 - [ ] No domain numbers added to code.
@@ -190,7 +190,7 @@ If you catch yourself thinking any of these, pause:
 > Read `CLAUDE.md`, the relevant `ARCHITECTURE.md` section, and `PLAN_Calculadora.md`.
 > Use `Explore` to map the affected code, then `Plan` to design the change. Write
 > the failing Vitest tests first (exact euros from the plan), then the minimal
-> implementation as pure functions. Run `npm test` and smoke `npm run dev`.
+> implementation as pure functions. Run `pnpm test` and smoke `pnpm dev`.
 > Finish with a `code-reviewer` + `security-auditor` pass. Don't break any §1
 > invariant; ask if you think you need to.
 
@@ -201,7 +201,7 @@ If you catch yourself thinking any of these, pause:
 
 **Run a migration wave**
 > Read `planes/migracion-codigo-ingles.md`. Execute exactly one wave, scoped to
-> its file list and glossary. Keep the app green (`npm test` + smoke). Run the §5
+> its file list and glossary. Keep the app green (`pnpm test` + smoke). Run the §5
 > `git grep` checklist for that wave's keys before finishing. One PR, no
 > unrelated renames.
 

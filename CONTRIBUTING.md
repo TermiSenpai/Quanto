@@ -15,10 +15,10 @@ This file is the human-facing summary; the three above are authoritative.
 
 ```bash
 nvm use            # Node 22 (see .nvmrc)
-npm install
-npm run dev        # launch the app
-npm test           # vitest run
-npm run test:watch # vitest in watch mode
+pnpm install
+pnpm dev           # launch the app
+pnpm test          # vitest run
+pnpm test:watch    # vitest in watch mode
 ```
 
 The production `config.js` lives on the NAS and is **not** in this repo. On first
@@ -68,8 +68,8 @@ sanctioned choice — propose it in `CLAUDE.md` first, then add it.
 Use the PR template. A PR is ready when the **Definition of Done**
 (`AGENTS.md` §5) holds:
 
-- [ ] `npm test` green (new tests for calc/schema changes).
-- [ ] Smoke-tested via `npm run dev` (`CLAUDE.md` §8 checklist: first run, crew
+- [ ] `pnpm test` green (new tests for calc/schema changes).
+- [ ] Smoke-tested via `pnpm dev` (`CLAUDE.md` §8 checklist: first run, crew
       pack T1 with/without hood, mixed pack with two quantities, admin conflict).
 - [ ] No hard rule violated; minimal diff; no new deps.
 - [ ] Docs updated if a rule, pattern, or schema changed (no silent divergence).
@@ -79,10 +79,10 @@ Use the PR template. A PR is ready when the **Definition of Done**
 
 See [`README-build.md`](README-build.md). In short:
 
-1. Ensure `npm test` is green and the smoke checklist passes.
+1. Ensure `pnpm test` is green and the smoke checklist passes.
 2. Bump `package.json:version` (keep the `-beta`/`-preview` suffix until V1).
 3. Move `CHANGELOG.md` `[Unreleased]` into a dated version section.
-4. `npm run build:win` → `dist/PackPrice-<version>-*.exe`.
+4. `pnpm build:win` → `dist/PackPrice-<version>-*.exe`.
 5. Distribute the new `.exe` to **all** PCs before anyone opens admin mode after a
    schema migration (see `planes/migracion-codigo-ingles.md` §8).
 

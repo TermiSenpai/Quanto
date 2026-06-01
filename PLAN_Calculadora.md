@@ -406,9 +406,9 @@ App de escritorio empaquetada como `.exe` portable. Lee y escribe directamente e
 En la carpeta del proyecto descomprimido:
 
 ```bash
-npm install              # instalar dependencias (solo primera vez)
-npm run dev              # ejecutar en modo desarrollo (sin construir .exe)
-npm run build:win        # generar .exe portable en dist/
+pnpm install              # instalar dependencias (solo primera vez)
+pnpm dev              # ejecutar en modo desarrollo (sin construir .exe)
+pnpm build:win        # generar .exe portable en dist/
 ```
 
 El `.exe` resultante: `dist/PackPrice-2.0.0-portable.exe`.
@@ -419,7 +419,7 @@ El `.exe` resultante: `dist/PackPrice-2.0.0-portable.exe`.
 
 | Problema                              | Causa probable                     | Solución                                                                                |
 | ------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------- |
-| `npm install` falla con permisos      | Terminal sin permisos              | Ejecutar como administrador                                                             |
+| `pnpm install` falla con permisos      | Terminal sin permisos              | Ejecutar como administrador                                                             |
 | Build avisa de "code signing"         | .exe no firmado                    | Para uso interno no hace falta firmar; añadir `"sign": null` en package.json si bloquea |
 | Windows SmartScreen avisa al ejecutar | .exe sin firma digital             | "Más información" → "Ejecutar de todas formas". Solo primera vez por PC                 |
 | App no encuentra config.js            | NAS desconectado o ruta incorrecta | Comprobar unidad mapeada o usar Ajustes para cambiar ruta                               |
@@ -433,7 +433,7 @@ El `.exe` resultante: `dist/PackPrice-2.0.0-portable.exe`.
 1. Sesión 1 — Estudio Excel + DOCX. Estudio de costes, márgenes y riesgos. Calculadora Excel y dos DOCX (hoja de pedido + estudio interno).
 2. Sesión 2 — Diseño de la app. Aclaración de constraints reales (NAS solo de archivos, 2 usuarios). Iteración de decisiones técnicas: SQLite descartado a favor de JSON. Web `file://` descartada por limitaciones del navegador. Electron elegido.
 3. Sesión 2 (cont.) — Implementación V2 Electron. Filesystem real, settings local en `%APPDATA%`, detección de conflictos por hash, backups automáticos, diálogos nativos.
-4. Pendiente — Pruebas locales con `npm run dev`, validación de comportamiento, ajuste fino de PVP de packs nuevos, distribución del `.exe` al segundo PC.
+4. Pendiente — Pruebas locales con `pnpm dev`, validación de comportamiento, ajuste fino de PVP de packs nuevos, distribución del `.exe` al segundo PC.
 
 ---
 

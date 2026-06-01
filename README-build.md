@@ -20,8 +20,8 @@ No necesitas Visual Studio ni Build Tools, electron-builder usa binarios pre-com
 Para iterar rápido durante el desarrollo:
 
 ```bash
-npm install     # solo la primera vez
-npm start       # alias de "electron ."
+pnpm install     # solo la primera vez
+pnpm start       # alias de "electron ."
 ```
 
 Cualquier cambio en el código requiere cerrar y volver a ejecutar.
@@ -33,7 +33,7 @@ Cualquier cambio en el código requiere cerrar y volver a ejecutar.
 Cuando quieras distribuir un binario:
 
 ```bash
-npm run build:win
+pnpm build:win
 ```
 
 Esto genera el ejecutable. Cuando termine, lo encontrarás en:
@@ -90,7 +90,7 @@ Estructura recomendada en el NAS:
 
 Cuando saques una nueva versión:
 
-1. Reconstruye el `.exe` con los nuevos cambios (`npm run build:win`).
+1. Reconstruye el `.exe` con los nuevos cambios (`pnpm build:win`).
 2. Distribuye el nuevo `.exe` a cada PC reemplazando el anterior.
 3. Los `settings.json` y el `config.js` del NAS se mantienen sin tocar.
 
@@ -125,10 +125,10 @@ packs app/
 
 ## 8. Resolución de problemas
 
-**`npm install` falla con error de permisos en Windows**
+**`pnpm install` falla con error de permisos en Windows**
 Ejecuta la terminal como administrador.
 
-**`npm run build:win` falla con "code signing"**
+**`pnpm build:win` falla con "code signing"**
 electron-builder a veces avisa de que no firmaste el `.exe` digitalmente. Para uso interno no hace falta firmarlo. Si te bloquea: añade `"sign": null` en `package.json` dentro de `build.win`.
 
 **Windows SmartScreen avisa al ejecutar el .exe**

@@ -119,10 +119,10 @@ automatic `backups\` before every admin write.
 ## 7. Workflow
 
 ```bash
-npm install          # if package.json changed
-npm run dev          # iterate
-npm test             # vitest run
-npm run build:win    # release: dist/PackPrice-<version>-*.exe
+pnpm install          # if package.json changed
+pnpm dev          # iterate
+pnpm test             # vitest run
+pnpm build:win    # release: dist/PackPrice-<version>-*.exe
 ```
 
 For any non-trivial change, follow the agent loop in `AGENTS.md` §2
@@ -131,8 +131,8 @@ For any non-trivial change, follow the agent loop in `AGENTS.md` §2
 
 ## 8. Definition of done
 
-- `npm test` green (with new tests for calc/schema changes).
-- `npm run dev` smoke per the checklist below.
+- `pnpm test` green (with new tests for calc/schema changes).
+- `pnpm dev` smoke per the checklist below.
 - No hard rule (§3) violated; minimal diff; no new deps.
 - Docs updated if a rule, pattern, or schema changed.
 

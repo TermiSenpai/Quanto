@@ -68,7 +68,7 @@ vulnerability:
 
 ## Dependencies
 
-Runtime dependencies are kept near zero. `npm audit` is run before each release;
+Runtime dependencies are kept near zero. `pnpm audit` is run before each release;
 build-time transitive vulnerabilities on an offline internal app are tolerable but
 are documented when ignored (`CLAUDE.md` §8.3). `electron` and `electron-builder`
 are bumped deliberately, with a packaging test after each bump.

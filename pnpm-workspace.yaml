@@ -1,0 +1,7 @@
+# pnpm 10+ moved build-script approval out of package.json into this file.
+# These deps run install/build scripts we trust and need:
+#   electron → downloads the Electron binary into node_modules/electron/dist
+#   esbuild  → fetches its platform binary (used by vitest)
+allowBuilds:
+  electron: true
+  esbuild: true

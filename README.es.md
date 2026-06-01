@@ -66,10 +66,10 @@ packs app/
 ## Uso rápido
 
 ```bash
-npm install        # solo la primera vez
-npm run dev        # iterar en modo desarrollo
-npm test           # ejecutar tests
-npm run build:win  # construir el .exe portable en dist/
+pnpm install        # solo la primera vez
+pnpm dev        # iterar en modo desarrollo
+pnpm test           # ejecutar tests
+pnpm build:win  # construir el .exe portable en dist/
 ```
 
 Detalles de empaquetado, distribución a otros PCs y resolución de problemas: [README-build.md](README-build.md).
@@ -98,7 +98,7 @@ Proyecto interno de empresa pequeña (2–3 usuarios). No se aceptan PRs de terc
 
 1. Lee [CLAUDE.md](CLAUDE.md) (convenciones, principios, qué NO hacer).
 2. Lee [PLAN_Calculadora.md](PLAN_Calculadora.md) si vas a tocar lógica de negocio.
-3. Ejecuta `npm test` antes de proponer cambios.
+3. Ejecuta `pnpm test` antes de proponer cambios.
 4. Mantén las funciones de cálculo puras y testables.
 
 ---

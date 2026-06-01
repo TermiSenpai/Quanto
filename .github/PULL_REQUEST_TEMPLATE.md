@@ -18,8 +18,8 @@ Keep PRs small and scoped. The English migration is wave-based: one wave per PR
 
 ## Definition of done (AGENTS.md §5)
 
-- [ ] `npm test` is green (new tests added for calculation/schema changes)
-- [ ] Smoke-tested with `npm run dev` (CLAUDE.md §8: first run, crew pack T1
+- [ ] `pnpm test` is green (new tests added for calculation/schema changes)
+- [ ] Smoke-tested with `pnpm dev` (CLAUDE.md §8: first run, crew pack T1
       with/without hood, mixed pack with two quantities, admin conflict)
 - [ ] No hard rule violated (CLAUDE.md §3) — security invariants intact, no domain
       numbers in code, renderer doesn't touch Node/fs, no swallowed errors
