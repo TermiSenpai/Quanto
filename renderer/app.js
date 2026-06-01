@@ -10,17 +10,19 @@
 //   - admin.js    (admin editor rendering)
 //   - format.js   (DOM/format helpers)
 //
-// Config and result data are v3 (English keys). HTML element IDs
-// and CSS class names stay in their kebab-case form (CLAUDE.md
-// §5.2/§5.3); user-facing strings stay in Spanish (§4.5).
+// Config and result data are v4 (English keys). The calculation flow
+// is generic: it is driven entirely by the config (pack options,
+// components, pricing_mode), so a new pack added to config renders and
+// prices without code changes. HTML element IDs and CSS class names
+// stay in their kebab-case form (CLAUDE.md §5.2/§5.3); user-facing
+// strings stay in Spanish (§4.5).
 // ============================================================
 
 import { el, show, hide, intFromInput, formatEur, formatPct, deepClone } from './format.js';
 import {
-  calculateCrewPack,
-  calculateSinglePack,
-  calculateMixedPack,
-  calculateCustomPack,
+  calculatePack,
+  calculateAddons,
+  recommendedPrice,
   getTier
 } from './calculo.js';
 import {
@@ -58,34 +60,16 @@ const state = {
 // ============================================================
 // Visual metadata per pack (card icon and description)
 // ============================================================
-// Mapped by id; if a new pack enters the config without an entry
-// here, it uses the safe defaults.
-const PACK_META = {
-  crew_full: {
-    icon: 'i-pack',
-    desc: 'Camiseta + sudadera por persona. Hasta 4 caras de impresión.'
-  },
-  tshirts_only: {
-    icon: 'i-shirt',
-    desc: 'Pack ligero. Una camiseta por persona, hasta 2 caras.'
-  },
-  classic_only: {
-    icon: 'i-hoodie',
-    desc: 'Sudaderas sin capucha (CLASICA). Una por persona.'
-  },
-  urban_only: {
-    icon: 'i-hoodie',
-    desc: 'Sudaderas con capucha (URBAN). Una por persona.'
-  },
-  hoodies_mixed: {
-    icon: 'i-layers',
-    desc: 'CLASICA + URBAN combinadas en el mismo pedido.'
-  },
-  custom: {
-    icon: 'i-plus',
-    desc: 'Combina manualmente cualquier cantidad de cada modelo Roly.'
-  }
-};
+// In v4 the icon and the description live in the config itself
+// (`pack.icon` / `pack.description`). This helper reads them with a
+// safe fallback so a brand-new pack added to the config renders
+// without any code change.
+function packMeta(pack) {
+  return {
+    icon: pack && pack.icon ? pack.icon : 'i-pack',
+    desc: pack && pack.description ? pack.description : ''
+  };
+}
 
 const ADMIN_TAB_META = {
   parameters: { title: 'Parámetros de cálculo', desc: 'Variables que afectan al coste interno y al recargo de tallas grandes.' },
@@ -227,30 +211,18 @@ async function loadConfigAndShowApp() {
 }
 
 /**
- * Ensures the in-memory config has the packs and parameters
- * introduced in versions later than the NAS file. Only adds missing
- * fields with safe defaults; it does not touch the file until an
- * admin saves.
+ * Defensive guard for the in-memory config. In v4 the schema is
+ * migrated to its current shape in main (on read), so the renderer
+ * should already receive a complete config. We only make sure the
+ * top-level collections the renderer iterates over exist, to avoid
+ * crashing on a partial/legacy file that slipped through.
  */
 function ensureDefaultPacks(cfg) {
   if (!cfg.packs) cfg.packs = {};
-  if (!cfg.packs.custom) {
-    cfg.packs.custom = {
-      type: 'custom',
-      name: 'Pack personalizado',
-      min_total: 10,
-      reference_models: {
-        BEAGLE:  'tshirts_only',
-        CLASICA: 'classic_only',
-        URBAN:   'urban_only'
-      }
-    };
-  }
-
+  if (!cfg.products) cfg.products = {};
+  if (!cfg.addons) cfg.addons = {};
   if (!cfg.parameters) cfg.parameters = {};
-  if (cfg.parameters.extra_name_eur         === undefined) cfg.parameters.extra_name_eur         = 1.5;
-  if (cfg.parameters.extra_short_sleeve_eur === undefined) cfg.parameters.extra_short_sleeve_eur = 1.5;
-  if (cfg.parameters.extra_long_sleeve_eur  === undefined) cfg.parameters.extra_long_sleeve_eur  = 3;
+  if (!Array.isArray(cfg.tiers)) cfg.tiers = [];
 }
 
 async function showErrorScreen(detail) {
@@ -517,11 +489,9 @@ function renderPackList() {
   container.innerHTML = '';
 
   for (const [id, pack] of Object.entries(CFG.packs)) {
-    const meta = PACK_META[id] || { icon: 'i-pack', desc: '' };
+    const meta = packMeta(pack);
     const fromPrice = computeFromPrice(pack);
-    const minText = pack.type === 'mixed'
-      ? `Mín. ${pack.min_total} unidades en total`
-      : `Mín. ${pack.min} unidades`;
+    const minText = `Mín. ${pack.min_total} unidades en total`;
 
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -545,34 +515,80 @@ function renderPackList() {
 }
 
 /**
- * "From X €" for the pack card: we take the price of the first tier
- * (T1) with the default combination (2 sides, without hood if it
- * applies). It is the most understandable reference price.
+ * "From X €" for the pack card, generic over v4 packs.
+ *
+ *   - bundle      → the cheapest `bundle_prices[combo]` at the first tier.
+ *   - components  → the cheapest unit price among the products the pack
+ *                   can use (its components / free catalog), at the first
+ *                   tier with the default sides key.
+ *
+ * Returns null when nothing can be resolved (the card just hides the
+ * badge). It never references v3 fields.
  */
 function computeFromPrice(pack) {
-  if (pack.type === 'crew' && pack.prices && pack.prices.without_hood) {
-    const t1 = CFG.tiers[0]?.id;
-    return pack.prices.without_hood.two_sides?.[t1] ?? null;
-  }
-  if (pack.type === 'single' && pack.prices && pack.prices.two_sides) {
-    const t1 = CFG.tiers[0]?.id;
-    return pack.prices.two_sides[t1] ?? null;
-  }
-  if (pack.type === 'mixed' && pack.reference_packs) {
-    const refClassic = CFG.packs[pack.reference_packs.CLASICA];
-    if (refClassic) return computeFromPrice(refClassic);
-  }
-  if (pack.type === 'custom' && pack.reference_models) {
-    // The cheapest of the references at T1 with 2 sides: orients the user.
+  const firstTier = CFG.tiers[0]?.id;
+  if (!firstTier) return null;
+
+  if (pack.pricing_mode === 'bundle') {
     let min = null;
-    for (const refId of Object.values(pack.reference_models)) {
-      const ref = CFG.packs[refId];
-      const v = ref ? computeFromPrice(ref) : null;
-      if (v !== null && (min === null || v < min)) min = v;
+    for (const row of Object.values(pack.bundle_prices || {})) {
+      const v = row ? row[firstTier] : undefined;
+      if (typeof v === 'number' && (min === null || v < min)) min = v;
     }
     return min;
   }
-  return null;
+
+  // components (fixed or free): cheapest candidate product's price.
+  const productIds = pack.free_components
+    ? Object.keys(CFG.products || {})
+    : (pack.components || []).map(c => resolveDefaultProduct(pack, c));
+
+  const sidesKey = defaultSidesKey(pack);
+  let min = null;
+  for (const pid of productIds) {
+    const product = CFG.products[pid];
+    if (!product) continue;
+    const table = (product.prices || {})[sidesKey] || {};
+    const v = table[firstTier];
+    if (typeof v === 'number' && (min === null || v < min)) min = v;
+  }
+  return min;
+}
+
+/**
+ * Resolves a component's product honoring the default value of any
+ * option that maps it (so the "from" price uses a coherent product).
+ */
+function resolveDefaultProduct(pack, component) {
+  let productId = component.product;
+  for (const option of (pack.options || [])) {
+    const map = option.maps_product;
+    if (map && map.component === component.id) {
+      const defValue = (option.values && option.values[0]) ? option.values[0].id : undefined;
+      if (defValue !== undefined && map[defValue] !== undefined) {
+        productId = map[defValue];
+      }
+    }
+  }
+  return productId;
+}
+
+/**
+ * Default price-table key for a pack: the id of the option value that
+ * declares `sides`, preferring `two_sides` to match the prior UX, then
+ * falling back to 'one_side'.
+ */
+function defaultSidesKey(pack) {
+  for (const option of (pack.options || [])) {
+    const values = option.values || [];
+    if (values.some(v => Number.isFinite(v.sides))) {
+      const two = values.find(v => v.sides === 2);
+      if (two) return two.id;
+      const any = values.find(v => Number.isFinite(v.sides));
+      if (any) return any.id;
+    }
+  }
+  return 'one_side';
 }
 
 function selectPack(packId) {
@@ -580,7 +596,7 @@ function selectPack(packId) {
   hide('error-msg');
 
   const pack = CFG.packs[packId];
-  const meta = PACK_META[packId] || { icon: 'i-pack', desc: '' };
+  const meta = packMeta(pack);
 
   // Mark the selected card visually (visible when returning to step 1)
   document.querySelectorAll('.pack-card').forEach(card => {
@@ -588,9 +604,7 @@ function selectPack(packId) {
   });
 
   el('pack-titulo').textContent = pack.name;
-  el('pack-subtitulo').textContent = meta.desc || (pack.type === 'mixed'
-    ? `Mín. ${pack.min_total} unidades en total`
-    : `Mín. ${pack.min} unidades`);
+  el('pack-subtitulo').textContent = meta.desc || `Mín. ${pack.min_total} unidades en total`;
 
   // Icon in the step 2 header
   const iconWrap = document.querySelector('#seccion-paso2 .section-card__icon');
@@ -630,100 +644,69 @@ function goToScreen(screen) {
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
+/**
+ * Renders the input form for a pack, fully generic over the v4 config:
+ *   - one control group per `pack.options` (radio cards),
+ *   - quantity inputs depending on `pricing_mode` / `free_components`,
+ *   - the addons checkboxes filtered by the pack's product categories.
+ */
 function renderPackInputs(packId) {
   const pack = CFG.packs[packId];
   const container = el('inputs-pack');
 
-  if (pack.type === 'crew') {
-    container.innerHTML = `
-      <div class="form-grid-2">
-        <div class="field">
-          <label class="field__label" for="in_cantidad">Número de packs (personas)</label>
-          ${numStep('in_cantidad', pack.min, pack.min)}
-          <span class="field__hint">Mínimo ${pack.min}. Cada pack incluye 1 camiseta + 1 sudadera.</span>
-        </div>
-        <div class="field">
-          <span class="field__label">Caras de impresión (cada prenda)</span>
-          <div class="radio-cards radio-cards--inline">
-            <label class="radio-card"><input type="radio" name="sides" value="1"> 1 cara</label>
-            <label class="radio-card"><input type="radio" name="sides" value="2" checked> 2 caras</label>
-          </div>
-        </div>
-      </div>
-      <div class="field">
-        <span class="field__label">Modelo de sudadera</span>
-        <div class="radio-cards">
-          <label class="radio-card">
-            <input type="radio" name="hood" value="without" checked>
-            <span><strong>CLASICA</strong> · sin capucha</span>
-          </label>
-          <label class="radio-card">
-            <input type="radio" name="hood" value="with">
-            <span><strong>URBAN</strong> · con capucha</span>
-          </label>
-        </div>
-        <span class="field__hint">El modelo afecta al PVP del pack.</span>
-      </div>
-    `;
-  } else if (pack.type === 'single') {
-    const m = CFG.roly_models[pack.model];
-    container.innerHTML = `
-      <div class="form-grid-2">
-        <div class="field">
-          <label class="field__label" for="in_cantidad">Cantidad de ${m.name.toLowerCase()}</label>
-          ${numStep('in_cantidad', pack.min, pack.min)}
-          <span class="field__hint">Mínimo ${pack.min} unidades.</span>
-        </div>
-        <div class="field">
-          <span class="field__label">Caras de impresión</span>
-          <div class="radio-cards radio-cards--inline">
-            <label class="radio-card"><input type="radio" name="sides" value="1"> 1 cara</label>
-            <label class="radio-card"><input type="radio" name="sides" value="2" checked> 2 caras</label>
-          </div>
-        </div>
-      </div>
-    `;
-  } else if (pack.type === 'mixed') {
-    container.innerHTML = `
-      <div class="form-grid-2">
-        <div class="field">
-          <label class="field__label" for="in_cant_clasica">Sudaderas SIN capucha (CLASICA)</label>
-          ${numStep('in_cant_clasica', 0, 0)}
-        </div>
-        <div class="field">
-          <label class="field__label" for="in_cant_urban">Sudaderas CON capucha (URBAN)</label>
-          ${numStep('in_cant_urban', 0, 0)}
-        </div>
-      </div>
-      <div class="field">
-        <span class="field__label">Caras de impresión</span>
-        <div class="radio-cards radio-cards--inline">
-          <label class="radio-card"><input type="radio" name="sides" value="1"> 1 cara</label>
-          <label class="radio-card"><input type="radio" name="sides" value="2" checked> 2 caras</label>
-        </div>
-        <span class="field__hint">Total mínimo: ${pack.min_total} sudaderas. Cada sudadera factura a su PVP según el tramo del total.</span>
-      </div>
-    `;
-  } else if (pack.type === 'custom') {
-    const availableModels = Object.keys(pack.reference_models || {});
-    container.innerHTML = `
+  const optionsHtml = (pack.options || []).map(renderOptionGroup).join('');
+
+  let quantitiesHtml = '';
+  if (pack.free_components) {
+    quantitiesHtml = `
       <div id="lineas-personalizado" class="lineas-personalizado"></div>
       <div class="lineas-personalizado__add">
         <button id="btn-anadir-linea" type="button" class="btn btn-secondary">
           <svg class="icon"><use href="#i-plus"/></svg> Añadir línea
         </button>
         <span class="field__hint">
-          Mín. ${pack.min_total} prendas en total. Cada línea factura al PVP del pack individual del modelo, según el tramo del total.
+          Mín. ${pack.min_total} prendas en total. Cada línea factura al PVP del producto elegido, según el tramo del total.
         </span>
       </div>
     `;
-    // Initial line with the first available model
+  } else if (pack.pricing_mode === 'bundle') {
+    // Default packs count so the order meets min_total garments.
+    const perPack = (pack.components || []).reduce((s, c) => s + (c.qty_per_pack || 1), 0) || 1;
+    const minPacks = Math.max(1, Math.ceil((pack.min_total || 1) / perPack));
+    quantitiesHtml = `
+      <div class="form-grid-2">
+        <div class="field">
+          <label class="field__label" for="in_packs">Número de packs (personas)</label>
+          ${numStep('in_packs', 1, minPacks)}
+          <span class="field__hint">Mínimo ${pack.min_total} unidades en total. ${componentsSummary(pack)}</span>
+        </div>
+      </div>
+    `;
+  } else {
+    // components pack with fixed components: one quantity per component.
+    const fields = (pack.components || []).map((c, idx) => `
+      <div class="field">
+        <label class="field__label" for="in_comp_${idx}">${escapeHTML(c.label || c.id)}</label>
+        ${numStep(`in_comp_${idx}`, 0, 0)}
+      </div>
+    `).join('');
+    quantitiesHtml = `
+      <div class="form-grid-2">${fields}</div>
+      <span class="field__hint">Total mínimo: ${pack.min_total} unidades. Cada producto factura a su PVP según el tramo del total.</span>
+    `;
+  }
+
+  container.innerHTML = quantitiesHtml + optionsHtml;
+
+  // Free-components: seed an initial line and wire add/remove.
+  if (pack.free_components) {
+    const productIds = Object.keys(CFG.products || {});
     const cont = el('lineas-personalizado');
-    cont.appendChild(createCustomLine(availableModels, availableModels[0], 1, 2));
+    cont.appendChild(createCustomLine(productIds, productIds[0], 1));
 
     el('btn-anadir-linea').addEventListener('click', () => {
       const idx = cont.children.length;
-      cont.appendChild(createCustomLine(availableModels, availableModels[0], 1, 2, idx));
+      cont.appendChild(createCustomLine(productIds, productIds[0], 1, idx));
       recomputePreview();
     });
 
@@ -745,47 +728,139 @@ function renderPackInputs(packId) {
     });
   }
 
+  renderAddons(pack);
+
   // Wire NumberSteps
   container.querySelectorAll('.numstep').forEach(wireNumStep);
 }
 
 /**
- * Creates a <div.linea-personalizado> with a model select, quantity
- * and sides. The sides radios need a unique name per line so each
- * group is independent.
+ * Renders a single option group as radio cards. The radio `name` is
+ * the option id and each radio `value` is the option-value id, which
+ * is exactly what `calculatePack` expects in `opt.options`. The first
+ * value is checked by default, except a "sides" option which defaults
+ * to its 2-sides value to match the prior UX.
  */
-function createCustomLine(availableModels, selectedModel, quantity, sides, idx = 0) {
+function renderOptionGroup(option) {
+  const values = option.values || [];
+  const hasSides = values.some(v => Number.isFinite(v.sides));
+  let defaultId = values[0] ? values[0].id : '';
+  if (hasSides) {
+    const two = values.find(v => v.sides === 2);
+    if (two) defaultId = two.id;
+  }
+
+  const cards = values.map(v => `
+    <label class="radio-card">
+      <input type="radio" name="opt_${escAttr(option.id)}" value="${escAttr(v.id)}" ${v.id === defaultId ? 'checked' : ''}>
+      <span>${escapeHTML(v.label || v.id)}</span>
+    </label>
+  `).join('');
+
+  return `
+    <div class="field" data-option-id="${escAttr(option.id)}">
+      <span class="field__label">${escapeHTML(option.label || option.id)}</span>
+      <div class="radio-cards radio-cards--inline">${cards}</div>
+    </div>
+  `;
+}
+
+/** Short "1 camiseta + 1 sudadera" style summary for bundle packs. */
+function componentsSummary(pack) {
+  const parts = (pack.components || []).map(c => `${c.qty_per_pack || 1} ${(c.label || c.id).toLowerCase()}`);
+  return parts.length ? `Cada pack incluye ${parts.join(' + ')}.` : '';
+}
+
+/**
+ * Renders the addons checkboxes into #addons-container, showing only
+ * addons whose `applies_to` includes '*' or the category of at least
+ * one product the pack can use. Hides the whole card if none apply.
+ */
+function renderAddons(pack) {
+  const cont = el('addons-container');
+  if (!cont) return;
+  const card = el('addons-card');
+
+  const categories = packCategories(pack);
+  const applicable = Object.entries(CFG.addons || {}).filter(([, addon]) => {
+    const applies = addon.applies_to || [];
+    return applies.includes('*') || applies.some(cat => categories.has(cat));
+  });
+
+  if (applicable.length === 0) {
+    cont.innerHTML = '';
+    if (card) card.classList.add('hidden');
+    return;
+  }
+  if (card) card.classList.remove('hidden');
+
+  const vat = CFG.parameters.vat || 0;
+  cont.innerHTML = applicable.map(([id, addon]) => {
+    const unitInc = addon.vat_included ? addon.price : addon.price * (1 + vat);
+    const vatNote = addon.vat_included ? 'IVA incl.' : 'sin IVA';
+    return `
+      <div class="field" data-addon-id="${escAttr(id)}">
+        <label class="field__label" for="addon_${escAttr(id)}">
+          ${escapeHTML(addon.label || id)}
+          <span class="field__hint">(+${formatEur(addon.price)}/ud ${vatNote} · ${formatEur(unitInc)} IVA inc.)</span>
+        </label>
+        <input type="number" id="addon_${escAttr(id)}" data-addon-qty="${escAttr(id)}" min="0" value="0">
+      </div>
+    `;
+  }).join('');
+}
+
+/** Set of product categories present in (or available to) a pack. */
+function packCategories(pack) {
+  const cats = new Set();
+  const addCat = (pid) => {
+    const product = CFG.products[pid];
+    if (product && product.category) cats.add(product.category);
+  };
+  if (pack.free_components) {
+    Object.keys(CFG.products || {}).forEach(addCat);
+  } else {
+    for (const c of (pack.components || [])) {
+      addCat(c.product);
+      // Honor option product swaps so e.g. URBAN's category counts too.
+      for (const option of (pack.options || [])) {
+        const map = option.maps_product;
+        if (map && map.component === c.id) {
+          for (const [k, v] of Object.entries(map)) {
+            if (k !== 'component') addCat(v);
+          }
+        }
+      }
+    }
+  }
+  return cats;
+}
+
+/**
+ * Creates a <div.linea-personalizado> with a product select and a
+ * quantity. Sides are a pack-level option in v4, so lines no longer
+ * carry their own sides selector.
+ */
+function createCustomLine(productIds, selectedProduct, quantity, idx = 0) {
   const wrap = document.createElement('div');
   wrap.className = 'linea-personalizado';
   wrap.dataset.idx = String(idx);
 
-  const options = availableModels.map(id => {
-    const m = CFG.roly_models[id];
-    const name = m ? `${m.name} (${id})` : id;
-    return `<option value="${id}" ${id === selectedModel ? 'selected' : ''}>${escapeHTML(name)}</option>`;
+  const options = productIds.map(id => {
+    const product = CFG.products[id];
+    const name = product ? product.name : id;
+    return `<option value="${escAttr(id)}" ${id === selectedProduct ? 'selected' : ''}>${escapeHTML(name)}</option>`;
   }).join('');
 
-  const sidesName = `sides_line_${idx}_${Math.random().toString(36).slice(2, 7)}`;
   wrap.innerHTML = `
     <div class="linea-personalizado__grid">
       <div class="field">
-        <label class="field__label">Modelo</label>
+        <label class="field__label">Producto</label>
         <select class="input" data-linea-modelo>${options}</select>
       </div>
       <div class="field">
         <label class="field__label">Cantidad</label>
         <input type="number" class="input" min="0" step="1" value="${quantity}" data-linea-cantidad>
-      </div>
-      <div class="field">
-        <span class="field__label">Caras</span>
-        <div class="radio-cards radio-cards--inline">
-          <label class="radio-card">
-            <input type="radio" name="${sidesName}" value="1" data-linea-caras ${sides === 1 ? 'checked' : ''}> 1 cara
-          </label>
-          <label class="radio-card">
-            <input type="radio" name="${sidesName}" value="2" data-linea-caras ${sides === 2 ? 'checked' : ''}> 2 caras
-          </label>
-        </div>
       </div>
       <button type="button" class="linea-personalizado__remove" data-accion-linea="eliminar"
               aria-label="Eliminar línea" title="Eliminar línea">
@@ -827,51 +902,65 @@ function wireNumStep(stepEl) {
   });
 }
 
+/**
+ * Reads the form into the generic `opt` shape consumed by
+ * `calculatePack` (see calculo.js header). No pack-type branching:
+ * the shape is driven by `pricing_mode` / `free_components`.
+ */
 function collectInputs() {
   const pack = CFG.packs[state.packId];
-  const qty_4xl = intFromInput('cant_4xl');
-  const qty_5xl = intFromInput('cant_5xl');
-  const extras = {
-    names:         intFromInput('cant_nombres'),
-    short_sleeves: intFromInput('cant_mangas_cortas'),
-    long_sleeves:  intFromInput('cant_mangas_largas')
+
+  // Selected option values: { <optionId>: <valueId> }.
+  const options = {};
+  for (const option of (pack.options || [])) {
+    const checked = document.querySelector(`input[name="opt_${cssEscape(option.id)}"]:checked`);
+    if (checked) options[option.id] = checked.value;
+  }
+
+  // Selected addons: { <addonId>: <qty> } (only positive quantities).
+  const addons = {};
+  document.querySelectorAll('[data-addon-qty]').forEach(input => {
+    const id = input.dataset.addonQty;
+    const qty = parseInt(input.value, 10) || 0;
+    if (qty > 0) addons[id] = qty;
+  });
+
+  const opt = {
+    options,
+    addons,
+    qty_3xl: intFromInput('cant_3xl'),
+    qty_4xl: intFromInput('cant_4xl'),
+    qty_5xl: intFromInput('cant_5xl')
   };
 
-  if (pack.type === 'crew') {
-    return {
-      quantity: intFromInput('in_cantidad'),
-      hood: document.querySelector('input[name="hood"]:checked').value,
-      sides: parseInt(document.querySelector('input[name="sides"]:checked').value, 10),
-      qty_4xl, qty_5xl, extras
-    };
-  }
-  if (pack.type === 'single') {
-    return {
-      quantity: intFromInput('in_cantidad'),
-      sides: parseInt(document.querySelector('input[name="sides"]:checked').value, 10),
-      qty_4xl, qty_5xl, extras
-    };
-  }
-  if (pack.type === 'mixed') {
-    return {
-      qty_classic: intFromInput('in_cant_clasica'),
-      qty_urban: intFromInput('in_cant_urban'),
-      sides: parseInt(document.querySelector('input[name="sides"]:checked').value, 10),
-      qty_4xl, qty_5xl, extras
-    };
-  }
-  if (pack.type === 'custom') {
-    const lines = [];
+  if (pack.free_components) {
+    opt.lines = [];
     document.querySelectorAll('.linea-personalizado').forEach(row => {
-      const model = row.querySelector('[data-linea-modelo]')?.value || '';
+      const product = row.querySelector('[data-linea-modelo]')?.value || '';
       const quantity = parseInt(row.querySelector('[data-linea-cantidad]')?.value, 10) || 0;
-      const sidesInput = row.querySelector('input[data-linea-caras]:checked');
-      const sides = sidesInput ? parseInt(sidesInput.value, 10) : 2;
-      lines.push({ model, quantity, sides });
+      opt.lines.push({ product, quantity });
     });
-    return { lines, qty_4xl, qty_5xl, extras };
+  } else if (pack.pricing_mode === 'bundle') {
+    opt.packs = intFromInput('in_packs');
+  } else {
+    opt.quantities = {};
+    (pack.components || []).forEach((c, idx) => {
+      opt.quantities[c.id] = intFromInput(`in_comp_${idx}`);
+    });
   }
-  return null;
+
+  return opt;
+}
+
+/**
+ * CSS.escape fallback for building attribute selectors from config ids.
+ * Config ids are simple slugs in practice, but stay defensive.
+ */
+function cssEscape(value) {
+  if (window.CSS && typeof window.CSS.escape === 'function') {
+    return window.CSS.escape(value);
+  }
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
 }
 
 // ============================================================
@@ -896,7 +985,7 @@ function recomputePreview() {
 
   const pack = CFG.packs[state.packId];
   const opt = collectInputsSafe();
-  const r = opt ? calculateByType(pack.type, opt) : null;
+  const r = opt ? calculate(opt) : null;
 
   const elTotal = el('preview-total');
   const elTier = el('preview-tramo');
@@ -916,33 +1005,30 @@ function recomputePreview() {
   elTotal.textContent = formatEur(r.total_vat_inc);
   elTier.textContent = `Tramo ${tierIdFromLabel(r.tier)}`;
 
-  const quantity = r.is_mixed ? r.total_quantity : r.quantity;
-  const unitLabel = r.is_custom ? 'prendas' : 'sudaderas';
-  const priceText = r.is_mixed
-    ? `${quantity} ${unitLabel}`
-    : `${quantity} × ${formatEur(r.unit_price)}`;
+  const quantity = r.total_quantity;
+  // For a bundle pack the headline is "N packs × bundle price"; for a
+  // multi-line components pack we just show the garment count.
+  const priceText = (r.pricing_mode === 'bundle')
+    ? `${r.breakdown[0] ? r.breakdown[0].quantity : 0} packs × ${formatEur(r.unit_price)}`
+    : (r.unit_price > 0 ? `${quantity} × ${formatEur(r.unit_price)}` : `${quantity} prendas`);
   elMeta.textContent = priceText;
 
-  // Short breakdown rows
+  // Short breakdown rows: per line for components, the bundle row for bundle.
   let rowsHtml = '';
-  if (r.is_mixed) {
+  if (r.pricing_mode === 'bundle') {
+    rowsHtml += `<div class="preview__row"><span>Subtotal pack</span><strong>${formatEur(r.subtotal)}</strong></div>`;
+  } else {
     for (const d of r.breakdown) {
       if (d.quantity === 0) continue;
-      rowsHtml += `<div class="preview__row"><span>${escapeHTML(d.model)} × ${d.quantity}</span><strong>${formatEur(d.subtotal)}</strong></div>`;
+      rowsHtml += `<div class="preview__row"><span>${escapeHTML(d.name)} × ${d.quantity}</span><strong>${formatEur(d.subtotal)}</strong></div>`;
     }
-  } else {
-    rowsHtml += `<div class="preview__row"><span>Subtotal pack</span><strong>${formatEur(r.subtotal)}</strong></div>`;
   }
   if (r.surcharges > 0) {
     rowsHtml += `<div class="preview__row"><span>Recargo tallas grandes</span><strong>${formatEur(r.surcharges)}</strong></div>`;
   }
   if (r.extras_no_vat > 0) {
-    const e = r.extras_detail || {};
-    const parts = [];
-    if (e.names)         parts.push(`${e.names} nombre${e.names > 1 ? 's' : ''}`);
-    if (e.short_sleeves) parts.push(`${e.short_sleeves} mc`);
-    if (e.long_sleeves)  parts.push(`${e.long_sleeves} ml`);
-    rowsHtml += `<div class="preview__row"><span>Extras (${parts.join(' · ')}) <em style="font-style: normal; opacity: 0.7;">sin IVA</em></span><strong>${formatEur(r.extras_no_vat)}</strong></div>`;
+    const parts = addonParts(r.extras_detail);
+    rowsHtml += `<div class="preview__row"><span>Extras (${escapeHTML(parts.join(' · '))}) <em style="font-style: normal; opacity: 0.7;">sin IVA</em></span><strong>${formatEur(r.extras_no_vat)}</strong></div>`;
   }
   rowsHtml += `<div class="preview__row"><span>IVA (${formatPct(CFG.parameters.vat)})</span><strong>${formatEur(r.vat)}</strong></div>`;
   rowsHtml += `<div class="preview__row preview__row--total"><span>Total</span><strong>${formatEur(r.total_vat_inc)}</strong></div>`;
@@ -951,40 +1037,52 @@ function recomputePreview() {
   renderTierBar(quantity);
 }
 
+/** Human "2 nombres · 1 manga larga" parts from an addons detail map. */
+function addonParts(detail) {
+  const d = detail || {};
+  const addons = CFG.addons || {};
+  const parts = [];
+  for (const [id, qty] of Object.entries(d)) {
+    if (!qty) continue;
+    const label = addons[id] ? (addons[id].label || id) : id;
+    parts.push(`${qty} ${label.toLowerCase()}`);
+  }
+  return parts;
+}
+
 function collectInputsSafe() {
   try {
     const opt = collectInputs();
     if (!opt) return null;
-    if ('quantity' in opt && (isNaN(opt.quantity) || opt.quantity <= 0)) return null;
-    if ('qty_classic' in opt && (opt.qty_classic + opt.qty_urban) <= 0) return null;
-    if ('lines' in opt) {
-      const total = (opt.lines || []).reduce((s, l) => s + (l.quantity || 0), 0);
-      if (total <= 0) return null;
-    }
+    const total = totalQuantityOf(CFG.packs[state.packId], opt);
+    if (total <= 0) return null;
     return opt;
   } catch (_) {
     return null;
   }
 }
 
-function calculateByType(type, opt) {
+/** Single generic entry point to the v4 engine. */
+function calculate(opt) {
   try {
-    if (type === 'crew')   return calculateCrewPack(CFG, opt);
-    if (type === 'single') return calculateSinglePack(CFG, state.packId, opt);
-    if (type === 'mixed')  return calculateMixedPack(CFG, opt);
-    if (type === 'custom') return calculateCustomPack(CFG, opt);
+    return calculatePack(CFG, state.packId, opt);
   } catch (e) {
     return { error: e.message || String(e) };
   }
-  return null;
 }
 
+/** Total garments implied by the current inputs (for the tier bar). */
 function totalQuantityOf(pack, opt) {
-  if (pack.type === 'mixed') return (opt.qty_classic || 0) + (opt.qty_urban || 0);
-  if (pack.type === 'custom') {
+  if (!pack) return 0;
+  if (pack.free_components) {
     return (opt.lines || []).reduce((s, l) => s + (l.quantity || 0), 0);
   }
-  return opt.quantity || 0;
+  if (pack.pricing_mode === 'bundle') {
+    const perPack = (pack.components || []).reduce((s, c) => s + (c.qty_per_pack || 1), 0);
+    return (opt.packs || 0) * perPack;
+  }
+  const q = opt.quantities || {};
+  return Object.values(q).reduce((s, n) => s + (n || 0), 0);
 }
 
 function tierIdFromLabel(label) {
@@ -1029,10 +1127,9 @@ function renderTierBar(quantity) {
 
 function runCalculation() {
   hide('error-msg');
-  const pack = CFG.packs[state.packId];
   const opt = collectInputs();
 
-  const result = calculateByType(pack.type, opt);
+  const result = calculate(opt);
 
   if (!result || result.error) {
     el('error-msg').textContent = (result && result.error) || 'No se pudo calcular el precio.';
@@ -1061,7 +1158,8 @@ function backToEdit() {
 
 function renderResult(r) {
   const c = el('resultado-content');
-  const quantity = r.is_mixed ? r.total_quantity : r.quantity;
+  const isBundle = r.pricing_mode === 'bundle';
+  const quantity = r.total_quantity;
   const tierId = tierIdFromLabel(r.tier);
   const baseNoVat = r.sale_base;
 
@@ -1069,13 +1167,16 @@ function renderResult(r) {
   const totalTime = estimateTotalTime(r);
   const timeFmt = formatTime(totalTime);
   const showCosts = state.isAdmin || state.showCosts;
-  const pricePerPack = r.is_mixed
-    ? formatEur(r.subtotal / Math.max(1, r.total_quantity))
-    : formatEur(r.unit_price);
-  const quantityLabel = r.is_custom ? 'Prendas' : 'Packs';
-  const priceLabel = r.is_custom ? 'PVP medio' : 'PVP por pack';
+  // For a bundle pack the headline metric is the per-pack price and the
+  // number of packs; otherwise the garment count and the average PVP.
+  const packsCount = isBundle && r.breakdown[0] ? r.breakdown[0].quantity : quantity;
+  const pricePerPack = isBundle
+    ? formatEur(r.unit_price)
+    : formatEur(r.subtotal / Math.max(1, quantity));
+  const quantityLabel = isBundle ? 'Packs' : 'Prendas';
+  const priceLabel = isBundle ? 'PVP por pack' : 'PVP medio';
   const stats = [
-    { label: quantityLabel,     value: quantity,    mono: true },
+    { label: quantityLabel,     value: isBundle ? packsCount : quantity, mono: true },
     { label: priceLabel,        value: pricePerPack, mono: true },
     { label: 'Tiempo estimado', value: timeFmt,     mono: true }
   ];
@@ -1088,8 +1189,9 @@ function renderResult(r) {
     });
   }
 
-  // Composition by size
-  const totalGarments = r.is_mixed ? quantity : (CFG.packs[state.packId].type === 'crew' ? quantity * 2 : quantity);
+  // Composition by size: the engine's total_quantity already counts
+  // every garment (e.g. 2 per crew pack), so no special-casing here.
+  const totalGarments = quantity;
   const bigSizes = r.qty_4xl + r.qty_5xl;
   const normalSizes = Math.max(0, totalGarments - bigSizes);
   const pctNormal = totalGarments > 0 ? (normalSizes / totalGarments * 100) : 100;
@@ -1201,7 +1303,7 @@ function renderResult(r) {
             <span class="composition__seg" style="width: ${pct5xl.toFixed(1)}%; background: var(--danger);"></span>
           </div>
           <div class="composition__legend">
-            <span><i style="background: var(--accent-primary);"></i>S–3XL · ${normalSizes}</span>
+            <span><i style="background: var(--accent-primary);"></i>S–3XL · ${normalSizes}${r.qty_3xl ? ` (incl. ${r.qty_3xl} × 3XL)` : ''}</span>
             <span><i style="background: var(--warning);"></i>4XL · ${r.qty_4xl}</span>
             <span><i style="background: var(--danger);"></i>5XL+ · ${r.qty_5xl}</span>
           </div>
@@ -1229,33 +1331,36 @@ function renderResult(r) {
 
 function buildBreakdownRows(r) {
   const rows = [];
-  if (r.is_mixed) {
+  const isBundle = r.pricing_mode === 'bundle';
+
+  if (isBundle) {
+    // Single bundle row; show the component composition in the detail.
+    const top = r.breakdown[0];
+    if (top) {
+      const sides = top.sides;
+      const comp = (top.components || []).map(c => `${c.quantity} × ${c.name}`).join(' + ');
+      rows.push({
+        concept: r.pack,
+        detail: `${comp ? comp + ' · ' : ''}${sides} cara${sides > 1 ? 's' : ''} de impresión`,
+        unit: top.unit_price,
+        qty: top.quantity,
+        subtotal: top.subtotal
+      });
+    }
+  } else {
     for (const d of r.breakdown) {
       if (d.quantity === 0) continue;
-      // In custom each line carries its own sides; in classic mixed
-      // they all share r.sides.
-      const sides = d.sides ?? r.sides;
+      const sides = d.sides;
       rows.push({
         concept: `${d.name}`,
-        detail: `${d.model} · ${sides} cara${sides > 1 ? 's' : ''} · modelo Roly`,
-        unit: d.price,
+        detail: `${d.model} · ${sides} cara${sides > 1 ? 's' : ''}`,
+        unit: d.unit_price,
         qty: d.quantity,
         subtotal: d.subtotal
       });
     }
-  } else {
-    const pack = CFG.packs[state.packId];
-    const detail = pack.type === 'crew'
-      ? `Camiseta + sudadera por persona · ${r.extra?.sides ?? 2} cara(s)`
-      : `${r.extra?.sides ?? 2} cara(s) de impresión`;
-    rows.push({
-      concept: r.pack,
-      detail,
-      unit: r.unit_price,
-      qty: r.quantity,
-      subtotal: r.subtotal
-    });
   }
+
   if (r.surcharges > 0) {
     const parts = [];
     if (r.qty_4xl > 0) parts.push(`${r.qty_4xl} × 4XL`);
@@ -1267,21 +1372,21 @@ function buildBreakdownRows(r) {
       subtotal: r.surcharges
     });
   }
+
   if (r.extras_no_vat > 0) {
-    const e = r.extras_detail || {};
+    const detail = r.extras_detail || {};
+    const addons = CFG.addons || {};
     const vat = CFG.parameters.vat || 0;
-    const items = [
-      { k: 'names',         label: 'Nombre',      unit: CFG.parameters.extra_name_eur,         unitLabel: 'ud'    },
-      { k: 'short_sleeves', label: 'Manga corta', unit: CFG.parameters.extra_short_sleeve_eur, unitLabel: 'manga' },
-      { k: 'long_sleeves',  label: 'Manga larga', unit: CFG.parameters.extra_long_sleeve_eur,  unitLabel: 'manga' }
-    ];
-    for (const it of items) {
-      const qty = e[it.k] || 0;
-      if (qty === 0) continue;
-      const unitInc = (it.unit || 0) * (1 + vat);
+    for (const [id, qty] of Object.entries(detail)) {
+      if (!qty) continue;
+      const addon = addons[id];
+      const price = addon ? addon.price : 0;
+      const label = addon ? (addon.label || id) : id;
+      const unitInc = addon && addon.vat_included ? price : price * (1 + vat);
+      const vatNote = addon && addon.vat_included ? 'IVA incl.' : 'sin IVA';
       rows.push({
-        concept: it.label,
-        detail: `${formatEur(it.unit || 0)}/${it.unitLabel} sin IVA · extra opcional`,
+        concept: label,
+        detail: `${formatEur(price)}/ud ${vatNote} · extra opcional`,
         unit: unitInc,
         qty,
         subtotal: qty * unitInc
@@ -1292,58 +1397,59 @@ function buildBreakdownRows(r) {
 }
 
 function buildCompositionMeta(r) {
-  const pack = CFG.packs[state.packId];
+  const pack = CFG.packs[r.pack_id];
   const meta = [
     { label: 'Pack', value: r.pack }
   ];
-  if (pack.type === 'crew') {
-    const hood = r.extra?.hood === 'with_hood' ? 'URBAN (con capucha)' : 'CLASICA (sin capucha)';
-    meta.push({ label: 'Modelo sudadera', value: hood });
-    meta.push({ label: 'Caras impresión', value: `${r.extra?.sides ?? 2} cara${(r.extra?.sides ?? 2) > 1 ? 's' : ''}` });
-  } else if (pack.type === 'single') {
-    const m = CFG.roly_models[pack.model];
-    meta.push({ label: 'Modelo', value: `${m.name} (${pack.model})` });
-    meta.push({ label: 'Caras impresión', value: `${r.extra?.sides ?? 2} cara${(r.extra?.sides ?? 2) > 1 ? 's' : ''}` });
-  } else if (pack.type === 'mixed') {
-    meta.push({ label: 'CLASICA / URBAN', value: `${r.breakdown[0].quantity} / ${r.breakdown[1].quantity}` });
-    meta.push({ label: 'Caras impresión', value: `${r.sides} cara${r.sides > 1 ? 's' : ''}` });
-  } else if (pack.type === 'custom') {
+
+  // Selected options (capucha, caras, …) resolved to their labels.
+  if (pack) {
+    for (const option of (pack.options || [])) {
+      const selectedId = (r.options || {})[option.id];
+      const value = (option.values || []).find(v => v.id === selectedId);
+      if (value) {
+        meta.push({ label: option.label || option.id, value: value.label || value.id });
+      }
+    }
+  }
+
+  // Line composition for multi-line components packs.
+  if (r.pricing_mode !== 'bundle' && r.breakdown.length > 1) {
     const lineSummary = r.breakdown
       .filter(d => d.quantity > 0)
-      .map(d => `${d.quantity} × ${d.model} (${d.sides}c)`)
+      .map(d => `${d.quantity} × ${d.name}`)
       .join(' · ');
     meta.push({ label: 'Líneas', value: lineSummary || '—' });
-    meta.push({ label: 'Total prendas', value: String(r.total_quantity) });
   }
+  meta.push({ label: 'Total prendas', value: String(r.total_quantity) });
+
   meta.push({ label: 'Tallas con recargo', value: `${r.qty_4xl + r.qty_5xl} (${r.qty_4xl} × 4XL · ${r.qty_5xl} × 5XL+)` });
+  if (r.qty_3xl) {
+    meta.push({ label: 'Colchón 3XL (no facturado)', value: `${r.qty_3xl}` });
+  }
   meta.push({ label: 'Tramo aplicado', value: r.tier });
   return meta;
 }
 
 function estimateTotalTime(r) {
-  // We reconstruct the time from base minutes × quantity × tier.
-  // Not exact to the internal calculation but a useful estimate.
+  // We reconstruct the time from base minutes × quantity × tier from
+  // the breakdown rows (each row carries its sides). Not exact to the
+  // internal calculation but a useful estimate.
   const p = CFG.parameters;
   const tier = CFG.tiers.find(t => t.label === r.tier);
   const reduction = tier ? tier.time_reduction : 0;
 
-  // In custom each line can have different sides.
-  if (r.is_custom) {
-    let total = 0;
-    for (const d of r.breakdown || []) {
-      const base = d.sides === 2 ? p.minutes_two_sides_base : p.minutes_one_side_base;
-      total += d.quantity * base * (1 - reduction);
-    }
-    return total;
+  let total = 0;
+  for (const d of (r.breakdown || [])) {
+    const base = d.sides === 2 ? p.minutes_two_sides_base : p.minutes_one_side_base;
+    // For a bundle row, quantity is the number of packs; multiply by the
+    // garments per pack so the time reflects every printed garment.
+    const garments = (r.pricing_mode === 'bundle')
+      ? (d.components || []).reduce((s, c) => s + c.quantity, 0)
+      : d.quantity;
+    total += garments * base * (1 - reduction);
   }
-
-  const quantity = r.is_mixed ? r.total_quantity : r.quantity;
-  // For crew there are two garments per pack
-  const pack = CFG.packs[state.packId];
-  const garments = pack && pack.type === 'crew' ? quantity * 2 : quantity;
-  const sides = r.is_mixed ? r.sides : (r.extra?.sides ?? 2);
-  const base = sides === 2 ? p.minutes_two_sides_base : p.minutes_one_side_base;
-  return garments * base * (1 - reduction);
+  return total;
 }
 
 function formatTime(minutes) {
@@ -1357,10 +1463,9 @@ function formatTime(minutes) {
 function copySummary() {
   const r = lastResult;
   if (!r) return;
-  const quantity = r.is_mixed ? r.total_quantity : r.quantity;
   const lines = [
     `${r.pack} · ${r.tier}`,
-    `Cantidad: ${quantity}`,
+    `Cantidad: ${r.total_quantity}`,
     `Total IVA inc.: ${formatEur(r.total_vat_inc)}`,
     `Base sin IVA: ${formatEur(r.sale_base)}`,
     `IVA (${formatPct(CFG.parameters.vat)}): ${formatEur(r.vat)}`
@@ -1369,11 +1474,7 @@ function copySummary() {
     lines.push(`Recargo tallas grandes: ${formatEur(r.surcharges)} (${r.qty_4xl} × 4XL · ${r.qty_5xl} × 5XL+)`);
   }
   if (r.extras_no_vat > 0) {
-    const e = r.extras_detail || {};
-    const parts = [];
-    if (e.names)         parts.push(`${e.names} nombre${e.names > 1 ? 's' : ''}`);
-    if (e.short_sleeves) parts.push(`${e.short_sleeves} manga${e.short_sleeves > 1 ? 's' : ''} corta${e.short_sleeves > 1 ? 's' : ''}`);
-    if (e.long_sleeves)  parts.push(`${e.long_sleeves} manga${e.long_sleeves > 1 ? 's' : ''} larga${e.long_sleeves > 1 ? 's' : ''}`);
+    const parts = addonParts(r.extras_detail);
     lines.push(`Extras opcionales (sin IVA): ${formatEur(r.extras_no_vat)} (${parts.join(' · ')})`);
   }
   navigator.clipboard.writeText(lines.join('\n')).catch(() => {});
@@ -1387,11 +1488,9 @@ function escapeHTML(s) {
 
 function resetForm() {
   if (state.packId) renderPackInputs(state.packId);
+  el('cant_3xl').value = '0';
   el('cant_4xl').value = '0';
   el('cant_5xl').value = '0';
-  el('cant_nombres').value = '0';
-  el('cant_mangas_cortas').value = '0';
-  el('cant_mangas_largas').value = '0';
   hide('error-msg');
   recomputePreview();
 }
@@ -1789,15 +1888,36 @@ async function onHistoryAction(action, id) {
   if (action === 'open') {
     const r = await window.packprice.getQuote(id);
     if (!r || !r.ok || !r.quote) return;
-    lastResult = r.quote.result || r.quote;
-    closeHistory();
-    if (typeof renderResult === 'function') {
-      try { renderResult(lastResult); } catch (_) {}
+    const result = r.quote.result || r.quote;
+    lastResult = result;
+
+    // Restore the pack context the result was computed under. The
+    // result carries `pack_id`; fall back to the stored draft field.
+    const packId = result.pack_id || r.quote.pack_id || null;
+    state.packId = packId;
+
+    // Guard: if the pack was renamed/removed from the config, the
+    // result still renders (it is self-contained) but option/composition
+    // lookups would fail. Warn instead of crashing.
+    if (packId && !CFG.packs[packId]) {
+      await window.packprice.showInfo({
+        titulo: 'Pack no encontrado',
+        mensaje: `El pack original ("${packId}") ya no existe en la configuración actual. Se muestra el presupuesto guardado, pero no podrás editarlo como pedido nuevo.`
+      });
     }
-    await window.packprice.showInfo({
-      titulo: 'Presupuesto cargado',
-      mensaje: `Presupuesto ${id} reabierto en pantalla.`
-    });
+
+    closeHistory();
+    try {
+      renderResult(result);
+      goToScreen('resultado');
+    } catch (err) {
+      await window.packprice.showError({
+        titulo: 'No se pudo reabrir',
+        mensaje: 'El presupuesto guardado no es compatible con la versión actual.',
+        detalle: err.message || String(err)
+      });
+      return;
+    }
     return;
   }
   if (action === 'pdf') {
