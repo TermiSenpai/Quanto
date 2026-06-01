@@ -8,6 +8,7 @@ Tres planes organizados por nivel de fricción contra los principios de CLAUDE.m
 | 2 | [`tier-2-ux-taller.md`](tier-2-ux-taller.md) | UX y robustez operativa. Asume Tier 1 hecho. | Tras Tier 1 |
 | 3 | [`tier-3-debate.md`](tier-3-debate.md) | Cambios que requieren debate previo y actualización de CLAUDE.md. | Solo si hay disparador objetivo |
 | Refactor | [`migracion-codigo-ingles.md`](migracion-codigo-ingles.md) | Migración por ondas de los identificadores a inglés (CLAUDE.md §2). | Transversal a Tier 1/2 |
+| V4 | [`v4-configurabilidad-total.md`](v4-configurabilidad-total.md) | Catálogo 100% configurable: productos, proveedores, packs y complementos. Motor unificado, PVP recomendado, 3XL correcto. Esquema `config v4` (sobre el v3-inglés) + migración v3→v4. | Evolución mayor; cruza Tier 3 |
 
 ## Orden global recomendado
 
