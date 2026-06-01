@@ -112,7 +112,7 @@ describe('validateConfigShape', () => {
 
   test.each([
     ['parameters'],
-    ['roly_models'],
+    ['products'],
     ['tiers'],
     ['packs'],
     ['admin']
