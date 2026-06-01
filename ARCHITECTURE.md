@@ -91,8 +91,10 @@ packs app/
 │
 ├── lib/                    ← pure, testable, framework-free modules (CommonJS, English)
 │   ├── config-parser.js    ← extract/serialize the JSON block of config.js (legacy ES identifiers)
-│   ├── config-schema.js    ← strict schema validation, dotted-path errors  (EN)
-│   ├── migrations.js        *← planned: migrateConfig/Quote/Settings, normalizeAuditEntry (EN)
+│   ├── config-schema.js    ← strict v4 schema validation, dotted-path errors (EN)
+│   ├── config-store.js     ← read+migrate+validate, atomic write (.tmp+rename) (EN)
+│   ├── migrations.js       ← migrateConfig (v2→v3→v4) / Quote / Settings, normalizeAuditEntry (EN)
+│   ├── path-guard.js       ← IPC path allow-list (isPathAllowed)             (EN)
 │   ├── diff.js             ← flat object diff for audit + admin preview      (EN)
 │   ├── audit.js            ← append-only audit log writer/reader             (EN)
 │   ├── history.js          ← local quote history store                       (EN)
@@ -102,8 +104,8 @@ packs app/
 ├── renderer/               ← UI + pure calculation (no Node)
 │   ├── index.html          ← single page; screens toggled via .hidden
 │   ├── app.js              ← orchestration: DOM events, IPC calls (legacy ES)
-│   ├── calculo.js          ← PURE pricing functions                  (legacy ES)
-│   ├── admin.js            ← admin editor (data-cfg-path driven)      (legacy ES)
+│   ├── calculo.js          ← PURE v4 pricing: calculatePack + helpers (EN identifiers)
+│   ├── admin.js            ← admin editor / catalog builder (data-cfg-path driven, EN)
 │   ├── admin-extras.js     ← audit log rendering                      (EN)
 │   ├── history.js          ← quote history UI                         (EN)
 │   ├── format.js           ← DOM/format helpers                       (legacy ES)
@@ -111,8 +113,6 @@ packs app/
 │
 └── tests/                  ← Vitest, English. One file per lib/renderer module.
 ```
-
-`*` = defined by the in-flight English migration (`planes/migracion-codigo-ingles.md`).
 
 ### Dependency rule (enforced, not optional)
 
@@ -127,9 +127,9 @@ renderer/app.js ──► renderer/calculo.js ──► (CFG object, pure)
 ```
 
 - `lib/*` modules are **pure where they can be**: `config-schema.js`, `diff.js`,
-  `pdf-template.js`, `migrations.js` must not touch `fs`, Electron, or globals.
-  `audit.js`, `history.js`, `logger.js` may touch `fs` (they are stores) but
-  must not import Electron UI.
+  `pdf-template.js`, `migrations.js`, `path-guard.js` must not touch `fs`,
+  Electron, or globals. `audit.js`, `history.js`, `logger.js`, `config-store.js`
+  may touch `fs` (they are stores) but must not import Electron UI.
 - `renderer/calculo.js` depends **only** on a `cfg` object passed in. No DOM,
   no globals beyond the injected config. This is what makes pricing testable.
 - `main.js` is the only file allowed to wire `lib/*` to the filesystem and IPC.
@@ -145,17 +145,32 @@ ones for the same job.
 
 ### 4.1 Pure functions for all domain calculation
 
-`getTramo`/`getTier`, `calcularCostePrenda`/`calculateGarmentCost`,
-`calcularPackPena`/`calculateCrewPack`, `calcularPackMixto`/`calculateMixedPack`,
-`calcularTotales`/`calculateTotals` are **pure**: `(cfg, input) → plain result
-object`. No DOM reads, no global mutation, no `Date.now()` inside the math.
+The pricing engine (`renderer/calculo.js`, schema v4) is a set of **pure**
+functions: `(cfg, input) → plain result object`. No DOM reads, no global
+mutation, no `Date.now()` inside the math.
+
+- `getTier(cfg, quantity)` — the volume tier, or `null` if below the first tier.
+- `calculateGarmentCost(cfg, productId, sides, tier, totalForShipping)` — the
+  real internal cost of one finished garment (supplier base + DTF + pressing +
+  waste + labor + overhead + prorated shipping).
+- `calculateAddons(cfg, selection)` — optional configurable extras, returning the
+  ex-VAT subtotal and the VAT-inclusive total.
+- `recommendedPrice(cfg, costPerUnit, targetMargin)` — suggested PVP (§6).
+- `calculatePack(cfg, packId, opt)` — **the one generic pack calculator.** It
+  replaced the four old hard-coded calculators (crew/single/mixed/custom). It is
+  driven entirely by the config: it reads the pack's `pricing_mode`, resolves the
+  selected `options` (sides/hood/…), expands components into priced lines, applies
+  3XL/4XL/5XL, and returns the full quote. A validation failure returns
+  `{ error }` with a Spanish message rather than throwing.
 
 > **Why:** pricing is the part a bug hurts most (wrong money). Pure functions are
 > trivially unit-testable without Electron or a DOM, and the test cases in
 > `tests/calculo.test.js` pin exact euro amounts from `PLAN_Calculadora.md`.
 
-**Rule:** a new pack type follows the same shape — *simple input → pure function
-→ flat result object*. Never reach into the DOM from a calculation function.
+**Rule:** a new pack is **data, not code** — add an entry to `cfg.packs` with a
+`pricing_mode` and declared `options`/`components`. Only genuinely new pricing
+behavior touches `calculatePack`, and then it stays generic. Never reach into the
+DOM from a calculation function.
 
 ### 4.2 Ports & Adapters at the IPC boundary
 
@@ -201,11 +216,21 @@ Contract for every migrator:
 - **Atomic:** backup → write; a failed write leaves the original intact.
 - **Logged:** one structured `logger.info` line per real migration.
 - **Lazy:** runs the first time a PC opens an old-format file; no human step.
-- **Chainable forward:** `if (v < 3) v = mapV2ToV3(v); if (v < 4) v = mapV3ToV4(v);`
+- **Chainable forward:** `migrateConfig` does exactly this — a v2 config is
+  mapped to v3 (`mapConfigV2ToV3`) and then to v4 (`migrateConfigV3ToV4`); a v3
+  config skips straight to the v4 step; a v4 config is returned by identity.
+
+The v3→v4 step is the substantive one: `roly_models` → `products` (each with its
+own price table, `suppliers[]` and `extra_cost_3xl`), the fixed `extra_*_eur`
+parameters → configurable `addons`, the dropped `buffer_3xl_eur_pack`, and pack
+`type` (`crew`/`single`/`mixed`/`custom`) → `pricing_mode` + declared
+`options`/`components` (with `maps_product` for the crew pack's hood→garment
+swap). See `migrateConfigV3ToV4` in `lib/migrations.js`.
 
 This is how the project keeps technical debt from compounding: old shapes are
 normalized at the door and **nobody downstream knows they ever existed**. See
-`planes/migracion-codigo-ingles.md` for the canonical v2→v3 example.
+`planes/migracion-codigo-ingles.md` (v2→v3) and
+`planes/v4-configurabilidad-total.md` (v3→v4) for the canonical examples.
 
 ### 4.5 Append-only audit log
 
@@ -275,25 +300,85 @@ parameters, admin password, company details — lives in `config.js` on the NAS,
 - **Corollary:** no domain numbers in `main.js`, `preload.js`, `app.js`, or
   `index.html`. Need one? Add it to `config.default.js` and read from `CFG`.
 
-### Config schema (current — being migrated v2 → v3)
+### Config schema (current — **v4**)
+
+`config.default.js` is the canonical, documented v4 shape. v2/v3 configs are
+migrated to v4 on read (§4.4) and never seen downstream.
 
 ```js
 {
-  version, fecha_actualizacion, modificado_por,      // → updated_at, modified_by (v3)
-  admin:       { clave },                            // → password (v3)
-  parametros:  { mo_eur_hora, iva, merma_pct, … },   // → parameters (v3)
-  modelos_roly:{ BEAGLE, CLASICA, URBAN },           // → roly_models (v3)
-  tramos:      [ { id, etiqueta, desde, hasta, … } ],// → tiers (v3)
-  packs:       { pena_completa, solo_camisetas, … }, // English ids in v3
-  empresa:     { … },                                // → company (v3)
-  presupuesto: { … }                                 // → quote_settings (v3)
+  version: '4.0.0', updated_at, modified_by,
+  admin:      { password },                 // stripped before reaching the renderer
+  parameters: {
+    labor_eur_hour, vat, waste_pct, overhead_eur_garment,
+    surcharge_4xl_eur, surcharge_5xl_eur, roly_shipping_eur_bundle,
+    garments_per_bundle, dtf_eur_meter, dtf_meters_two_sides,
+    dtf_meters_one_side, pressing_eur_side, minutes_two_sides_base,
+    minutes_one_side_base,
+    default_target_margin,        // fallback target margin for recommendedPrice
+    price_rounding_ending         // psychological rounding, e.g. 0.95 → x,95
+  },                              // NOTE: no buffer_3xl_eur_pack, no extra_*_eur
+  suppliers: { ROLY: { name, web, notes } },          // provider registry
+  products:  {                                         // replaces roly_models
+    BEAGLE: {
+      name, category,                       // category groups + decides addons
+      extra_cost_3xl, target_margin,
+      suppliers: [ { supplier, ref, price, min_order, is_default } ], // one default
+      prices: { two_sides: { T1, T2, T3, T4 }, one_side: { … } }     // sides × tier
+    }, …
+  },
+  tiers:  [ { id, label, from, to, time_reduction } ], // to:null = open-ended
+  addons: {                                            // replaces extra_*_eur
+    name: { label, price, vat_included, cost, applies_to: ['*'] }, … // applies_to = categories or '*'
+  },
+  packs: {
+    crew_full: {                            // pricing_mode 'bundle'
+      name, description, icon, pricing_mode:'bundle', min_total, target_margin,
+      options: [ { id, label, values:[{ id, label, sides? }], maps_product? } ],
+      components: [ { id, label, product, qty_per_pack } ],
+      bundle_prices: { 'without_hood|two_sides': { T1, … }, … } // option-combo × tier
+    },
+    tshirts_only: {                         // pricing_mode 'components'
+      name, …, pricing_mode:'components', min_total,
+      options:[ … ], components:[ { id, label, product } ]      // priced from product.prices
+    },
+    custom: { …, pricing_mode:'components', free_components:true, components:[] }
+  },
+  company:        { name, tax_id, address, phone, email, web },
+  quote_settings: { validity_days, terms }
 }
 ```
 
-The English key migration is specified end-to-end in
-`planes/migracion-codigo-ingles.md`. **Structural keys → English; user-visible
-values (labels, model names, terms text) → stay Spanish** because they render to
-the user.
+**Structural keys → English; user-visible values (`name`, tier `label`, addon
+`label`, pack `name`/`description`, `terms`, company data) → stay Spanish**
+because they render to the user. The strict validator (`lib/config-schema.js`)
+checks every field the engine depends on — including that each product has
+exactly one default supplier, that every `prices`/`bundle_prices` cell exists for
+every tier and option-combo, that tiers don't overlap, and that
+`components`/`maps_product` reference existing products.
+
+> **Per-entry `target_margin`:** products and packs carry a `target_margin`, but
+> the engine's `recommendedPrice` currently uses `parameters.default_target_margin`
+> as the margin; the admin "Aplicar PVP recomendado" UI passes the per-entry
+> override explicitly. Keep this in mind before assuming a stored `target_margin`
+> is consulted automatically.
+
+### Pricing rules that live in the engine (not in config)
+
+- **3XL** is an *internal* cost, never billed. Each product has an
+  `extra_cost_3xl`; for an order, `calculatePack` adds `qty_3xl × MAX(extra_cost_3xl
+  over the products in that order)` to the internal cost. The MAX is deliberately
+  conservative: the shop never loses money on the size mix. The old fixed
+  `buffer_3xl_eur_pack` is gone.
+- **4XL / 5XL** remain *client* surcharges (`surcharge_4xl_eur` /
+  `surcharge_5xl_eur`), added to the VAT-inclusive total. `qty_3xl + qty_4xl +
+  qty_5xl` is bounded by the order size.
+- **Recommended PVP:** `recommendedPrice` = round-up of `cost / (1 −
+  target_margin)` to the next price ending in `price_rounding_ending` (0.95 →
+  `x,95`). It reports the real margin at the rounded price. The basis is whatever
+  cost is passed in (an ex-VAT cost yields an ex-VAT price; no VAT gross-up here).
+- **Margin:** `margin_pct` is computed over the **net base** (`sale_base =
+  total_vat_inc / (1 + vat)`), not over the VAT-inclusive total.
 
 ### Adding a config field
 
@@ -318,18 +403,29 @@ config must pass `validateConfigSchema` before reaching the renderer.
 |---|---|
 | `contextIsolation: true` | isolate renderer from main |
 | `nodeIntegration: false` | renderer cannot call Node |
-| CSP `default-src 'self'` | block external/inline scripts |
+| CSP `default-src 'self'`, `script-src 'self'` | block external/inline scripts |
 | narrow `preload.js` surface | each exposed fn is attack surface; no `fs`/`ipcRenderer` leak |
+| IPC path allow-list (`lib/path-guard.js`) | filesystem IPC only touches blessed paths (config + per-PC settings), never arbitrary user paths |
+| `settings:write` / `quotes:save` input validation | reject malformed payloads at the IPC boundary |
+| admin-password verify rate-limit | throttle/lock repeated `auth:verify-admin` attempts |
 | no `eval`/`Function`/`vm`/dynamic `require` on user paths | prevent RCE via config |
 | schema validation on every read | bad data fails fast, never produces `NaN` prices |
+| atomic config write (`.tmp` + rename) | an interrupted write leaves the original intact |
 | backup before every admin write | recoverable from corruption or bad edit |
 | conflict check before write | no silent overwrite of another user's edit |
-| `admin.clave` stored in plaintext | it is **anti-accidental-click**, *not* security (documented in `PLAN_Calculadora.md` §7.1). Admin password is stripped before config reaches the renderer. |
+| `admin.password` stored in plaintext | it is **anti-accidental-click**, *not* security (documented in `PLAN_Calculadora.md` §7.1). Admin password is stripped before config reaches the renderer. |
 
 **Threat posture:** the app runs on a trusted LAN with trusted users. The real
 risks are (a) a malformed/hostile `config.js` reaching code execution, and (b)
 data loss. Both are mitigated above. Do not add auth, crypto, or hardening that
 the threat model doesn't justify — that is its own kind of debt.
+
+> **Accepted deferral — CSP `style-src 'unsafe-inline'`.** The CSP keeps
+> `style-src 'self' 'unsafe-inline'` because the UI uses inline `style="..."`
+> attributes pervasively. Tightening it would require sweeping the markup for an
+> offline LAN app whose script surface is already locked down (`script-src
+> 'self'`, no external origins). This is a conscious trade-off, not an oversight;
+> revisit it if the UI is ever reworked.
 
 **Never** sign the `.exe` with a borrowed or expired certificate. **Never**
 publish the code or `.exe` outside the workshop without the owner's consent.
@@ -359,13 +455,14 @@ publish the code or `.exe` outside the workshop without the owner's consent.
 
 - **Vitest**, one test file per module, in English.
 - **Highest-value targets** (test these before anything else):
-  1. `getTramo`/`getTier` — tier boundaries (9, 10, 24, 25, 49, 50, 99, 100).
+  1. `getTier` — tier boundaries (9, 10, 24, 25, 49, 50, 99, 100); null below the first tier.
   2. `calculateGarmentCost` — two-sided garment across tiers, with/without reduction.
-  3. `calculateCrewPack` — the `PLAN_Calculadora.md` case: 12 packs no-hood 2-sides → 311.40 €.
-  4. `calculateMixedPack` — 7 URBAN + 5 CLASICA T1 → 193.40 €.
-  5. `buildDefaultConfig()` — structural keys survive refactors.
-  6. `config-parser` / `config-schema` — malformed files, missing sections.
-  7. `migrations.*` — round-trip v2→v3, idempotency, missing-field errors.
+  3. `calculatePack` (bundle) — the `PLAN_Calculadora.md` case: 12 crew packs no-hood 2-sides → 311.40 €.
+  4. `calculatePack` (components) — 7 URBAN + 5 CLASICA T1 → 193.40 €; plus 3XL/4XL/5XL bounds and `margin_pct` over `sale_base`.
+  5. `recommendedPrice` — round-up to `x,95` and reported margin at the rounded price.
+  6. `buildDefaultConfig()` — structural v4 keys survive refactors.
+  7. `config-parser` / `config-schema` — malformed files, missing sections, v4 rules.
+  8. `migrations.*` — round-trip v2→v3→v4, idempotency, missing-field errors.
 - **Rule:** any change touching calculation or config schema ships with tests.
   Pure functions (§4.1) make this cheap — there is no excuse to skip it.
 - E2E (Playwright on the packaged `.exe`) is deferred until the app justifies it.
@@ -377,15 +474,17 @@ publish the code or `.exe` outside the workshop without the owner's consent.
 The app is built for **2–3 users + one NAS**. These are the *only* sanctioned
 growth seams; anything beyond them needs a debate and a `CLAUDE.md` update.
 
-### Cheap, supported by design (data-only)
-- New Roly model: add `roly_models.<ID>`.
-- New single-model pack: add `packs.<id>` with `type: 'single'`.
+### Cheap, supported by design (data-only, from the admin UI)
+- New supplier: add `suppliers.<ID>`.
+- New product/garment: add `products.<ID>` (category, suppliers, price table, 3XL).
+- New single-product or multi-component pack: add `packs.<id>` with a
+  `pricing_mode` and declared `options`/`components`. No code change — the unified
+  `calculatePack` handles it. This is the whole point of v4: the catalog is data.
 
 ### Needs code (follow the existing pattern)
-- New mixed pack: `calculateMixedPack` is currently coupled to CLASICA+URBAN. For
-  a generic mixed pack, refactor it to iterate `pack.components` instead of
-  hard-coded models. Do this **when a second mixed pack actually exists**, not
-  preemptively.
+- A genuinely new *pricing behavior* (e.g. a tiered surcharge that no current
+  option models) extends `calculatePack` — but keep it generic and config-driven,
+  never a per-pack branch. Add tests pinning the new behavior.
 
 ### Bigger seams (each gated on a real trigger)
 - **Quote history at scale:** already local per-PC JSON via `lib/history.js`. If

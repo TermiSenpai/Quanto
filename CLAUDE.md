@@ -18,6 +18,7 @@ low-maintenance** codebase that stays cheap to own for years, for a workshop of
 | How to work with Claude Code / subagents / workflow | `AGENTS.md` |
 | The business model (pricing, packs, tiers) — source of truth | `PLAN_Calculadora.md` |
 | The English-migration plan (waves, key glossary) | `planes/migracion-codigo-ingles.md` |
+| The v4 configurability plan (products/suppliers/addons, unified engine) | `planes/v4-configurabilidad-total.md` |
 | Build & distribution | `README-build.md` |
 
 ---
@@ -28,6 +29,10 @@ An **Electron** desktop app that prices DTF (Direct-to-Film) textile
 customization packs. Each workshop PC runs a portable `.exe`; all share one
 `config.js` on the company NAS (`\\172.26.0.154\Paep\Packs\`). No multi-tenant,
 no public internet, no telemetry, no backend. The NAS file *is* the backend.
+
+The config/engine is at **schema v4**: the whole catalog (products, suppliers,
+addons, packs) is user-configurable from the admin UI. See `ARCHITECTURE.md` §6
+for the shape and `PLAN_Calculadora.md` for the business model.
 
 Currently **beta** (`-preview`/`-beta` version suffixes) — not V1.
 
@@ -92,14 +97,15 @@ Full rationale in `ARCHITECTURE.md` §7 and `AGENTS.md` §1.
 ```
 main.js            ← main process: IPC + filesystem
 preload.js         ← the port: window.packprice.* whitelist
-config.default.js  ← default config seed (bootstrap only)
+config.default.js  ← default config seed (bootstrap only; canonical v4 shape)
 lib/               ← pure, testable modules (English): config-schema, diff,
-                     audit, history, pdf-template, logger, config-parser, migrations*
+                     audit, history, pdf-template, logger, config-parser,
+                     config-store, migrations, path-guard
 renderer/          ← UI + pure calc: index.html, app.js, calculo.js, admin.js,
                      admin-extras.js, history.js, format.js, styles.css
 tests/             ← Vitest (English), one file per module
 ```
-`*` planned by the migration. Full map and layering rules in `ARCHITECTURE.md` §3.
+Full map and layering rules in `ARCHITECTURE.md` §3.
 
 The production `config.js` is **not in this repo** — it lives on the NAS with
 automatic `backups\` before every admin write.
