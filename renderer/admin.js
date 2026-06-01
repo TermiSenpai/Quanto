@@ -6,8 +6,8 @@
 // `window.confirm` for destructive actions (guarded so the module
 // stays unit-testable in Node).
 //
-//   - updateConfigFromInput  (a single field change; alias applyConfigInput)
-//   - executeAdminAction     (add/remove a row; alias runAdminAction)
+//   - updateConfigFromInput  (a single field change)
+//   - executeAdminAction     (add/remove a row)
 //
 // Orchestration (open/close modal, login, IPC, save/diff) lives in
 // app.js. Config schema: v4 (English keys). The user can create and
@@ -110,7 +110,7 @@ export function renderAdminParameters(cfg) {
       const maxAttr  = it.max  !== undefined ? ` max="${it.max}"`   : '';
       html += `
         <label>${esc(it.label)}${it.hint ? ` <span class="hint">${esc(it.hint)}</span>` : ''}
-          <input type="number"${stepAttr}${minAttr}${maxAttr} value="${valueAttr}" data-cfg-path="parameters.${it.key}">
+          <input type="number"${stepAttr}${minAttr}${maxAttr} value="${esc(valueAttr)}" data-cfg-path="parameters.${esc(it.key)}">
         </label>
       `;
     }
@@ -144,13 +144,13 @@ export function renderAdminSuppliers(cfg) {
         </div>
         <div class="admin-grid">
           <label>Nombre
-            <input type="text" value="${esc(s.name || '')}" data-cfg-path="suppliers.${id}.name">
+            <input type="text" value="${esc(s.name || '')}" data-cfg-path="suppliers.${esc(id)}.name">
           </label>
           <label>Web <span class="hint">opcional</span>
-            <input type="text" value="${esc(s.web || '')}" data-cfg-path="suppliers.${id}.web">
+            <input type="text" value="${esc(s.web || '')}" data-cfg-path="suppliers.${esc(id)}.web">
           </label>
           <label>Notas <span class="hint">opcional</span>
-            <input type="text" value="${esc(s.notes || '')}" data-cfg-path="suppliers.${id}.notes">
+            <input type="text" value="${esc(s.notes || '')}" data-cfg-path="suppliers.${esc(id)}.notes">
           </label>
         </div>
       </div>
@@ -199,17 +199,17 @@ export function renderAdminProducts(cfg) {
     html += '<div class="admin-grid">';
     html += `
       <label>Nombre
-        <input type="text" value="${esc(p.name || '')}" data-cfg-path="products.${id}.name">
+        <input type="text" value="${esc(p.name || '')}" data-cfg-path="products.${esc(id)}.name">
       </label>
       <label>Categoría <span class="hint">agrupa y decide qué complementos aplican</span>
-        <input type="text" list="cat-list-${esc(id)}" value="${esc(p.category || '')}" data-cfg-path="products.${id}.category">
+        <input type="text" list="cat-list-${esc(id)}" value="${esc(p.category || '')}" data-cfg-path="products.${esc(id)}.category">
         <datalist id="cat-list-${esc(id)}">${categories.map(c => `<option value="${esc(c)}"></option>`).join('')}</datalist>
       </label>
       <label>Coste extra 3XL (€) <span class="hint">colchón interno · no se factura</span>
-        <input type="number" step="0.01" min="0" value="${p.extra_cost_3xl ?? 0}" data-cfg-path="products.${id}.extra_cost_3xl">
+        <input type="number" step="0.01" min="0" value="${esc(p.extra_cost_3xl ?? 0)}" data-cfg-path="products.${esc(id)}.extra_cost_3xl">
       </label>
       <label>Margen objetivo <span class="hint">decimal · vacío usa el global</span>
-        <input type="number" step="0.01" min="0" max="0.99" value="${p.target_margin ?? ''}" data-cfg-path="products.${id}.target_margin">
+        <input type="number" step="0.01" min="0" max="0.99" value="${esc(p.target_margin ?? '')}" data-cfg-path="products.${esc(id)}.target_margin">
       </label>
     `;
     html += '</div>';
@@ -227,12 +227,12 @@ export function renderAdminProducts(cfg) {
             <div class="admin-row__title">
               <label style="flex-direction: row; align-items: center; gap: 6px; font-weight: 600;">
                 <input type="radio" name="prod-default-${esc(id)}" ${sup.is_default ? 'checked' : ''}
-                       data-action-change="set-default-supplier" data-id="${esc(id)}" data-idx="${sidx}">
+                       data-action-change="set-default-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}">
                 Por defecto
               </label>
             </div>
             <button type="button" class="admin-row__remove"
-                    data-action="remove-product-supplier" data-id="${esc(id)}" data-idx="${sidx}"
+                    data-action="remove-product-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}"
                     ${onlyOne ? 'disabled title="Debe quedar al menos un proveedor"' : 'title="Quitar proveedor"'}
                     aria-label="Quitar proveedor">
               <svg class="icon"><use href="#i-x"/></svg>
@@ -240,16 +240,16 @@ export function renderAdminProducts(cfg) {
           </div>
           <div class="admin-grid">
             <label>Proveedor
-              <select data-cfg-path="products.${id}.suppliers.${sidx}.supplier">${supplierOptions}</select>
+              <select data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.supplier">${supplierOptions}</select>
             </label>
             <label>Referencia
-              <input type="text" value="${esc(sup.ref || '')}" data-cfg-path="products.${id}.suppliers.${sidx}.ref">
+              <input type="text" value="${esc(sup.ref || '')}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.ref">
             </label>
             <label>Precio base (€) <span class="hint">sin IVA, sin DTF</span>
-              <input type="number" step="0.0001" min="0" value="${sup.price ?? 0}" data-cfg-path="products.${id}.suppliers.${sidx}.price">
+              <input type="number" step="0.0001" min="0" value="${esc(sup.price ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.price">
             </label>
             <label>Pedido mínimo
-              <input type="number" step="1" min="0" value="${sup.min_order ?? 0}" data-cfg-path="products.${id}.suppliers.${sidx}.min_order">
+              <input type="number" step="1" min="0" value="${esc(sup.min_order ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.min_order">
             </label>
           </div>
         </div>
@@ -273,7 +273,7 @@ export function renderAdminProducts(cfg) {
         const value = p.prices?.[faceKey]?.[t.id];
         html += `
           <label>${esc(t.id)} · ${esc(t.label || '')}
-            <input type="number" step="0.01" min="0" value="${value ?? 0}" data-cfg-path="products.${id}.prices.${faceKey}.${t.id}">
+            <input type="number" step="0.01" min="0" value="${esc(value ?? 0)}" data-cfg-path="products.${esc(id)}.prices.${esc(faceKey)}.${esc(t.id)}">
           </label>
         `;
       }
@@ -351,16 +351,16 @@ export function renderAdminAddons(cfg) {
         </div>
         <div class="admin-grid">
           <label>Etiqueta
-            <input type="text" value="${esc(a.label || '')}" data-cfg-path="addons.${id}.label">
+            <input type="text" value="${esc(a.label || '')}" data-cfg-path="addons.${esc(id)}.label">
           </label>
           <label>Precio (€/ud)
-            <input type="number" step="0.01" min="0" value="${a.price ?? 0}" data-cfg-path="addons.${id}.price">
+            <input type="number" step="0.01" min="0" value="${esc(a.price ?? 0)}" data-cfg-path="addons.${esc(id)}.price">
           </label>
           <label>Coste interno (€/ud) <span class="hint">para el margen</span>
-            <input type="number" step="0.01" min="0" value="${a.cost ?? 0}" data-cfg-path="addons.${id}.cost">
+            <input type="number" step="0.01" min="0" value="${esc(a.cost ?? 0)}" data-cfg-path="addons.${esc(id)}.cost">
           </label>
           <label style="flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" ${a.vat_included ? 'checked' : ''} data-cfg-path="addons.${id}.vat_included">
+            <input type="checkbox" ${a.vat_included ? 'checked' : ''} data-cfg-path="addons.${esc(id)}.vat_included">
             El precio ya incluye IVA
           </label>
         </div>
@@ -404,7 +404,7 @@ export function renderAdminTiers(cfg) {
             <strong>${esc(t.label || '')}</strong>
           </div>
           <button type="button" class="admin-row__remove"
-                  data-action="remove-tier" data-idx="${i}"
+                  data-action="remove-tier" data-idx="${esc(i)}"
                   ${disableRemove ? 'disabled title="Debe quedar al menos un tramo"' : 'title="Eliminar tramo"'}
                   aria-label="Eliminar tramo ${esc(t.id)}">
             <svg class="icon"><use href="#i-x"/></svg>
@@ -412,16 +412,16 @@ export function renderAdminTiers(cfg) {
         </div>
         <div class="admin-grid">
           <label>Etiqueta
-            <input type="text" value="${esc(t.label || '')}" data-cfg-path="tiers.${i}.label">
+            <input type="text" value="${esc(t.label || '')}" data-cfg-path="tiers.${esc(i)}.label">
           </label>
           <label>Reducción de tiempo <span class="hint">decimal · 0.10 = 10%</span>
-            <input type="number" step="0.01" min="0" max="1" value="${t.time_reduction ?? 0}" data-cfg-path="tiers.${i}.time_reduction">
+            <input type="number" step="0.01" min="0" max="1" value="${esc(t.time_reduction ?? 0)}" data-cfg-path="tiers.${esc(i)}.time_reduction">
           </label>
           <label>Desde (uds)
-            <input type="number" min="1" step="1" value="${t.from ?? 0}" data-cfg-path="tiers.${i}.from">
+            <input type="number" min="1" step="1" value="${esc(t.from ?? 0)}" data-cfg-path="tiers.${esc(i)}.from">
           </label>
           <label>Hasta (uds) <span class="hint">vacío = sin límite</span>
-            <input type="number" min="1" step="1" value="${t.to === null || t.to === undefined ? '' : t.to}" data-cfg-path="tiers.${i}.to">
+            <input type="number" min="1" step="1" value="${esc(t.to === null || t.to === undefined ? '' : t.to)}" data-cfg-path="tiers.${esc(i)}.to">
           </label>
         </div>
       </div>
@@ -469,19 +469,19 @@ export function renderAdminPacks(cfg) {
     html += '<div class="admin-grid">';
     html += `
       <label>Nombre
-        <input type="text" value="${esc(pack.name || '')}" data-cfg-path="packs.${id}.name">
+        <input type="text" value="${esc(pack.name || '')}" data-cfg-path="packs.${esc(id)}.name">
       </label>
       <label>Descripción
-        <input type="text" value="${esc(pack.description || '')}" data-cfg-path="packs.${id}.description">
+        <input type="text" value="${esc(pack.description || '')}" data-cfg-path="packs.${esc(id)}.description">
       </label>
       <label>Icono <span class="hint">id de icono (ej. i-pack)</span>
-        <input type="text" value="${esc(pack.icon || '')}" data-cfg-path="packs.${id}.icon">
+        <input type="text" value="${esc(pack.icon || '')}" data-cfg-path="packs.${esc(id)}.icon">
       </label>
       <label>Mínimo total (uds)
-        <input type="number" step="1" min="1" value="${pack.min_total ?? 1}" data-cfg-path="packs.${id}.min_total">
+        <input type="number" step="1" min="1" value="${esc(pack.min_total ?? 1)}" data-cfg-path="packs.${esc(id)}.min_total">
       </label>
       <label>Margen objetivo <span class="hint">decimal · vacío usa el global</span>
-        <input type="number" step="0.01" min="0" max="0.99" value="${pack.target_margin ?? ''}" data-cfg-path="packs.${id}.target_margin">
+        <input type="number" step="0.01" min="0" max="0.99" value="${esc(pack.target_margin ?? '')}" data-cfg-path="packs.${esc(id)}.target_margin">
       </label>
       <label>Modo de precio
         <select data-action-change="set-pricing-mode" data-id="${esc(id)}">
@@ -538,14 +538,14 @@ function renderPackOptions(cfg, id, pack) {
             <strong>${esc(option.label || '')}</strong>
           </div>
           <button type="button" class="admin-row__remove"
-                  data-action="remove-pack-option" data-id="${esc(id)}" data-idx="${oidx}"
+                  data-action="remove-pack-option" data-id="${esc(id)}" data-idx="${esc(oidx)}"
                   title="Eliminar opción" aria-label="Eliminar opción">
             <svg class="icon"><use href="#i-x"/></svg>
           </button>
         </div>
         <div class="admin-grid">
           <label>Etiqueta
-            <input type="text" value="${esc(option.label || '')}" data-cfg-path="packs.${id}.options.${oidx}.label">
+            <input type="text" value="${esc(option.label || '')}" data-cfg-path="packs.${esc(id)}.options.${esc(oidx)}.label">
           </label>
         </div>
         <div class="admin-mini-head">Valores</div>
@@ -556,13 +556,13 @@ function renderPackOptions(cfg, id, pack) {
       html += `
         <div class="admin-grid" style="grid-template-columns: 2fr 1fr auto; align-items: end;">
           <label>${esc(value.id || `v${vidx}`)} · etiqueta
-            <input type="text" value="${esc(value.label || '')}" data-cfg-path="packs.${id}.options.${oidx}.values.${vidx}.label">
+            <input type="text" value="${esc(value.label || '')}" data-cfg-path="packs.${esc(id)}.options.${esc(oidx)}.values.${esc(vidx)}.label">
           </label>
           <label>Caras <span class="hint">vacío = no aplica</span>
-            <input type="number" step="1" min="0" value="${sidesVal}" data-cfg-path="packs.${id}.options.${oidx}.values.${vidx}.sides">
+            <input type="number" step="1" min="0" value="${esc(sidesVal)}" data-cfg-path="packs.${esc(id)}.options.${esc(oidx)}.values.${esc(vidx)}.sides">
           </label>
           <button type="button" class="admin-row__remove"
-                  data-action="remove-option-value" data-id="${esc(id)}" data-idx="${oidx}" data-vidx="${vidx}"
+                  data-action="remove-option-value" data-id="${esc(id)}" data-idx="${esc(oidx)}" data-vidx="${esc(vidx)}"
                   ${onlyOne ? 'disabled title="Debe quedar al menos un valor"' : 'title="Quitar valor"'}
                   aria-label="Quitar valor">
             <svg class="icon"><use href="#i-x"/></svg>
@@ -572,7 +572,7 @@ function renderPackOptions(cfg, id, pack) {
     });
     html += `
         <div class="admin-row-add" style="margin-top: 6px;">
-          <button type="button" class="btn btn-ghost" data-action="add-option-value" data-id="${esc(id)}" data-idx="${oidx}">
+          <button type="button" class="btn btn-ghost" data-action="add-option-value" data-id="${esc(id)}" data-idx="${esc(oidx)}">
             <svg class="icon"><use href="#i-plus"/></svg> Añadir valor
           </button>
         </div>
@@ -604,21 +604,21 @@ function renderPackComponents(cfg, id, pack, productIds) {
             <strong>${esc(comp.label || '')}</strong>
           </div>
           <button type="button" class="admin-row__remove"
-                  data-action="remove-pack-component" data-id="${esc(id)}" data-idx="${cidx}"
+                  data-action="remove-pack-component" data-id="${esc(id)}" data-idx="${esc(cidx)}"
                   title="Quitar componente" aria-label="Quitar componente">
             <svg class="icon"><use href="#i-x"/></svg>
           </button>
         </div>
         <div class="admin-grid">
           <label>Etiqueta
-            <input type="text" value="${esc(comp.label || '')}" data-cfg-path="packs.${id}.components.${cidx}.label">
+            <input type="text" value="${esc(comp.label || '')}" data-cfg-path="packs.${esc(id)}.components.${esc(cidx)}.label">
           </label>
           <label>Producto
-            <select data-cfg-path="packs.${id}.components.${cidx}.product">${productOptions}</select>
+            <select data-cfg-path="packs.${esc(id)}.components.${esc(cidx)}.product">${productOptions}</select>
           </label>
           ${isBundle ? `
           <label>Cantidad por pack
-            <input type="number" step="1" min="1" value="${comp.qty_per_pack ?? 1}" data-cfg-path="packs.${id}.components.${cidx}.qty_per_pack">
+            <input type="number" step="1" min="1" value="${esc(comp.qty_per_pack ?? 1)}" data-cfg-path="packs.${esc(id)}.components.${esc(cidx)}.qty_per_pack">
           </label>` : ''}
         </div>
       </div>
@@ -647,7 +647,7 @@ function renderBundlePrices(cfg, id, pack) {
       const value = row[t.id];
       html += `
         <label>${esc(t.id)} · ${esc(t.label || '')}
-          <input type="number" step="0.01" min="0" value="${value ?? 0}" data-cfg-path="packs.${id}.bundle_prices.${combo}.${t.id}">
+          <input type="number" step="0.01" min="0" value="${esc(value ?? 0)}" data-cfg-path="packs.${esc(id)}.bundle_prices.${esc(combo)}.${esc(t.id)}">
         </label>
       `;
     }
@@ -728,9 +728,6 @@ export function updateConfigFromInput(cfg, input) {
   obj[path[path.length - 1]] = value;
 }
 
-// Back-compat alias (app.js still imports applyConfigInput).
-export const applyConfigInput = updateConfigFromInput;
-
 /**
  * Runs a row/builder action. Returns { error?, dirty? }; on error
  * the caller must show it and NOT refresh.
@@ -779,9 +776,6 @@ export function executeAdminAction(cfg, dataset) {
     default: return { error: `Acción desconocida: ${action}` };
   }
 }
-
-// Back-compat alias (app.js still imports runAdminAction).
-export const runAdminAction = executeAdminAction;
 
 // ------------------------------------------------------------
 // Tiers (cascade now updates products.prices and bundle_prices)
@@ -1080,6 +1074,9 @@ function addPack(cfg) {
       ? [{ id: 'item', label: cfg.products[productIds[0]].name || 'Producto', product: productIds[0] }]
       : []
   };
+  // Without products an empty `components` array only validates if the
+  // pack lets the user pick products at quote time (free_components).
+  if (productIds.length === 0) pack.free_components = true;
   cfg.packs[id] = pack;
   return { dirty: true };
 }
@@ -1261,13 +1258,16 @@ function comboToSelectedOptions(pack, combo) {
   return selected;
 }
 
-/** Number of sides implied by the selection (default 1). */
+/** Number of sides implied by the selection (default 1). Mirrors
+ *  calculo.js `calculatePack`: when several option values carry
+ *  `sides`, the LAST match wins so the cost basis stays in lockstep. */
 function sidesFromSelection(pack, selected) {
+  let sides = 1;
   for (const option of (pack.options || [])) {
     const value = (option.values || []).find(v => v.id === selected[option.id]);
-    if (value && Number.isFinite(value.sides)) return value.sides;
+    if (value && Number.isFinite(value.sides)) sides = value.sides;
   }
-  return 1;
+  return sides;
 }
 
 /** Mirrors calculo.js resolveComponentProduct for the recommended sum. */

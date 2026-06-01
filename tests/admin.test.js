@@ -20,9 +20,7 @@ import {
   renderAdminPacks,
   renderAdminTabContent,
   updateConfigFromInput,
-  applyConfigInput,
-  executeAdminAction,
-  runAdminAction
+  executeAdminAction
 } from '../renderer/admin.js';
 import { buildDefaultConfig } from '../config.default.js';
 import { collectConfigErrors } from '../lib/config-schema.js';
@@ -107,10 +105,6 @@ describe('updateConfigFromInput', () => {
     const cfg = freshCfg();
     updateConfigFromInput(cfg, fakeInput('nope.also_nope.deep', 'text', 'x'));
     expect(cfg.nope).toBeUndefined();
-  });
-
-  test('applyConfigInput is an alias of updateConfigFromInput', () => {
-    expect(applyConfigInput).toBe(updateConfigFromInput);
   });
 });
 
@@ -326,6 +320,35 @@ describe('packs builder actions', () => {
     expectValid(cfg);
   });
 
+  test('add-pack with zero products yields a schema-valid pack', () => {
+    const cfg = freshCfg();
+    // Strip the catalog so products is empty when the pack is created;
+    // remove packs first so the products are no longer in use.
+    for (const id of Object.keys(cfg.packs)) delete cfg.packs[id];
+    for (const id of Object.keys(cfg.products)) delete cfg.products[id];
+    expect(Object.keys(cfg.products).length).toBe(0);
+
+    const r = executeAdminAction(cfg, { action: 'add-pack' });
+    expect(r.dirty).toBe(true);
+    expect(cfg.packs.pack_1).toBeDefined();
+    // With no products the pack must be free_components so its empty
+    // `components` array is schema-valid (it would fail otherwise).
+    expect(cfg.packs.pack_1.components).toEqual([]);
+    expect(cfg.packs.pack_1.free_components).toBe(true);
+
+    // The schema also forbids an empty `products` section, so the pack
+    // is exercised inside an otherwise-valid catalog: only the pack's
+    // own validity is under test, and it passes with no errors.
+    cfg.products.PROBE = {
+      name: 'Probe', category: 'general', extra_cost_3xl: 0, target_margin: 0.35,
+      suppliers: [{ supplier: Object.keys(cfg.suppliers)[0], ref: '', price: 1, min_order: 0, is_default: true }],
+      prices: Object.fromEntries(
+        ['two_sides', 'one_side'].map(face => [face, Object.fromEntries(cfg.tiers.map(t => [t.id, 1]))])
+      )
+    };
+    expect(collectConfigErrors(cfg)).toEqual([]);
+  });
+
   test('remove-pack deletes it', () => {
     const cfg = freshCfg();
     const r = executeAdminAction(cfg, { action: 'remove-pack', id: 'tshirts_only' });
@@ -414,9 +437,9 @@ describe('packs builder actions', () => {
 });
 
 // ============================================================
-// Router + aliases
+// Router
 // ============================================================
-describe('router and aliases', () => {
+describe('router', () => {
   test('renderAdminTabContent routes every v4 tab', () => {
     const cfg = freshCfg();
     expect(renderAdminTabContent(cfg, 'parameters')).toContain('parameters.vat');
@@ -426,10 +449,6 @@ describe('router and aliases', () => {
     expect(renderAdminTabContent(cfg, 'tiers')).toContain('tiers.0.label');
     expect(renderAdminTabContent(cfg, 'packs')).toContain('packs.crew_full.name');
     expect(renderAdminTabContent(cfg, 'unknown')).toBe('');
-  });
-
-  test('runAdminAction is an alias of executeAdminAction', () => {
-    expect(runAdminAction).toBe(executeAdminAction);
   });
 
   test('unknown action returns an error', () => {
