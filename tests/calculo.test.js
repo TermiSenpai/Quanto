@@ -266,6 +266,20 @@ describe('calculatePack — cost and 3XL', () => {
     expect(with3xl.total_vat_inc).toBeCloseTo(base.total_vat_inc, 2);
   });
 
+  test('3XL uses the MAX extra across heterogeneous products (never under-prices)', () => {
+    // crew_full mixes BEAGLE (extra_cost_3xl 0.40) + CLASICA (0.60).
+    // The conservative rule charges the MAX (0.60), not the t-shirt's 0.40.
+    const base = calculatePack(CFG, 'crew_full', {
+      options: { hood: 'without_hood', sides: 'two_sides' }, packs: 12
+    });
+    const with3xl = calculatePack(CFG, 'crew_full', {
+      options: { hood: 'without_hood', sides: 'two_sides' }, packs: 12, qty_3xl: 3
+    });
+    expect(with3xl.total_cost - base.total_cost).toBeCloseTo(1.80, 2); // 3 × 0.60 (MAX)
+    // and explicitly NOT the cheaper t-shirt rate
+    expect(with3xl.total_cost - base.total_cost).not.toBeCloseTo(1.20, 2); // 3 × 0.40
+  });
+
   test('addons add cost and revenue', () => {
     const base = calculatePack(CFG, 'tshirts_only', {
       options: { sides: 'two_sides' }, quantities: { tshirt: 10 }
@@ -330,6 +344,12 @@ describe('recommendedPrice', () => {
   test('defaults to the config target margin when none is passed', () => {
     const r = recommendedPrice(CFG, 10);
     expect(r.price).toBeCloseTo(15.95, 2); // default 0.35
+  });
+
+  test('margin >= 1 yields Infinity without crashing', () => {
+    const r = recommendedPrice(CFG, 10, 1);
+    expect(r.price).toBe(Infinity);
+    expect(r.margin_pct).toBe(0);
   });
 
   test('reports the real margin at the rounded price', () => {

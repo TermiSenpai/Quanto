@@ -132,18 +132,19 @@ export function calculateGarmentCost(cfg, productId, sides, tier, totalGarmentsF
 }
 
 /**
- * Recommended VAT-included price for a unit of cost `costPerUnit` at
- * the given `targetMargin` (fraction of the net sale base), rounded UP
- * to the next price whose cents end at `cfg.parameters.price_rounding_ending`
- * (0.95 → next x,95).
+ * Recommended price for a unit of cost `costPerUnit` at the given
+ * `targetMargin`, rounded UP to the next price whose cents end at
+ * `cfg.parameters.price_rounding_ending` (0.95 → next x,95).
  *
- * Returns the suggested price and the real margin it yields so the UI
- * can show "this rounding gives you X% margin".
+ * Price is computed on the SAME basis as the cost passed in: an ex-VAT
+ * cost yields an ex-VAT price (no VAT gross-up happens here). The
+ * returned margin is `price - costPerUnit` and `margin_pct` is over the
+ * price, so the UI can show "this rounding gives you X% margin".
  *
  *   cost 10, margin 0.35 → 10/0.65 = 15.3846 → round up → 15.95
  *
  * @param cfg
- * @param costPerUnit  internal cost of one unit (ex-VAT)
+ * @param costPerUnit  internal cost of one unit
  * @param targetMargin fraction in [0,1)
  * @returns { price, raw_price, margin, margin_pct }
  */
@@ -158,7 +159,7 @@ export function recommendedPrice(cfg, costPerUnit, targetMargin) {
 
   // Real margin at the rounded price (margin over the price itself).
   const realMargin = price - costPerUnit;
-  const realMarginPct = price > 0 ? (realMargin / price) : 0;
+  const realMarginPct = (Number.isFinite(price) && price > 0) ? (realMargin / price) : 0;
 
   return {
     price,
@@ -310,7 +311,7 @@ export function calculatePack(cfg, packId, opt) {
   const breakdown = [];
 
   if (pack.pricing_mode === 'bundle') {
-    const comboKey = (pack.options || []).map(opt => selectedOptions[opt.id]).join('|');
+    const comboKey = (pack.options || []).map(option => selectedOptions[option.id]).join('|');
     const priceRow = (pack.bundle_prices || {})[comboKey];
     const bundlePrice = priceRow ? priceRow[tier.id] : undefined;
     if (bundlePrice === undefined || bundlePrice === null) {

@@ -65,6 +65,10 @@ const SUPPLIERS = {
 // (sides × tier), used directly by 'components' packs and as the basis
 // for recommended prices. Each product lists one or more suppliers;
 // exactly one is `is_default: true` and its `price` feeds cost.
+// NOTE: per-product/per-pack `target_margin` is seeded here but not yet
+// read by the engine (recommendedPrice currently uses
+// parameters.default_target_margin); the admin/recommended-price UI
+// (later phase) will consume the per-entry override.
 const PRODUCTS = {
   BEAGLE: {
     name:           'Camiseta',
