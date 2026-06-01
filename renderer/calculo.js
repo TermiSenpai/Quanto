@@ -5,40 +5,27 @@
 // They never touch the DOM, the filesystem, or globals, which is
 // what lets us test them in isolation (see CLAUDE.md §7).
 //
-// Schema: v3 (English keys) for both the config they consume and
+// Schema: v4 (English keys) for both the config they consume and
 // the result they produce. User-facing strings (error messages,
 // pack/tier names that come from the config) stay in Spanish.
+//
+// v4 unifies the old four pack calculators into a single generic
+// `calculatePack(cfg, packId, opt)` driven entirely by the config:
+//   - 'bundle'     packs price the whole pack at `bundle_prices`
+//                  keyed by the option-combo string × tier.
+//   - 'components' packs sum each component's own product price.
+// Options (sides, hood, …) are declared in the config, not here.
+//
+// `opt` input shape:
+//   opt = {
+//     options:    { <optionId>: <selectedValueId>, ... },
+//     packs:      <number>,                          // bundle packs
+//     quantities: { <componentId>: <qty>, ... },     // components packs
+//     lines:      [ { product:<id>, quantity:<n> } ],// free_components only
+//     qty_3xl, qty_4xl, qty_5xl,                      // size counts (def 0)
+//     addons:     { <addonId>: <qty>, ... }           // selected addons
+//   }
 // ============================================================
-
-/**
- * Computes optional extras (name, printed sleeves) in euros.
- *
- * Config prices (extra_*_eur) are WITHOUT VAT. We return both the
- * VAT-free subtotal (what the user "ordered") and its VAT-included
- * equivalent, to add to the total the rest of the flow treats as
- * VAT-included. With no extras everything is 0.
- *
- * @param cfg
- * @param extras  { names, short_sleeves, long_sleeves }
- */
-export function calculateExtras(cfg, extras) {
-  const e = extras || {};
-  const p = cfg.parameters;
-  const names        = e.names         || 0;
-  const shortSleeves = e.short_sleeves || 0;
-  const longSleeves  = e.long_sleeves  || 0;
-
-  const noVat = names        * (p.extra_name_eur         || 0)
-             + shortSleeves  * (p.extra_short_sleeve_eur || 0)
-             + longSleeves   * (p.extra_long_sleeve_eur  || 0);
-  const vatInc = noVat * (1 + (p.vat || 0));
-
-  return {
-    no_vat: noVat,
-    vat_inc: vatInc,
-    detail: { names, short_sleeves: shortSleeves, long_sleeves: longSleeves }
-  };
-}
 
 /**
  * Returns the volume tier for a quantity, or null if it fits none
@@ -47,27 +34,82 @@ export function calculateExtras(cfg, extras) {
 export function getTier(cfg, quantity) {
   for (const t of cfg.tiers) {
     const meetsMin = quantity >= t.from;
-    const meetsMax = (t.to === null) || (quantity <= t.to);
+    const meetsMax = (t.to === null || t.to === undefined) || (quantity <= t.to);
     if (meetsMin && meetsMax) return t;
   }
   return null;
 }
 
 /**
- * Real cost of producing one finished garment (Roly + DTF +
+ * Returns the default supplier price for a product: the supplier
+ * flagged `is_default: true`, or the first one as a fallback.
+ */
+function defaultSupplierPrice(product) {
+  const suppliers = Array.isArray(product.suppliers) ? product.suppliers : [];
+  const def = suppliers.find(s => s && s.is_default) || suppliers[0];
+  return def ? def.price : undefined;
+}
+
+/**
+ * Optional configurable extras (addons) in euros.
+ *
+ * Driven by `cfg.addons`. Each selected addon contributes
+ * `qty * price`; if the addon `price` is already VAT-included we use
+ * it as-is, otherwise we gross it up by the VAT rate. We return both
+ * the VAT-free subtotal (`no_vat`) and the VAT-included total
+ * (`vat_inc`), mirroring the old `calculateExtras` contract so the
+ * rest of the flow (which treats totals as VAT-included) keeps working.
+ *
+ * @param cfg
+ * @param selection  { <addonId>: <qty>, ... }
+ * @returns { no_vat, vat_inc, detail }
+ */
+export function calculateAddons(cfg, selection) {
+  const sel = selection || {};
+  const addons = cfg.addons || {};
+  const vat = (cfg.parameters && cfg.parameters.vat) || 0;
+
+  let noVat = 0;
+  let vatInc = 0;
+  const detail = {};
+
+  for (const [id, qty] of Object.entries(sel)) {
+    const n = qty || 0;
+    if (n <= 0) continue;
+    const addon = addons[id];
+    if (!addon) continue;
+    detail[id] = n;
+    if (addon.vat_included) {
+      // Price already includes VAT: split out the net part.
+      vatInc += n * addon.price;
+      noVat += n * (addon.price / (1 + vat));
+    } else {
+      noVat += n * addon.price;
+      vatInc += n * addon.price * (1 + vat);
+    }
+  }
+
+  return { no_vat: noVat, vat_inc: vatInc, detail };
+}
+
+/**
+ * Real cost of producing one finished garment (supplier base + DTF +
  * pressing + waste + labor + overhead + prorated shipping).
  *
  * @param cfg                          full configuration
- * @param modelId                      key of cfg.roly_models (BEAGLE, etc.)
+ * @param productId                    key of cfg.products (BEAGLE, etc.)
  * @param sides                        1 or 2
  * @param tier                         the already-resolved tier object
  * @param totalGarmentsForShipping     total garments of the order for proration
  */
-export function calculateGarmentCost(cfg, modelId, sides, tier, totalGarmentsForShipping) {
-  const m = cfg.roly_models[modelId];
+export function calculateGarmentCost(cfg, productId, sides, tier, totalGarmentsForShipping) {
+  const product = cfg.products[productId];
+  if (!product) {
+    throw new Error(`Producto desconocido: ${productId}.`);
+  }
   const p = cfg.parameters;
 
-  const baseRoly = m.price;
+  const baseProduct = defaultSupplierPrice(product) || 0;
   const dtfMeters = (sides === 2) ? p.dtf_meters_two_sides : p.dtf_meters_one_side;
   const dtf = dtfMeters * p.dtf_eur_meter;
   const pressing = sides * p.pressing_eur_side;
@@ -75,7 +117,7 @@ export function calculateGarmentCost(cfg, modelId, sides, tier, totalGarmentsFor
   const numBundles = Math.ceil(totalGarmentsForShipping / p.garments_per_bundle);
   const shippingPerGarment = (numBundles * p.roly_shipping_eur_bundle) / totalGarmentsForShipping;
 
-  const subtotalPreWaste = baseRoly + shippingPerGarment + dtf + pressing;
+  const subtotalPreWaste = baseProduct + shippingPerGarment + dtf + pressing;
   const waste = subtotalPreWaste * p.waste_pct;
 
   const baseMinutes = (sides === 2) ? p.minutes_two_sides_base : p.minutes_one_side_base;
@@ -85,249 +127,324 @@ export function calculateGarmentCost(cfg, modelId, sides, tier, totalGarmentsFor
   const overhead = p.overhead_eur_garment;
 
   return {
-    total: baseRoly + shippingPerGarment + dtf + pressing + waste + labor + overhead
+    total: baseProduct + shippingPerGarment + dtf + pressing + waste + labor + overhead
   };
 }
 
 /**
- * Crew pack: combines a BEAGLE t-shirt + a hoodie (CLASICA or URBAN
- * depending on `hood`). The tier is computed on the number of packs.
+ * Recommended VAT-included price for a unit of cost `costPerUnit` at
+ * the given `targetMargin` (fraction of the net sale base), rounded UP
+ * to the next price whose cents end at `cfg.parameters.price_rounding_ending`
+ * (0.95 → next x,95).
+ *
+ * Returns the suggested price and the real margin it yields so the UI
+ * can show "this rounding gives you X% margin".
+ *
+ *   cost 10, margin 0.35 → 10/0.65 = 15.3846 → round up → 15.95
+ *
+ * @param cfg
+ * @param costPerUnit  internal cost of one unit (ex-VAT)
+ * @param targetMargin fraction in [0,1)
+ * @returns { price, raw_price, margin, margin_pct }
  */
-export function calculateCrewPack(cfg, opt) {
-  const { quantity, hood, sides, qty_4xl, qty_5xl, extras } = opt;
-  const pack = cfg.packs.crew_full;
+export function recommendedPrice(cfg, costPerUnit, targetMargin) {
+  const ending = cfg.parameters.price_rounding_ending;
+  const margin = (targetMargin === undefined || targetMargin === null)
+    ? cfg.parameters.default_target_margin
+    : targetMargin;
 
-  if (quantity < pack.min) {
-    return { error: `Mínimo ${pack.min} packs para "${pack.name}".` };
-  }
+  const rawPrice = (margin >= 1) ? Infinity : costPerUnit / (1 - margin);
+  const price = roundUpToEnding(rawPrice, ending);
 
-  const tier = getTier(cfg, quantity);
-  if (!tier) {
-    return { error: 'No hay un tramo de precio definido para esa cantidad.' };
-  }
+  // Real margin at the rounded price (margin over the price itself).
+  const realMargin = price - costPerUnit;
+  const realMarginPct = price > 0 ? (realMargin / price) : 0;
 
-  const totalGarments = quantity * 2;
-  if ((qty_4xl || 0) + (qty_5xl || 0) > totalGarments) {
-    return { error: 'Las tallas grandes (4XL/5XL) no pueden superar el número de prendas del pedido.' };
-  }
-
-  const sidesKey = (sides === 2) ? 'two_sides' : 'one_side';
-  const hoodKey  = (hood === 'with') ? 'with_hood' : 'without_hood';
-  const unitPrice = pack.prices[hoodKey][sidesKey][tier.id];
-
-  const hoodieModel = (hood === 'with') ? 'URBAN' : 'CLASICA';
-  const tshirtCost = calculateGarmentCost(cfg, 'BEAGLE', sides, tier, totalGarments);
-  const hoodieCost = calculateGarmentCost(cfg, hoodieModel, sides, tier, totalGarments);
-  const buffer3xl = cfg.parameters.buffer_3xl_eur_pack;
-  const packCost = tshirtCost.total + hoodieCost.total + buffer3xl;
-
-  return calculateTotals(cfg, {
-    pack: pack.name, tier: tier.label, quantity,
-    unit_price: unitPrice, unit_cost: packCost,
-    qty_4xl, qty_5xl, extras,
-    extra_detail: { hood: hoodKey, sides }
-  });
+  return {
+    price,
+    raw_price: rawPrice,
+    margin: realMargin,
+    margin_pct: realMarginPct
+  };
 }
 
 /**
- * Single packs: t-shirts only, CLASICA only, URBAN only.
+ * Rounds `value` UP to the next number whose fractional part equals
+ * `ending` (e.g. ending 0.95 → 15.3846 → 15.95; 15.95 stays 15.95;
+ * 15.96 → 16.95). `ending` must be in [0, 1).
  */
-export function calculateSinglePack(cfg, packId, opt) {
-  const { quantity, sides, qty_4xl, qty_5xl, extras } = opt;
+function roundUpToEnding(value, ending) {
+  if (!Number.isFinite(value)) return value;
+  const floor = Math.floor(value);
+  const candidate = floor + ending;
+  // Tiny epsilon so a value already exactly at the ending is not
+  // pushed to the next integer by float noise.
+  if (candidate >= value - 1e-9) return round2(candidate);
+  return round2(floor + 1 + ending);
+}
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+// ------------------------------------------------------------
+// Generic pack calculation
+// ------------------------------------------------------------
+/**
+ * Computes a full quote for any pack, bundle or components.
+ *
+ * @param cfg     full v4 configuration
+ * @param packId  key of cfg.packs
+ * @param opt     see the file header for the input shape
+ * @returns result object (see the bottom of this function) or
+ *          `{ error }` with a Spanish message on any validation failure
+ */
+export function calculatePack(cfg, packId, opt) {
+  const o = opt || {};
   const pack = cfg.packs[packId];
-
-  if (quantity < pack.min) {
-    return { error: `Mínimo ${pack.min} unidades para "${pack.name}".` };
+  if (!pack) {
+    return { error: `No existe el pack "${packId}".` };
   }
 
-  const tier = getTier(cfg, quantity);
-  if (!tier) {
-    return { error: 'No hay un tramo de precio definido para esa cantidad.' };
+  const selectedOptions = o.options || {};
+
+  // --- Resolve the "sides" info from the selected option values. ---
+  // The option value carrying a numeric `sides` defines both the
+  // number of sides (cost) and the price-table key (`one_side` /
+  // `two_sides`). All seed packs have a sides option.
+  let sidesNum = 1;
+  let sidesKey = null;
+  for (const option of (pack.options || [])) {
+    const selectedId = selectedOptions[option.id];
+    const value = (option.values || []).find(v => v.id === selectedId);
+    if (value && Number.isFinite(value.sides)) {
+      sidesNum = value.sides;
+      sidesKey = value.id;
+    }
   }
-  if ((qty_4xl || 0) + (qty_5xl || 0) > quantity) {
-    return { error: 'Las tallas grandes (4XL/5XL) no pueden superar el número de prendas del pedido.' };
+  if (sidesKey === null) {
+    // No sides option selected: fall back to a price-table key the
+    // products actually expose (one_side by convention).
+    sidesKey = 'one_side';
   }
 
-  const sidesKey = (sides === 2) ? 'two_sides' : 'one_side';
-  const unitPrice = pack.prices[sidesKey][tier.id];
+  const qty3xl = o.qty_3xl || 0;
+  const qty4xl = o.qty_4xl || 0;
+  const qty5xl = o.qty_5xl || 0;
 
-  const unitCost = calculateGarmentCost(cfg, pack.model, sides, tier, quantity);
+  // --- Build the list of component lines with resolved products. ---
+  // Each line: { id, label, productId, quantity }.
+  let lines;
+  let packsN = 0;
 
-  return calculateTotals(cfg, {
-    pack: pack.name, tier: tier.label, quantity,
-    unit_price: unitPrice, unit_cost: unitCost.total,
-    qty_4xl, qty_5xl, extras,
-    extra_detail: { model: pack.model, sides }
-  });
-}
+  if (pack.free_components) {
+    const rawLines = (o.lines || []).filter(l => l && (l.quantity || 0) > 0);
+    if (rawLines.length === 0) {
+      return { error: 'Añade al menos una línea con cantidad mayor que cero.' };
+    }
+    lines = [];
+    for (const l of rawLines) {
+      if (!cfg.products[l.product]) {
+        return { error: `El producto "${l.product}" no existe en el catálogo.` };
+      }
+      lines.push({
+        id: l.product,
+        label: cfg.products[l.product].name,
+        productId: l.product,
+        quantity: l.quantity
+      });
+    }
+  } else if (pack.pricing_mode === 'bundle') {
+    packsN = o.packs || 0;
+    if (packsN <= 0) {
+      return { error: 'Indica un número de packs mayor que cero.' };
+    }
+    lines = (pack.components || []).map(c => ({
+      id: c.id,
+      label: c.label,
+      productId: resolveComponentProduct(pack, c, selectedOptions),
+      quantity: packsN * (c.qty_per_pack || 1)
+    }));
+  } else {
+    // components pack with fixed components, quantity per component.
+    const quantities = o.quantities || {};
+    lines = (pack.components || []).map(c => ({
+      id: c.id,
+      label: c.label,
+      productId: resolveComponentProduct(pack, c, selectedOptions),
+      quantity: quantities[c.id] || 0
+    }));
+    if (lines.every(l => l.quantity <= 0)) {
+      return { error: 'Indica al menos una cantidad mayor que cero.' };
+    }
+  }
 
-/**
- * Mixed hoodie pack: combines X CLASICA + Y URBAN. The tier is
- * computed on the sum; each hoodie is billed at its single price.
- */
-export function calculateMixedPack(cfg, opt) {
-  const { qty_classic, qty_urban, sides, qty_4xl, qty_5xl, extras } = opt;
-  const pack = cfg.packs.hoodies_mixed;
-  const total = qty_classic + qty_urban;
+  // Validate resolved products exist (maps_product could point nowhere).
+  for (const l of lines) {
+    if (!l.productId || !cfg.products[l.productId]) {
+      return { error: `El componente "${l.label || l.id}" no resuelve a un producto válido.` };
+    }
+  }
+
+  const total = lines.reduce((s, l) => s + l.quantity, 0);
 
   if (total < pack.min_total) {
-    return { error: `Mínimo ${pack.min_total} sudaderas en total.` };
+    return { error: `Mínimo ${pack.min_total} unidades en total para "${pack.name}".` };
   }
-  if (qty_classic === 0 && qty_urban === 0) {
+  if (total <= 0) {
     return { error: 'Indica al menos una cantidad mayor que cero.' };
   }
 
   const tier = getTier(cfg, total);
   if (!tier) {
-    return { error: 'No hay un tramo de precio definido para esa cantidad.' };
-  }
-  if ((qty_4xl || 0) + (qty_5xl || 0) > total) {
-    return { error: 'Las tallas grandes (4XL/5XL) no pueden superar el número de prendas del pedido.' };
+    return { error: `No hay un tramo de precio definido para ${total} unidades.` };
   }
 
-  const sidesKey = (sides === 2) ? 'two_sides' : 'one_side';
-
-  const priceClassic = cfg.packs[pack.reference_packs.CLASICA].prices[sidesKey][tier.id];
-  const priceUrban   = cfg.packs[pack.reference_packs.URBAN].prices[sidesKey][tier.id];
-
-  const subtotal = (qty_classic * priceClassic) + (qty_urban * priceUrban);
-  const surcharges = (qty_4xl * cfg.parameters.surcharge_4xl_eur)
-                   + (qty_5xl * cfg.parameters.surcharge_5xl_eur);
-  const extrasCalc = calculateExtras(cfg, extras);
-  const totalVatInc = subtotal + surcharges + extrasCalc.vat_inc;
-
-  const costClassic = calculateGarmentCost(cfg, 'CLASICA', sides, tier, total);
-  const costUrban   = calculateGarmentCost(cfg, 'URBAN',   sides, tier, total);
-  const totalCost = (qty_classic * costClassic.total) + (qty_urban * costUrban.total);
-
-  const saleBase = totalVatInc / (1 + cfg.parameters.vat);
-  const vat = totalVatInc - saleBase;
-  const margin = saleBase - totalCost;
-  const marginPct = saleBase > 0 ? (margin / saleBase) : 0;
-
-  return {
-    pack: pack.name, tier: tier.label, is_mixed: true,
-    total_quantity: total, qty_4xl, qty_5xl, sides,
-    breakdown: [
-      { model: 'CLASICA', name: cfg.roly_models.CLASICA.name, quantity: qty_classic, price: priceClassic, subtotal: qty_classic * priceClassic },
-      { model: 'URBAN',   name: cfg.roly_models.URBAN.name,   quantity: qty_urban,   price: priceUrban,   subtotal: qty_urban * priceUrban }
-    ],
-    subtotal, surcharges,
-    extras_no_vat: extrasCalc.no_vat, extras_detail: extrasCalc.detail,
-    total_vat_inc: totalVatInc, sale_base: saleBase, vat,
-    total_cost: totalCost, margin, margin_pct: marginPct
-  };
-}
-
-/**
- * Custom pack: the user adds N lines, each with its Roly model,
- * quantity and sides (1 or 2). The tier is computed on the total
- * sum of garments and each line is billed at the single price of
- * the pack that corresponds to that model (via `pack.reference_models`).
- *
- * @param cfg
- * @param opt  { lines:[{model,quantity,sides}], qty_4xl, qty_5xl }
- */
-export function calculateCustomPack(cfg, opt) {
-  const { lines, qty_4xl, qty_5xl, extras } = opt;
-  const pack = cfg.packs.custom;
-
-  const validLines = (lines || []).filter(l => l && l.quantity > 0);
-  if (validLines.length === 0) {
-    return { error: 'Añade al menos una línea con cantidad mayor que cero.' };
+  if (qty3xl + qty4xl + qty5xl > total) {
+    return { error: 'Las tallas grandes (3XL/4XL/5XL) no pueden superar el número de prendas del pedido.' };
   }
 
-  const total = validLines.reduce((s, l) => s + l.quantity, 0);
-  if (total < pack.min_total) {
-    return { error: `Mínimo ${pack.min_total} prendas en total.` };
-  }
-
-  const tier = getTier(cfg, total);
-  if (!tier) {
-    return { error: `No hay tramo definido para ${total} unidades.` };
-  }
-  if ((qty_4xl || 0) + (qty_5xl || 0) > total) {
-    return { error: 'Las tallas grandes (4XL/5XL) no pueden superar el número de prendas del pedido.' };
-  }
-
-  const breakdown = [];
+  // --- Revenue (IVA-incl `subtotal`) + breakdown. ---
   let subtotal = 0;
-  let totalCost = 0;
+  let topUnitPrice = 0;
+  const breakdown = [];
 
-  for (const l of validLines) {
-    const refPackId = pack.reference_models?.[l.model];
-    const refPack = refPackId ? cfg.packs[refPackId] : null;
-    if (!refPack || !refPack.prices) {
-      return { error: `No hay PVP de referencia para el modelo ${l.model}.` };
+  if (pack.pricing_mode === 'bundle') {
+    const comboKey = (pack.options || []).map(opt => selectedOptions[opt.id]).join('|');
+    const priceRow = (pack.bundle_prices || {})[comboKey];
+    const bundlePrice = priceRow ? priceRow[tier.id] : undefined;
+    if (bundlePrice === undefined || bundlePrice === null) {
+      return { error: `Falta el PVP del pack para la combinación "${comboKey}" (${tier.id}).` };
     }
-    const sidesKey = (l.sides === 2) ? 'two_sides' : 'one_side';
-    const price = refPack.prices[sidesKey]?.[tier.id];
-    if (price === undefined || price === null) {
-      return { error: `Falta PVP de ${refPackId} (${sidesKey}, ${tier.id}).` };
-    }
+    subtotal = packsN * bundlePrice;
+    topUnitPrice = bundlePrice;
 
-    const sub = l.quantity * price;
-    subtotal += sub;
-
-    const cost = calculateGarmentCost(cfg, l.model, l.sides, tier, total);
-    totalCost += l.quantity * cost.total;
-
-    const m = cfg.roly_models[l.model];
+    // Represent the bundle as a single row (qty = packs, unit = bundle
+    // price per pack), keeping the component composition for the PDF.
     breakdown.push({
-      model: l.model,
-      name: m ? m.name : l.model,
-      quantity: l.quantity,
-      sides: l.sides,
-      price,
-      subtotal: sub
+      model: packId,
+      name: pack.name,
+      quantity: packsN,
+      sides: sidesNum,
+      unit_price: bundlePrice,
+      subtotal,
+      components: lines.map(l => ({
+        model: l.productId,
+        name: cfg.products[l.productId].name,
+        quantity: l.quantity
+      }))
     });
+  } else {
+    for (const l of lines) {
+      const product = cfg.products[l.productId];
+      const priceTable = (product.prices || {})[sidesKey] || {};
+      const unitPrice = priceTable[tier.id];
+      if (unitPrice === undefined || unitPrice === null) {
+        return { error: `Falta el PVP de "${product.name}" (${sidesKey}, ${tier.id}).` };
+      }
+      const lineSubtotal = l.quantity * unitPrice;
+      subtotal += lineSubtotal;
+      breakdown.push({
+        model: l.productId,
+        name: product.name,
+        quantity: l.quantity,
+        sides: sidesNum,
+        unit_price: unitPrice,
+        subtotal: lineSubtotal
+      });
+    }
+    // For a single-component components pack, the top-level unit_price
+    // is that product's unit price; for multi-line packs leave it 0.
+    topUnitPrice = (lines.length === 1) ? breakdown[0].unit_price : 0;
   }
 
-  const surcharges = (qty_4xl * cfg.parameters.surcharge_4xl_eur)
-                   + (qty_5xl * cfg.parameters.surcharge_5xl_eur);
-  const extrasCalc = calculateExtras(cfg, extras);
-  const totalVatInc = subtotal + surcharges + extrasCalc.vat_inc;
+  // --- Cost (ex-VAT). ---
+  let garmentsCost = 0;
+  let maxExtra3xl = 0;
+  for (const l of lines) {
+    const product = cfg.products[l.productId];
+    const unitCost = calculateGarmentCost(cfg, l.productId, sidesNum, tier, total).total;
+    garmentsCost += l.quantity * unitCost;
+    // MAX over the products actually in this order: conservative, the
+    // shop must never lose money on the size mix (we charge the worst
+    // case for the 3XL units, which are a buffer, not billed to client).
+    if (Number.isFinite(product.extra_cost_3xl) && product.extra_cost_3xl > maxExtra3xl) {
+      maxExtra3xl = product.extra_cost_3xl;
+    }
+  }
+  const cost3xl = qty3xl * maxExtra3xl;
+
+  const addons = calculateAddons(cfg, o.addons);
+  const addonsCost = addonsTotalCost(cfg, o.addons);
+
+  const totalCost = garmentsCost + cost3xl + addonsCost;
+
+  // --- Surcharges billed to the client (4XL/5XL; 3XL is NOT). ---
+  const surcharges = (qty4xl * cfg.parameters.surcharge_4xl_eur)
+                   + (qty5xl * cfg.parameters.surcharge_5xl_eur);
+
+  // --- Totals. ---
+  const totalVatInc = subtotal + surcharges + addons.vat_inc;
   const saleBase = totalVatInc / (1 + cfg.parameters.vat);
   const vat = totalVatInc - saleBase;
   const margin = saleBase - totalCost;
   const marginPct = saleBase > 0 ? (margin / saleBase) : 0;
 
   return {
-    pack: pack.name, tier: tier.label, is_mixed: true, is_custom: true,
-    total_quantity: total, qty_4xl, qty_5xl,
+    pack_id: packId,
+    pricing_mode: pack.pricing_mode,
+    pack: pack.name,
+    tier: tier.label,
+    options: selectedOptions,
+    total_quantity: total,
+    quantity: total,
+    unit_price: topUnitPrice,
     breakdown,
-    subtotal, surcharges,
-    extras_no_vat: extrasCalc.no_vat, extras_detail: extrasCalc.detail,
-    total_vat_inc: totalVatInc, sale_base: saleBase, vat,
-    total_cost: totalCost, margin, margin_pct: marginPct
+    subtotal,
+    surcharges,
+    extras_no_vat: addons.no_vat,
+    extras_detail: addons.detail,
+    total_vat_inc: totalVatInc,
+    sale_base: saleBase,
+    vat,
+    total_cost: totalCost,
+    margin,
+    margin_pct: marginPct,
+    qty_3xl: qty3xl,
+    qty_4xl: qty4xl,
+    qty_5xl: qty5xl
   };
 }
 
 /**
- * Computes subtotals, VAT and margins from quantity × price +
- * surcharges + optional extras. Shared by the crew pack and the
- * single packs (not the mixed one).
+ * Resolves which product a component uses, honoring any option's
+ * `maps_product` whose `component` matches this component's id.
  */
-export function calculateTotals(cfg, data) {
-  const subtotal = data.quantity * data.unit_price;
-  const surcharges = (data.qty_4xl * cfg.parameters.surcharge_4xl_eur)
-                   + (data.qty_5xl * cfg.parameters.surcharge_5xl_eur);
-  const extras = calculateExtras(cfg, data.extras);
-  const totalVatInc = subtotal + surcharges + extras.vat_inc;
-  const saleBase = totalVatInc / (1 + cfg.parameters.vat);
-  const vat = totalVatInc - saleBase;
-  const totalCost = data.quantity * data.unit_cost;
-  const margin = saleBase - totalCost;
-  const marginPct = saleBase > 0 ? (margin / saleBase) : 0;
+function resolveComponentProduct(pack, component, selectedOptions) {
+  let productId = component.product;
+  for (const option of (pack.options || [])) {
+    const map = option.maps_product;
+    if (map && map.component === component.id) {
+      const selectedId = selectedOptions[option.id];
+      if (selectedId !== undefined && map[selectedId] !== undefined) {
+        productId = map[selectedId];
+      }
+    }
+  }
+  return productId;
+}
 
-  return {
-    pack: data.pack, tier: data.tier, quantity: data.quantity,
-    unit_price: data.unit_price, qty_4xl: data.qty_4xl, qty_5xl: data.qty_5xl,
-    subtotal, surcharges,
-    extras_no_vat: extras.no_vat, extras_detail: extras.detail,
-    total_vat_inc: totalVatInc, sale_base: saleBase, vat,
-    unit_cost: data.unit_cost, total_cost: totalCost,
-    margin, margin_pct: marginPct,
-    extra: data.extra_detail
-  };
+/** Internal real cost of the selected addons (ex-VAT, by `addon.cost`). */
+function addonsTotalCost(cfg, selection) {
+  const sel = selection || {};
+  const addons = cfg.addons || {};
+  let cost = 0;
+  for (const [id, qty] of Object.entries(sel)) {
+    const n = qty || 0;
+    if (n <= 0) continue;
+    const addon = addons[id];
+    if (!addon) continue;
+    cost += n * (addon.cost || 0);
+  }
+  return cost;
 }
