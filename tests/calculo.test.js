@@ -3,7 +3,11 @@
 // ============================================================
 // Cubrimos los casos del PLAN_Calculadora.md y los bordes de tramo.
 // Las funciones son puras: reciben (cfg, opciones) y devuelven el
-// resultado. Construimos `cfg` con buildDefaultConfig.
+// resultado.
+//
+// renderer/calculo.js todavía consume el esquema v2 (se migra en
+// Onda 6), así que alimentamos el fixture v2 canónico en vez de
+// buildDefaultConfig (que ya emite v3).
 // ============================================================
 import { describe, test, expect } from 'vitest';
 import {
@@ -15,9 +19,9 @@ import {
   calcularPackMixto,
   calcularPackPersonalizado
 } from '../renderer/calculo.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { buildV2Config } from './fixtures/config-v2.js';
 
-const CFG = buildDefaultConfig();
+const CFG = buildV2Config();
 
 // Tolerancia de 1 céntimo para evitar fragilidad por flotantes.
 const EUR = 0.01;
@@ -193,7 +197,7 @@ describe('calcularPackPersonalizado', () => {
   });
 
   test('rechaza modelo sin pack de referencia', () => {
-    const cfgRoto = buildDefaultConfig();
+    const cfgRoto = buildV2Config();
     cfgRoto.modelos_roly.NUEVO = { nombre: 'X', ref: 'X', precio: 1 };
     const r = calcularPackPersonalizado(cfgRoto, {
       lineas: [
