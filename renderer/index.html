@@ -305,6 +305,12 @@
 
               <div class="tallas-row">
                 <div class="field">
+                  <label class="field__label" for="cant_3xl">
+                    3XL <span class="field__hint">(colchón interno · no se factura)</span>
+                  </label>
+                  <input type="number" id="cant_3xl" min="0" value="0">
+                </div>
+                <div class="field">
                   <label class="field__label" for="cant_4xl">
                     4XL <span class="field__hint">(+<span data-cfg="surcharge_4xl_eur">3</span> €/prenda)</span>
                   </label>
@@ -319,37 +325,18 @@
               </div>
             </article>
 
-            <article class="section-card">
+            <article class="section-card" id="addons-card">
               <div class="section-card__head">
                 <div>
                   <h2 class="h-card">Extras opcionales</h2>
                   <p class="text-secondary" style="margin-top: 4px; font-size: 13px;">
-                    Personalización extra. Precios sin IVA: se suman al subtotal y se aplica el IVA al total.
+                    Personalización extra. Precios sin IVA salvo indicación: se suman al subtotal y se aplica el IVA al total.
                   </p>
                 </div>
                 <span class="badge badge--neutral">IVA no incluido</span>
               </div>
 
-              <div class="form-grid-3">
-                <div class="field">
-                  <label class="field__label" for="cant_nombres">
-                    Nombre <span class="field__hint">(+<span data-cfg="extra_name_eur">1.5</span> €/ud)</span>
-                  </label>
-                  <input type="number" id="cant_nombres" min="0" value="0">
-                </div>
-                <div class="field">
-                  <label class="field__label" for="cant_mangas_cortas">
-                    Mangas cortas <span class="field__hint">(+<span data-cfg="extra_short_sleeve_eur">1.5</span> €/manga)</span>
-                  </label>
-                  <input type="number" id="cant_mangas_cortas" min="0" value="0">
-                </div>
-                <div class="field">
-                  <label class="field__label" for="cant_mangas_largas">
-                    Manga larga <span class="field__hint">(+<span data-cfg="extra_long_sleeve_eur">3</span> €/manga)</span>
-                  </label>
-                  <input type="number" id="cant_mangas_largas" min="0" value="0">
-                </div>
-              </div>
+              <div class="form-grid-3" id="addons-container"></div>
             </article>
 
             <div id="error-msg" class="alert alert-error hidden"></div>

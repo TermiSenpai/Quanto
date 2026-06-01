@@ -1011,7 +1011,7 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 }
 .linea-personalizado__grid {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) 110px 1fr;
+  grid-template-columns: minmax(180px, 1.4fr) 110px;
   gap: 14px;
   align-items: end;
 }
