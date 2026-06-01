@@ -328,15 +328,14 @@ ipcMain.handle('config:create-default', (event, payload) => {
   const filePath = payload.ruta ?? payload.path;
   const modifiedBy = payload.modificadoPor ?? payload.modifiedBy;
   try {
-    // Creating a config at a path is a strong commit signal from setup;
-    // bless it so the follow-up read of that same file is allowed.
-    if (typeof filePath === 'string' && filePath !== '') {
-      rememberBlessedConfigPath(filePath);
-    }
     const r = createDefaultConfigFile(filePath, { modified_by: modifiedBy });
     if (!r.creado) {
       return { ok: false, motivo: r.motivo, error: 'El archivo ya existe en esa ruta' };
     }
+    // Only after a successful create do we bless the path, so the
+    // follow-up read of that same file is allowed. A failed create
+    // never widens the allow-list.
+    rememberBlessedConfigPath(r.ruta);
     const info = getFileInfo(r.ruta);
     return { ok: true, config: stripAdminPassword(r.config), info, ruta: r.ruta };
   } catch (err) {
@@ -574,6 +573,8 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const ADMIN_LOCK_MESSAGE = 'Demasiados intentos. Espera unos segundos e inténtalo de nuevo.';
+
 ipcMain.handle('auth:verify-admin', async (event, { ruta, clave }) => {
   try {
     if (typeof clave !== 'string' || typeof ruta !== 'string') {
@@ -584,7 +585,7 @@ ipcMain.handle('auth:verify-admin', async (event, { ruta, clave }) => {
     // Reject up front if we are inside an active lock window, without
     // even reading the config or evaluating the password (Item C).
     if (adminThrottle.lockedUntil && Date.now() < adminThrottle.lockedUntil) {
-      return { ok: false, error: 'Demasiados intentos. Espera unos segundos e inténtalo de nuevo.' };
+      return { ok: false, error: ADMIN_LOCK_MESSAGE };
     }
 
     const cfg = migrateConfig(readConfigFromFile(ruta));
@@ -600,7 +601,7 @@ ipcMain.handle('auth:verify-admin', async (event, { ruta, clave }) => {
 
     if (transition.locked) {
       logger.warn('auth:verify-admin locked (too many attempts)', { ruta });
-      return { ok: false, error: 'Demasiados intentos. Espera unos segundos e inténtalo de nuevo.' };
+      return { ok: false, error: ADMIN_LOCK_MESSAGE };
     }
     if (transition.delayMs > 0) {
       await sleep(transition.delayMs);
