@@ -72,4 +72,28 @@ describe('applyMigrations', () => {
     const done = await applyMigrations(client, MIGRATIONS, OPTS);
     expect(done).toEqual(['0002_more']);
   });
+
+  test('re-executes a migration when the ledger insert crashed after exec', async () => {
+    const client = fakeClient([]);
+    const realQuery = client.query.bind(client);
+    let broken = true;
+    client.query = async (sql, params = []) => {
+      if (broken && /INSERT INTO schema_migrations/.test(sql) && params[0] === '0001_init') {
+        broken = false;
+        client.executed.push(sql);
+        throw new Error('D1 insert failed');
+      }
+      return realQuery(sql, params);
+    };
+    // First run: 0001's SQL ran, but the ledger insert crashed right after.
+    await expect(applyMigrations(client, [MIGRATIONS[0]], OPTS)).rejects.toThrow('D1 insert failed');
+    expect(client.executed.filter((s) => s === MIGRATIONS[0].sql)).toHaveLength(1);
+    expect(client.inserts).toEqual([]);
+    // Second run: the ledger has no record of 0001, so its file is re-executed —
+    // this is why every migration must be internally idempotent.
+    const done = await applyMigrations(client, [MIGRATIONS[0]], OPTS);
+    expect(done).toEqual(['0001_init']);
+    expect(client.executed.filter((s) => s === MIGRATIONS[0].sql)).toHaveLength(2);
+    expect(client.inserts.map((p) => p[0])).toEqual(['0001_init']);
+  });
 });
