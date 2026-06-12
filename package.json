@@ -3,7 +3,8 @@
   "version": "4.0.0-beta",
   "description": "PackPrice - calculadora de packs (app de escritorio)",
   "main": "main.js",
-  "author": "PackPrice",
+  "author": "xkoistudio",
+  "license": "Apache-2.0",
   "private": true,
   "scripts": {
     "start": "electron .",
