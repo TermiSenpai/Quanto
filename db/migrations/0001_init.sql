@@ -67,7 +67,11 @@ CREATE TABLE IF NOT EXISTS packs (
 CREATE TABLE IF NOT EXISTS pack_options (
   pack_id TEXT NOT NULL REFERENCES packs(id),
   option_id TEXT NOT NULL, label TEXT NOT NULL,
-  maps_product INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL,
+  -- maps_product flags an option that swaps a component's product per value;
+  -- maps_component names the component being swapped (cfg maps_product.component).
+  maps_product INTEGER NOT NULL DEFAULT 0,
+  maps_component TEXT,
+  position INTEGER NOT NULL,
   PRIMARY KEY (pack_id, option_id));
 
 CREATE TABLE IF NOT EXISTS pack_option_values (
