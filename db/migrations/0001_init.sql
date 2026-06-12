@@ -1,4 +1,16 @@
--- 0001_init.sql — esquema inicial PackPrice v5 (aditivo desde aquí; jamás editar este archivo después de publicado)
+-- 0001_init.sql — initial PackPrice v5 schema.
+--
+-- Never edit this file after release — schema changes are new numbered
+-- migration files, additive only.
+--
+-- Every migration must be internally idempotent (IF NOT EXISTS /
+-- INSERT OR IGNORE): the runner's exec() and ledger INSERT are two
+-- separate, non-atomic HTTP calls — see lib/db-migrator.js.
+--
+-- FK policy: catalog tables declare REFERENCES (D1 enforces foreign
+-- keys); quote tables deliberately omit FKs to pack/product ids because
+-- quotes are historical records that must survive catalog edits; tier
+-- ids are user-editable data, so price tables do not FK them.
 
 CREATE TABLE IF NOT EXISTS parameters (
   key TEXT PRIMARY KEY, value TEXT NOT NULL, type TEXT NOT NULL CHECK (type IN ('number','string','boolean')));
