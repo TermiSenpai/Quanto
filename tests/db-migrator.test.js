@@ -119,9 +119,12 @@ function lockClient({ migratingSince = null, tableExists = true } = {}) {
         }
         return { results: [], meta: { changes: 0 } };
       }
-      if (/SET migrating_since = NULL/.test(sql)) {
-        state.migratingSince = null;
-        return { results: [], meta: { changes: 1 } };
+      if (/SET migrating_since = NULL WHERE migrating_since = \?/.test(sql)) {
+        if (state.migratingSince === params[0]) {
+          state.migratingSince = null;
+          return { results: [], meta: { changes: 1 } };
+        }
+        return { results: [], meta: { changes: 0 } };
       }
       return { results: [], meta: {} };
     }
@@ -131,10 +134,10 @@ function lockClient({ migratingSince = null, tableExists = true } = {}) {
 const NOW = () => '2026-06-12T10:00:00.000Z';
 
 describe('acquireMigrationLock / releaseMigrationLock', () => {
-  test('acquires a free lock and stamps migrating_since with now()', async () => {
+  test('acquires a free lock, stamps migrating_since and returns the lockTs it wrote', async () => {
     const client = lockClient();
-    const got = await acquireMigrationLock(client, { now: NOW });
-    expect(got).toBe(true);
+    const lockTs = await acquireMigrationLock(client, { now: NOW });
+    expect(lockTs).toBe('2026-06-12T10:00:00.000Z');
     expect(client.state.migratingSince).toBe('2026-06-12T10:00:00.000Z');
     const { sql, params } = client.queries[0];
     expect(sql).toMatch(/UPDATE catalog_meta SET migrating_since = \? WHERE migrating_since IS NULL OR migrating_since < \?/);
@@ -142,26 +145,33 @@ describe('acquireMigrationLock / releaseMigrationLock', () => {
     expect(params).toEqual(['2026-06-12T10:00:00.000Z', '2026-06-12T09:50:00.000Z']);
   });
 
-  test('refuses when another PC holds a fresh lock', async () => {
+  test('normalizes a now() without milliseconds to a uniform UTC ISO lockTs', async () => {
+    const client = lockClient();
+    const lockTs = await acquireMigrationLock(client, { now: () => '2026-06-12T10:00:00Z' });
+    expect(lockTs).toBe('2026-06-12T10:00:00.000Z');
+    expect(client.state.migratingSince).toBe('2026-06-12T10:00:00.000Z');
+  });
+
+  test('refuses with null when another PC holds a fresh lock', async () => {
     const client = lockClient({ migratingSince: '2026-06-12T09:55:00.000Z' }); // 5 min old
-    expect(await acquireMigrationLock(client, { now: NOW })).toBe(false);
+    expect(await acquireMigrationLock(client, { now: NOW })).toBeNull();
     expect(client.state.migratingSince).toBe('2026-06-12T09:55:00.000Z'); // untouched
   });
 
   test('steals a stale lock older than staleMinutes (orphaned migration)', async () => {
     const client = lockClient({ migratingSince: '2026-06-12T09:30:00.000Z' }); // 30 min old
-    expect(await acquireMigrationLock(client, { now: NOW })).toBe(true);
+    expect(await acquireMigrationLock(client, { now: NOW })).toBe('2026-06-12T10:00:00.000Z');
     expect(client.state.migratingSince).toBe('2026-06-12T10:00:00.000Z');
   });
 
   test('honours a custom staleMinutes window', async () => {
     const client = lockClient({ migratingSince: '2026-06-12T09:55:00.000Z' }); // 5 min old
-    expect(await acquireMigrationLock(client, { now: NOW, staleMinutes: 3 })).toBe(true);
+    expect(await acquireMigrationLock(client, { now: NOW, staleMinutes: 3 })).toBe('2026-06-12T10:00:00.000Z');
   });
 
-  test('returns true without failing when catalog_meta does not exist yet (first migration)', async () => {
+  test('returns the lockTs without failing when catalog_meta does not exist yet (first migration)', async () => {
     const client = lockClient({ tableExists: false });
-    expect(await acquireMigrationLock(client, { now: NOW })).toBe(true);
+    expect(await acquireMigrationLock(client, { now: NOW })).toBe('2026-06-12T10:00:00.000Z');
   });
 
   test('propagates non-missing-table errors instead of swallowing them', async () => {
@@ -171,10 +181,24 @@ describe('acquireMigrationLock / releaseMigrationLock', () => {
     await expect(acquireMigrationLock(client, { now: NOW })).rejects.toThrow(/No se pudo conectar/);
   });
 
-  test('releaseMigrationLock sets migrating_since back to NULL', async () => {
-    const client = lockClient({ migratingSince: '2026-06-12T09:59:00.000Z' });
-    await releaseMigrationLock(client);
+  test('releaseMigrationLock clears only the lock it owns (conditional UPDATE)', async () => {
+    const client = lockClient();
+    const lockTs = await acquireMigrationLock(client, { now: NOW });
+    await releaseMigrationLock(client, { lockTs });
     expect(client.state.migratingSince).toBeNull();
-    expect(client.queries[0].sql).toMatch(/UPDATE catalog_meta SET migrating_since = NULL/);
+    const release = client.queries[1];
+    expect(release.sql).toBe('UPDATE catalog_meta SET migrating_since = NULL WHERE migrating_since = ?');
+    expect(release.params).toEqual([lockTs]);
+  });
+
+  test('a stale owner cannot wipe a lock stolen by another PC', async () => {
+    // PC-A acquired long ago; its lock went stale and PC-B stole it.
+    const client = lockClient({ migratingSince: '2026-06-12T09:30:00.000Z' });
+    const staleLockTs = '2026-06-12T09:30:00.000Z'; // what PC-A wrote back then
+    const stolen = await acquireMigrationLock(client, { now: NOW }); // PC-B steals
+    expect(stolen).toBe('2026-06-12T10:00:00.000Z');
+    // PC-A wakes up and releases with its old lockTs → must change nothing.
+    await releaseMigrationLock(client, { lockTs: staleLockTs });
+    expect(client.state.migratingSince).toBe('2026-06-12T10:00:00.000Z'); // B still holds it
   });
 });

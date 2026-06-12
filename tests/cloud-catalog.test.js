@@ -2,8 +2,12 @@
 // Tests · lib/cloud-catalog.js (catalog read path + initial seed)
 // ============================================================
 import { describe, test, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   ENTITY_TABLES,
+  ARCHIVABLE_TABLES,
   loadEntities,
   getCatalogVersion,
   seedCatalog
@@ -47,7 +51,33 @@ describe('ENTITY_TABLES', () => {
   });
 });
 
+describe('ARCHIVABLE_TABLES', () => {
+  test('matches exactly the ENTITY_TABLES declaring archived_at in the bundled schema (drift pin)', () => {
+    const sqlPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'migrations', '0001_init.sql');
+    const sql = fs.readFileSync(sqlPath, 'utf-8');
+    // Each chunk runs from one CREATE TABLE to the next, so an
+    // archived_at column anywhere in the chunk belongs to that table.
+    const declared = sql
+      .split(/CREATE TABLE IF NOT EXISTS /)
+      .slice(1)
+      .map((chunk) => ({ name: chunk.match(/^(\w+)/)[1], chunk }))
+      .filter(({ chunk }) => /\barchived_at\b/.test(chunk))
+      .map(({ name }) => name)
+      .filter((name) => ENTITY_TABLES.includes(name));
+    expect(new Set(declared)).toEqual(ARCHIVABLE_TABLES);
+  });
+});
+
 describe('loadEntities', () => {
+  test('reads catalog_meta FIRST, then the entity tables', async () => {
+    const client = fakeReadClient();
+    await loadEntities(client);
+    // The version is captured before any entity rows, so the cached
+    // catalogVersion can never overstate the freshness of the rows.
+    expect(client.queries[0].sql).toBe('SELECT * FROM catalog_meta WHERE id = 1');
+    expect(client.queries).toHaveLength(ENTITY_TABLES.length + 1);
+  });
+
   test('selects every table (archived filtered out) plus the meta row', async () => {
     const client = fakeReadClient({
       products: [{ id: 'BEAGLE', name: 'Camiseta' }],
@@ -147,11 +177,14 @@ describe('seedCatalog', () => {
     expect(firstSeen).toEqual(ENTITY_TABLES.filter((t) => entities[t].length > 0));
   });
 
-  test('stamps catalog_meta with the seeding user and timestamp', async () => {
+  test('bumps catalog_version and stamps the seeding user and timestamp', async () => {
     const client = fakeSeedClient({ productCount: 0 });
     await seedCatalog(client, entities, OPTS);
     const metaUpdate = client.queries.find((q) => /^UPDATE catalog_meta/.test(q.sql));
-    expect(metaUpdate.sql).toBe('UPDATE catalog_meta SET updated_by = ?, updated_at = ? WHERE id = 1');
+    // The bump invalidates any cached pre-seed (empty) snapshot.
+    expect(metaUpdate.sql).toBe(
+      'UPDATE catalog_meta SET catalog_version = catalog_version + 1, updated_by = ?, updated_at = ? WHERE id = 1'
+    );
     expect(metaUpdate.params).toEqual(['PC-Wizard', '2026-06-12T11:00:00.000Z']);
   });
 

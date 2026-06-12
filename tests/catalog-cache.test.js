@@ -55,6 +55,21 @@ describe('catalog cache', () => {
     expect(thrown.cause).toBeInstanceOf(Error);
   });
 
+  test('readCache throws the same Spanish error on valid JSON with the wrong shape', () => {
+    const cachePath = path.join(tmpDir, 'catalog.json');
+    const wrongShapes = [
+      'null',
+      '"just a string"',
+      '{ "fetchedAt": "2026-06-12T10:00:00.000Z" }', // entities and version missing
+      '{ "catalogVersion": "7", "entities": {} }', // version is a string
+      '{ "catalogVersion": 7, "entities": null }' // entities is null
+    ];
+    for (const raw of wrongShapes) {
+      fs.writeFileSync(cachePath, raw, 'utf-8');
+      expect(() => readCache(cachePath), raw).toThrow(/Caché de catálogo dañada/);
+    }
+  });
+
   test('writeCache creates the parent directory when missing', () => {
     const cachePath = path.join(tmpDir, 'deep', 'nested', 'catalog.json');
     writeCache(cachePath, SAMPLE);
