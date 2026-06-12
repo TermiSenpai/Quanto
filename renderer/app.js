@@ -455,7 +455,11 @@ function bindSecretCostShortcut() {
   };
 
   document.addEventListener('keydown', (e) => {
-    if (e.key !== '.') {
+    // The numpad decimal key emits "," (not ".") under the Spanish keyboard
+    // layout these machines use, so match the physical key via e.code and
+    // accept both characters from the main row.
+    const isDot = e.code === 'NumpadDecimal' || e.key === '.' || e.key === ',';
+    if (!isDot) {
       // Any other key breaks the chain.
       if (presses > 0) reset();
       return;
