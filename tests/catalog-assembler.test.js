@@ -6,7 +6,7 @@
 // assembler must reproduce the default catalog exactly (minus admin).
 // ============================================================
 import { describe, test, expect } from 'vitest';
-import { disassemble } from '../lib/catalog-assembler.js';
+import { disassemble, assemble } from '../lib/catalog-assembler.js';
 import { buildDefaultConfig } from '../config.default.js';
 
 describe('disassemble', () => {
@@ -55,5 +55,36 @@ describe('disassemble', () => {
   test('never emits the admin section', () => {
     const json = JSON.stringify(e);
     expect(json).not.toContain('password');
+  });
+});
+
+describe('assemble', () => {
+  const cfg = buildDefaultConfig();
+  const META = { version: cfg.version, updated_at: cfg.updated_at, modified_by: cfg.modified_by };
+
+  test('rebuilds typed parameters', () => {
+    const rebuilt = assemble(disassemble(cfg), META);
+    expect(rebuilt.parameters.vat).toBe(cfg.parameters.vat);
+    expect(typeof rebuilt.parameters.vat).toBe('number');
+  });
+
+  test('restores option/value/component ordering from position', () => {
+    const entities = disassemble(cfg);
+    const packId = Object.keys(cfg.packs)[0];
+    const shuffled = {
+      ...entities,
+      pack_option_values: [...entities.pack_option_values].reverse(),
+      pack_options: [...entities.pack_options].reverse(),
+      pack_components: [...entities.pack_components].reverse()
+    };
+    const rebuilt = assemble(shuffled, META);
+    expect(rebuilt.packs[packId].options.map((o) => o.id))
+      .toEqual(cfg.packs[packId].options.map((o) => o.id));
+  });
+
+  test('decodes company and quote_settings JSON values', () => {
+    const rebuilt = assemble(disassemble(cfg), META);
+    expect(rebuilt.company).toEqual(cfg.company);
+    expect(rebuilt.quote_settings).toEqual(cfg.quote_settings);
   });
 });
