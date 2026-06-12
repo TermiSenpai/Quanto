@@ -88,6 +88,66 @@ describe('assemble', () => {
     expect(rebuilt.company).toEqual(cfg.company);
     expect(rebuilt.quote_settings).toEqual(cfg.quote_settings);
   });
+
+  test('rejects a price row that references a non-existent product', () => {
+    const entities = disassemble(cfg);
+    entities.product_prices.push({ product_id: 'ghost', sides: '1', tier: 'T1', price: 9 });
+    expect(() => assemble(entities, META)).toThrow(/inexistente/);
+  });
+
+  test('rejects a company row with invalid JSON', () => {
+    const entities = disassemble(cfg);
+    entities.company.push({ key: 'company.broken', value: '{not json' });
+    expect(() => assemble(entities, META)).toThrow(/JSON inválido/);
+  });
+
+  test('assemble omits optional keys for NULL row values', () => {
+    // Hand-built minimal rows: every nullable column is NULL. assemble
+    // does not validate the schema, so the fixture only needs to be
+    // structurally consistent, not pass validateConfigSchema.
+    const entities = {
+      parameters: [],
+      suppliers: [{ id: 'sup1', name: 'Proveedor', web: null, notes: null }],
+      products: [{ id: 'prod1', name: 'Camiseta', category: 'garment', extra_cost_3xl: 2, target_margin: null }],
+      product_suppliers: [{ product_id: 'prod1', supplier_id: 'sup1', ref: null, price: 3, min_order: null, is_default: 1 }],
+      product_prices: [{ product_id: 'prod1', sides: '1', tier: 'T1', price: 10 }],
+      tiers: [{ id: 'T1', label: '10+', from_qty: 10, to_qty: null, time_reduction: 0, position: 0 }],
+      addons: [],
+      packs: [{
+        id: 'pack1', name: 'Pack', description: null, icon: null,
+        pricing_mode: 'per_unit', min_total: 0, target_margin: null, free_components: 0
+      }],
+      pack_options: [{ pack_id: 'pack1', option_id: 'opt1', label: 'Opción', maps_product: 0, maps_component: null, position: 0 }],
+      pack_option_values: [{ pack_id: 'pack1', option_id: 'opt1', value_id: 'v1', label: 'Valor', sides: null, maps_to_product: null, position: 0 }],
+      pack_components: [{ pack_id: 'pack1', component_id: 'c1', label: 'Comp', product_id: null, qty_per_pack: null, position: 0 }],
+      bundle_prices: [],
+      company: []
+    };
+    const rebuilt = assemble(entities, META);
+
+    expect(Object.keys(rebuilt.suppliers.sup1)).toEqual(['name']);
+
+    const product = rebuilt.products.prod1;
+    expect(product).not.toHaveProperty('target_margin');
+    expect(Object.keys(product.suppliers[0])).toEqual(['supplier', 'price', 'is_default']);
+
+    // `to` is not optional in the v4 tier shape: a NULL to_qty stays an
+    // explicit `to: null` (open-ended tier).
+    expect(rebuilt.tiers[0].to).toBeNull();
+
+    const pack = rebuilt.packs.pack1;
+    expect(pack).not.toHaveProperty('description');
+    expect(pack).not.toHaveProperty('icon');
+    expect(pack).not.toHaveProperty('target_margin');
+    expect(pack).not.toHaveProperty('free_components');
+    expect(pack).not.toHaveProperty('bundle_prices');
+
+    const option = pack.options[0];
+    expect(option).not.toHaveProperty('maps_product');
+    expect(Object.keys(option.values[0])).toEqual(['id', 'label']);
+
+    expect(Object.keys(pack.components[0])).toEqual(['id', 'label']);
+  });
 });
 
 describe('round-trip', () => {
