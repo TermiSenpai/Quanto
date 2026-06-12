@@ -5,7 +5,10 @@ import { describe, test, expect } from 'vitest';
 import {
   validateSettingsPayload,
   MAX_CONFIG_PATH,
-  MAX_USER_NAME
+  MAX_USER_NAME,
+  MAX_CLOUD_TOKEN,
+  MAX_CLOUD_ID,
+  DATA_SOURCES
 } from '../lib/settings-validator.js';
 
 describe('validateSettingsPayload', () => {
@@ -64,5 +67,78 @@ describe('validateSettingsPayload', () => {
     });
     expect(out.config_path).toHaveLength(MAX_CONFIG_PATH);
     expect(out.user_name).toHaveLength(MAX_USER_NAME);
+  });
+});
+
+// --- v5 cloud fields (additive: pre-v5 settings keep validating) ---
+
+describe('validateSettingsPayload · data_source', () => {
+  test('accepts the two known sources', () => {
+    expect(DATA_SOURCES).toEqual(['file', 'cloud']);
+    expect(validateSettingsPayload({ data_source: 'file' })).toEqual({ data_source: 'file' });
+    expect(validateSettingsPayload({ data_source: 'cloud' })).toEqual({ data_source: 'cloud' });
+  });
+
+  test('is optional: existing settings without it keep validating unchanged', () => {
+    const legacy = { config_path: 'Z:\\Packs\\config.js', user_name: 'Alberto' };
+    expect(validateSettingsPayload(legacy)).toEqual(legacy);
+  });
+
+  test('rejects unknown or non-string sources', () => {
+    expect(() => validateSettingsPayload({ data_source: 'nas' })).toThrow(/origen de datos/i);
+    expect(() => validateSettingsPayload({ data_source: 7 })).toThrow(/origen de datos/i);
+    expect(() => validateSettingsPayload({ data_source: ['cloud'] })).toThrow(/origen de datos/i);
+  });
+});
+
+describe('validateSettingsPayload · cloud', () => {
+  const CLOUD = {
+    token: 'tok-abc123',
+    account_id: 'a'.repeat(32),
+    database_id: '123e4567-e89b-42d3-a456-426614174000',
+    user_name: 'PC-Taller'
+  };
+
+  test('keeps the four known cloud fields', () => {
+    expect(validateSettingsPayload({ cloud: CLOUD })).toEqual({ cloud: CLOUD });
+  });
+
+  test('allows partial cloud payloads and drops unknown cloud fields', () => {
+    const out = validateSettingsPayload({
+      cloud: { account_id: 'abc', has_token: true, evil: 'x' }
+    });
+    expect(out).toEqual({ cloud: { account_id: 'abc' } });
+  });
+
+  test('rejects a cloud section that is not a plain object', () => {
+    expect(() => validateSettingsPayload({ cloud: 'token' })).toThrow(/nube/i);
+    expect(() => validateSettingsPayload({ cloud: [] })).toThrow(/nube/i);
+    expect(() => validateSettingsPayload({ cloud: 42 })).toThrow(/nube/i);
+  });
+
+  test('rejects non-string cloud fields', () => {
+    expect(() => validateSettingsPayload({ cloud: { token: 9 } })).toThrow();
+    expect(() => validateSettingsPayload({ cloud: { account_id: {} } })).toThrow();
+    expect(() => validateSettingsPayload({ cloud: { database_id: null } })).toThrow();
+    expect(() => validateSettingsPayload({ cloud: { user_name: false } })).toThrow();
+  });
+
+  test('rejects over-long cloud fields and accepts the exact bound', () => {
+    expect(() => validateSettingsPayload({ cloud: { token: 't'.repeat(MAX_CLOUD_TOKEN + 1) } })).toThrow();
+    expect(() => validateSettingsPayload({ cloud: { account_id: 'a'.repeat(MAX_CLOUD_ID + 1) } })).toThrow();
+    expect(() => validateSettingsPayload({ cloud: { database_id: 'd'.repeat(MAX_CLOUD_ID + 1) } })).toThrow();
+    expect(() => validateSettingsPayload({ cloud: { user_name: 'u'.repeat(MAX_USER_NAME + 1) } })).toThrow();
+    const out = validateSettingsPayload({ cloud: { token: 't'.repeat(MAX_CLOUD_TOKEN) } });
+    expect(out.cloud.token).toHaveLength(MAX_CLOUD_TOKEN);
+  });
+
+  test('a full v5 payload round-trips intact', () => {
+    const payload = {
+      config_path: 'Z:\\Packs\\config.js',
+      user_name: 'Alberto',
+      data_source: 'cloud',
+      cloud: CLOUD
+    };
+    expect(validateSettingsPayload(payload)).toEqual(payload);
   });
 });
