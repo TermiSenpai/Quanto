@@ -427,8 +427,10 @@ the threat model doesn't justify — that is its own kind of debt.
 > 'self'`, no external origins). This is a conscious trade-off, not an oversight;
 > revisit it if the UI is ever reworked.
 
-**Never** sign the `.exe` with a borrowed or expired certificate. **Never**
-publish the code or `.exe` outside the workshop without the owner's consent.
+**Never** sign the `.exe` with a borrowed or expired certificate. Publishing
+is owner-sanctioned since 2026-06-12 (public GitHub repo, `.exe` on Releases —
+see the debate in `CLAUDE.md` §2); what must **never** be published: secrets,
+tokens, the real NAS `config.js`, or any customer's D1 data.
 
 ---
 
@@ -489,10 +491,24 @@ growth seams; anything beyond them needs a debate and a `CLAUDE.md` update.
 ### Bigger seams (each gated on a real trigger)
 - **Quote history at scale:** already local per-PC JSON via `lib/history.js`. If
   it grows, the repository API hides the storage swap.
-- **HTTP backend (V4):** only if you cross ~5 active users or need cross-PC
-  reports ≥3 times. Then: Node + Express + SQLite on an always-on PC; Electron
-  becomes an HTTP client; `config.js` stops being the single source of truth;
-  `electron-updater` + GitHub Releases for updates.
+- **Cloud storage (v5 — approved 2026-06-12, in progress):** the catalog (and
+  quotes) can live in Cloudflare D1 (normalized tables) in *the customer's
+  own account*, accessed **directly over Cloudflare's REST API — no Worker,
+  no server-side code**; the app self-provisions the database on first run
+  and applies bundled SQL migrations itself (additive-only, automatic
+  pre-migration backup + restore fallback). The design keeps every invariant
+  above: network only in the main process behind a `lib/config-backend.js`
+  interface (adapters: `file` = today's config-store, `d1` = new
+  `lib/d1-client.js`, native `fetch`); a pure `lib/catalog-assembler.js`
+  converts entities ↔ the same v4 `cfg` object **in both directions** (it is
+  also the local↔cloud migrator), so `calculo.js` and `validateConfigSchema`
+  are untouched; writes are per-entity diffs (`lib/diff.js`) guarded by
+  optimistic version checks (`UPDATE … WHERE version = ?`); offline =
+  read-only from an atomic local cache in `%APPDATA%` plus an outbox for
+  quotes. Debate in `CLAUDE.md` §2; full plan in `planes/v5-cloud-sync.md`;
+  requirements in `docs/PRD.md`. Until the workshop's transition ships, the
+  NAS file remains the production source of truth and everything else in
+  this document applies unchanged.
 - **i18n:** all strings are Spanish today. If ever sold abroad: extract to
   `renderer/i18n/<lang>.json` + a tiny `T(key)` lookup. No i18n framework for ~50
   strings.

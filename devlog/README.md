@@ -35,6 +35,16 @@ También hace algo más útil para un equipo pequeño: **bloquea decisiones**. U
 
 ---
 
+## Cómo escribir nuevas entradas
+
+Desde la v5, el devlog es **por release**: cada versión distribuida publica su
+capítulo siguiendo [`TEMPLATE.md`](TEMPLATE.md) — resumen ejecutivo, capturas
+en `images/`, diagramas Mermaid, caminos descartados y decisiones bloqueadas.
+La entrada se publica **antes** de distribuir el `.exe` (es parte de la
+definición de hecho, ver `CLAUDE.md` §8).
+
+---
+
 ## Cómo leer este devlog
 
 El orden está pensado para leerse de arriba abajo. Cada capítulo asume el anterior. Si vienes a buscar algo concreto, los apartados de cada capítulo son autocontenidos: hay un resumen ejecutivo de tres líneas al principio y un bloque de "decisiones bloqueadas" al final.

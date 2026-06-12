@@ -16,9 +16,12 @@ low-maintenance** codebase that stays cheap to own for years, for a workshop of
 | The rules of the road (this file) | `CLAUDE.md` |
 | Architecture, design patterns, invariants, scaling | `ARCHITECTURE.md` |
 | How to work with Claude Code / subagents / workflow | `AGENTS.md` |
-| The business model (pricing, packs, tiers) — source of truth | `PLAN_Calculadora.md` |
+| The pricing model (formulas, packs, tiers) — spec'd on customer #1's numbers | `PLAN_Calculadora.md` |
 | The English-migration plan (waves, key glossary) | `planes/migracion-codigo-ingles.md` |
 | The v4 configurability plan (products/suppliers/addons, unified engine) | `planes/v4-configurabilidad-total.md` |
+| Product requirements (what & why, success metrics) | `docs/PRD.md` |
+| Design system + UI states (incl. v5 cloud states) | `docs/UI-UX.md` |
+| The v5 cloud-sync plan (Cloudflare D1 + Worker, cache, phases) | `planes/v5-cloud-sync.md` |
 | Build & distribution | `README-build.md` |
 
 ---
@@ -26,9 +29,18 @@ low-maintenance** codebase that stays cheap to own for years, for a workshop of
 ## 1. What this is
 
 An **Electron** desktop app that prices DTF (Direct-to-Film) textile
-customization packs. Each workshop PC runs a portable `.exe`; all share one
-`config.js` on the company NAS (`\\172.26.0.154\Paep\Packs\`). No multi-tenant,
-no public internet, no telemetry, no backend. The NAS file *is* the backend.
+customization packs — built for one workshop, becoming a **product for many
+companies, each owning and operating its own storage** (single PC, NAS, their
+Cloudflare account, or their private cloud). **The developer never sees any
+customer's data — he only ships software** (`docs/PRD.md` §1b). Each workshop
+PC runs a portable `.exe`; the original workshop (customer #1) shares one
+`config.js` on its NAS (`\\172.26.0.154\Paep\Packs\`). No multi-tenant,
+no business-data telemetry (only opt-out error reports — see the debates
+below), **no server-side code at all**. The NAS file *is* the backend
+today; **v5 (approved, in progress)** adds a second storage choice: Cloudflare
+D1 in *the customer's own account*, talked to directly over Cloudflare's REST
+API and self-provisioned by the app. Local and cloud are interchangeable at
+any time (`planes/v5-cloud-sync.md`).
 
 The config/engine is at **schema v4**: the whole catalog (products, suppliers,
 addons, packs) is user-configurable from the admin UI. See `ARCHITECTURE.md` §6
@@ -42,8 +54,9 @@ Currently **beta** (`-preview`/`-beta` version suffixes) — not V1.
 |---|---|
 | Runtime | Electron + Node (main) + Chromium (renderer) |
 | UI | HTML + CSS + vanilla JS — **no build step, no framework** |
-| Shared persistence | flat `config.js` on the NAS |
-| Local persistence | `settings.json` in `%APPDATA%\packprice\` |
+| Shared persistence | user's choice: flat `config.js` (PC/NAS) **or** Cloudflare D1 in the customer's account, via REST from main (v5) — interchangeable |
+| Local persistence | `settings.json` + catalog cache + outbox in `%APPDATA%\packprice\` |
+| Cloud (v5) | **no server code**: `lib/d1-client.js` (native `fetch`, main only) + bundled SQL migrations in `db/migrations/` — zero new dependencies |
 | Packaging | `electron-builder` portable Windows x64 |
 | **UI language** | **Spanish** (users are Spanish-speaking) |
 | **Code language** | **English** — identifiers, comments, IPC channels, filenames |
@@ -51,6 +64,50 @@ Currently **beta** (`-preview`/`-beta` version suffixes) — not V1.
 **We do not add** (without a documented debate in this file): UI frameworks,
 TypeScript, bundlers, databases, backends/APIs, telemetry, or runtime
 dependencies. The default answer is **YAGNI**.
+
+### Documented debates
+
+- **2026-06-12 — Cloud storage, no backend (final form after same-day
+  revision).** The catalog (and quotes) can live in Cloudflare D1 (normalized
+  tables) **in each customer's own account**, accessed directly over
+  Cloudflare's REST API — there is **no Worker and no server-side code**; the
+  app self-provisions the database (first-run wizard, guided API token). The
+  "no backends/APIs" rule stands. Motivation: out-of-workshop access, real
+  traceability (audit + versioned snapshots in SQL), in-app statistics, and
+  selling the app to other companies with zero per-customer infrastructure.
+  Conditions that keep the rules intact: network calls **only in the main
+  process** (renderer CSP untouched); the customer's API token lives in
+  per-PC `settings.json`, never committed, never in the renderer; **the
+  admin-mode password gate is removed in v5** — protection against mistakes
+  is a save-confirmation dialog + per-write author in the audit log +
+  snapshot rollback; validation is client-side only (same trust model as the
+  NAS file); schema migrations are applied by the app itself, additive-only,
+  with an automatic pre-migration backup + restore fallback; the file mode
+  remains a first-class choice, interchangeable with cloud at any time.
+  Statistics use hand-rolled SVG (`renderer/charts.js`) — no chart libraries.
+  This is each company's own business data in its own database — the "no
+  telemetry" rule is untouched. Anything beyond this (a Worker, other
+  services, background sync, multi-tenant DB) reopens the debate. Full
+  design: `planes/v5-cloud-sync.md`, requirements `docs/PRD.md`.
+- **2026-06-12 — GitHub distribution.** The repo goes **public**; `main` is
+  production; each release publishes the portable `.exe` on GitHub Releases
+  and the app shows a non-blocking "new version" notice on startup
+  (toggleable, plus a manual "check now" button in settings). Before
+  the repo flips public: sweep for secrets, and the owner decides which docs
+  with real business numbers (`PLAN_Calculadora.md`, devlog) get published.
+- **2026-06-12 — Productization.** License: **Apache-2.0** (business model is
+  service, not license enforcement). `.exe` ships **unsigned** for now — the
+  SmartScreen warning is documented with screenshots in the user manual.
+  The default seed becomes a **neutral demo catalog** (the workshop's real
+  catalog is archived to its NAS first — never lost, never published).
+  **Error-report telemetry is the one sanctioned exception to "no
+  telemetry"**: unhandled main-process errors go to a developer-owned
+  Sentry-compatible endpoint via plain `fetch` (no SDK, no new deps),
+  whitelisted fields only (stack, versions, OS — never business data, with a
+  tested scrubber), opt-out in settings, disclosed in the manual. PDF quote
+  templates use a **tiny in-house template engine** (QWeb-style HTML+CSS
+  directives, no library); custom templates are shared data, sanitized on
+  load (no scripts, no external resources).
 
 > **Language migration:** much legacy code (`main.js`, `app.js`, `calculo.js`,
 > `admin.js`, `config-parser.js`) is Spanish for historical reasons and migrates
@@ -71,7 +128,8 @@ Full rationale in `ARCHITECTURE.md` §7 and `AGENTS.md` §1.
 4. **No silent error swallowing.** Fail-fast in main; show it in the renderer.
 5. **No persisted-schema change without a backup + idempotent migration**
    (`lib/migrations.js`).
-6. **Keep the admin conflict check** (mtime + sha256). Improve UX, don't remove.
+6. **Keep the admin conflict check** (file mode: mtime + sha256; cloud mode:
+   per-entity `If-Match` version). Improve UX, don't remove.
 7. **Tests ship with any calculation or schema change.**
 8. **English code, Spanish user strings.** Incremental renames, never big-bang.
 9. **No new deps/frameworks/TS/build steps** without debate + a doc update here.
@@ -141,6 +199,8 @@ For any non-trivial change, follow the agent loop in `AGENTS.md` §2
 - `pnpm dev` smoke per the checklist below.
 - No hard rule (§3) violated; minimal diff; no new deps.
 - Docs updated if a rule, pattern, or schema changed.
+- **Releases only:** devlog entry per `devlog/TEMPLATE.md` (screenshots +
+  diagrams) published before distributing the `.exe`.
 
 **Smoke checklist:** first run (delete `%APPDATA%\packprice\`); crew pack T1
 with/without hood; mixed pack with two quantities; admin conflict (edit config by
@@ -152,8 +212,10 @@ hand while an admin editor is open).
 - **Tramo / tier (T1–T4)** — quantity range driving PVP and time reduction.
 - **DTF** — Direct-to-Film print technique.
 - **NAS** — workshop file server (`172.26.0.154`).
-- **Admin mode** — config parameter editor (shared password; anti-accidental-
-  click, not security).
+- **Admin mode** — legacy name for the config editor. File mode still gates it
+  with the shared password (anti-accidental-click, not security); **v5 removes
+  the gate**: the catalog editor is always available, protected by save
+  confirmation + audit + snapshot rollback instead.
 
 ---
 
