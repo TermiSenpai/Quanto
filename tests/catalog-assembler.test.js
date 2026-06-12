@@ -8,6 +8,7 @@
 import { describe, test, expect } from 'vitest';
 import { disassemble, assemble } from '../lib/catalog-assembler.js';
 import { buildDefaultConfig } from '../config.default.js';
+import { collectConfigErrors, validateConfigSchema } from '../lib/config-schema.js';
 
 describe('disassemble', () => {
   const cfg = buildDefaultConfig();
@@ -86,5 +87,29 @@ describe('assemble', () => {
     const rebuilt = assemble(disassemble(cfg), META);
     expect(rebuilt.company).toEqual(cfg.company);
     expect(rebuilt.quote_settings).toEqual(cfg.quote_settings);
+  });
+});
+
+describe('round-trip', () => {
+  test('assemble(disassemble(cfg)) reproduces the default catalog exactly (minus admin)', () => {
+    const cfg = buildDefaultConfig();
+    const expected = { ...cfg };
+    delete expected.admin;
+    const rebuilt = assemble(disassemble(cfg), {
+      version: cfg.version, updated_at: cfg.updated_at, modified_by: cfg.modified_by
+    });
+    expect(rebuilt).toEqual(expected);
+  });
+
+  test('the rebuilt config passes the strict v4 validator', () => {
+    const cfg = buildDefaultConfig();
+    const rebuilt = assemble(disassemble(cfg), {
+      version: cfg.version, updated_at: cfg.updated_at, modified_by: cfg.modified_by
+    });
+    rebuilt.admin = cfg.admin;
+    // collectConfigErrors returns the full list (empty when valid);
+    // validateConfigSchema throws on any error and returns undefined.
+    expect(collectConfigErrors(rebuilt)).toEqual([]);
+    expect(() => validateConfigSchema(rebuilt)).not.toThrow();
   });
 });
