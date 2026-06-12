@@ -46,6 +46,31 @@ describe('createD1Client', () => {
     const client = createD1Client({ token: 'tok', fetchImpl });
     await expect(client.listAccounts()).rejects.toThrow(/502/);
   });
+
+  test('throws with the Cloudflare detail when success:false arrives under HTTP 200', async () => {
+    const fetchImpl = fakeFetch(
+      { success: false, errors: [{ code: 7403, message: 'database is in a read-only state' }] },
+      { ok: true, status: 200 }
+    );
+    const client = createD1Client({ token: 'tok', fetchImpl });
+    await expect(client.listAccounts()).rejects.toThrow(/read-only state/);
+    await expect(client.listAccounts()).rejects.toBeInstanceOf(D1ClientError);
+  });
+
+  test('wraps network-level fetch failures in a Spanish connection error', async () => {
+    const netErr = new TypeError('fetch failed');
+    const fetchImpl = vi.fn(async () => { throw netErr; });
+    const client = createD1Client({ token: 'tok', fetchImpl });
+    await expect(client.listAccounts()).rejects.toThrow(/No se pudo conectar con Cloudflare/);
+    await expect(client.listAccounts()).rejects.toMatchObject({ name: 'D1ClientError', cause: netErr });
+  });
+
+  test('rejects with a missing-account error before any network call', async () => {
+    const fetchImpl = fakeFetch({ success: true, result: [] });
+    const client = createD1Client({ token: 'tok', fetchImpl });
+    await expect(client.listDatabases()).rejects.toThrow(/cuenta/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });
 
 describe('database operations', () => {
@@ -94,5 +119,19 @@ describe('database operations', () => {
     const client = createD1Client({ token: 't', accountId: ACC, databaseId: DB, fetchImpl });
     const r = await client.exec('CREATE TABLE a (x); CREATE TABLE b (y);');
     expect(r).toHaveLength(2);
+  });
+
+  test('query uses client.databaseId assigned after createDatabase (live property, not closure)', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.endsWith('/d1/database')) {
+        return { ok: true, status: 200, json: async () => ({ success: true, result: { uuid: 'fresh-uuid', name: 'packprice' } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true, result: [{ results: [], success: true, meta: {} }] }) };
+    });
+    const client = createD1Client({ token: 't', accountId: ACC, fetchImpl });
+    const db = await client.createDatabase('packprice');
+    client.databaseId = db.uuid;
+    await client.query('SELECT 1');
+    expect(fetchImpl.mock.calls[1][0]).toContain('/d1/database/fresh-uuid/query');
   });
 });
