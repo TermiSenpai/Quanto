@@ -57,6 +57,9 @@ const { renderQuoteHtml } = require('./lib/pdf-template');
 const { validateSettingsPayload } = require('./lib/settings-validator');
 const { isPathAllowed } = require('./lib/path-guard');
 const { initialThrottleState, nextThrottleState } = require('./lib/admin-throttle');
+const { createD1Client } = require('./lib/d1-client');
+const { loadMigrations } = require('./lib/migration-loader');
+const { createCloudBootstrap } = require('./lib/cloud-bootstrap');
 
 // --- Path configuration ---
 const SETTINGS_DIR = path.join(app.getPath('userData'));
@@ -74,6 +77,21 @@ const CONFIG_PATH_CANDIDATES = [
   '\\\\172.26.0.154\\Paep\\Packs\\config.js',
   'Z:\\Packs\\config.js'
 ];
+
+// --- Cloud mode (v5): all orchestration lives in lib/cloud-bootstrap.js;
+// the handlers below are thin wiring. Network only in main, ever.
+const CATALOG_CACHE_PATH = path.join(SETTINGS_DIR, 'cache', 'catalog.json');
+const CLOUD_BACKUP_DIR = path.join(SETTINGS_DIR, 'backups');
+const MIGRATIONS_DIR = path.join(__dirname, 'db', 'migrations');
+
+const cloudBootstrap = createCloudBootstrap({
+  createClient: createD1Client,
+  loadMigrations: () => loadMigrations(MIGRATIONS_DIR),
+  cachePath: CATALOG_CACHE_PATH,
+  backupDir: CLOUD_BACKUP_DIR,
+  buildDefaultConfig,
+  appVersion: app.getVersion()
+});
 
 let mainWindow = null;
 
@@ -273,8 +291,23 @@ function mergeWithCurrentPassword(filePath, configFromRenderer) {
 
 // --- Settings ---
 
+/**
+ * The renderer must never see the Cloudflare API token in clear
+ * (CLAUDE.md hard rule via the v5 debate): `cloud.token` is replaced
+ * by a `has_token` flag so the wizard can tell "configured" from
+ * "missing" without holding the secret.
+ */
+function redactSettingsForRenderer(settings) {
+  if (!settings || typeof settings !== 'object' || !settings.cloud) return settings;
+  const { token, ...cloudRest } = settings.cloud;
+  return {
+    ...settings,
+    cloud: { ...cloudRest, has_token: typeof token === 'string' && token.length > 0 }
+  };
+}
+
 ipcMain.handle('settings:read', () => {
-  return readSettings();
+  return redactSettingsForRenderer(readSettings());
 });
 
 ipcMain.handle('settings:write', (event, settings) => {
@@ -285,7 +318,21 @@ ipcMain.handle('settings:write', (event, settings) => {
     if (typeof clean.config_path === 'string' && clean.config_path !== '') {
       rememberBlessedConfigPath(clean.config_path);
     }
-    writeSettings(clean);
+    // The renderer never holds the cloud token (settings:read redacts
+    // it), so a renderer round-trip must not wipe what only main
+    // knows: keep the stored data_source/cloud when the payload omits
+    // them, and the stored token when the payload's cloud lacks one.
+    const current = readSettings() || {};
+    const merged = { ...clean };
+    if (merged.data_source === undefined && current.data_source !== undefined) {
+      merged.data_source = current.data_source;
+    }
+    if (merged.cloud === undefined && current.cloud !== undefined) {
+      merged.cloud = current.cloud;
+    } else if (merged.cloud && !merged.cloud.token && current.cloud && current.cloud.token) {
+      merged.cloud = { ...merged.cloud, token: current.cloud.token };
+    }
+    writeSettings(merged);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -371,12 +418,62 @@ ipcMain.handle('dialog:select-config', async () => {
   return { cancelado: false, ruta: picked };
 });
 
+// --- Cloud (v5): first-run wizard + catalog read path ---
+//
+// Thin wiring only: the orchestration (timeouts, cache fallback, the
+// §6 migration-safety contract) lives in lib/cloud-bootstrap.js and
+// is unit-tested there. The API token stays inside main: payloads in,
+// assemble() configs out — never the token, never an admin section.
+
+ipcMain.handle('cloud:test-token', (event, payload) => {
+  return cloudBootstrap.testToken(payload || {});
+});
+
+ipcMain.handle('cloud:provision', async (event, payload) => {
+  const { token, accountId } = payload || {};
+  const settings = readSettings() || {};
+  const result = await cloudBootstrap.provision({
+    token, accountId, user: settings.user_name || 'desconocido'
+  });
+  if (result.ok) {
+    // Persist the working cloud connection so the next boot starts
+    // from D1. The token lives only in the per-PC settings.json.
+    writeSettings({
+      ...settings,
+      data_source: 'cloud',
+      cloud: {
+        token,
+        account_id: accountId,
+        database_id: result.databaseId,
+        user_name: settings.user_name || ''
+      }
+    });
+    logger.info('cloud:provision success', { databaseId: result.databaseId, seeded: result.seeded });
+  } else {
+    logger.error('cloud:provision failed', { code: result.code, error: result.error });
+  }
+  return result;
+});
+
+ipcMain.handle('catalog:load', () => cloudBootstrap.loadCatalog(readSettings()));
+
+ipcMain.handle('catalog:check-version', () => cloudBootstrap.checkVersion(readSettings()));
+
+ipcMain.handle('catalog:refresh', () => cloudBootstrap.refreshCatalog(readSettings()));
+
 // --- Config read (with lazy v2 -> v3 migration) ---
 //
 // The first PC to open an old (v2) config migrates it to v3: backs
 // up the original tagged `pre-v3-migration` and rewrites it
 // atomically. Subsequent reads see v3 and do nothing.
 ipcMain.handle('config:read', (event, payload) => {
+  // Cloud mode answers with the same { ok, config, … } envelope so
+  // the current renderer keeps working; the file path is ignored.
+  // File mode below stays untouched.
+  const settings = readSettings();
+  if (settings && settings.data_source === 'cloud') {
+    return cloudBootstrap.loadCatalog(settings);
+  }
   const filePath = (payload && typeof payload === 'object')
     ? (payload.path ?? payload.ruta)
     : payload;

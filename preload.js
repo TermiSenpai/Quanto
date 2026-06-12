@@ -57,6 +57,15 @@ contextBridge.exposeInMainWorld('packprice', {
   deleteQuote:        (id)    => ipcRenderer.invoke('quotes:delete', id),
 
   // --- PDF export ---
-  exportPdf:          (payload) => ipcRenderer.invoke('pdf:export', payload)
+  exportPdf:          (payload) => ipcRenderer.invoke('pdf:export', payload),
+
+  // --- Cloud mode (v5): first-run wizard + catalog read path ---
+  // The API token travels INTO main here and never comes back: the
+  // configs returned carry no token and no admin section.
+  testCloudToken:      (data) => ipcRenderer.invoke('cloud:test-token', data),
+  provisionCloud:      (data) => ipcRenderer.invoke('cloud:provision', data),
+  loadCatalog:         ()     => ipcRenderer.invoke('catalog:load'),
+  checkCatalogVersion: ()     => ipcRenderer.invoke('catalog:check-version'),
+  refreshCatalog:      ()     => ipcRenderer.invoke('catalog:refresh')
 
 });
