@@ -2,7 +2,7 @@
 // Tests · lib/db-migrator.js
 // ============================================================
 import { describe, test, expect } from 'vitest';
-import { applyMigrations } from '../lib/db-migrator.js';
+import { applyMigrations, acquireMigrationLock, releaseMigrationLock } from '../lib/db-migrator.js';
 
 function fakeClient(appliedIds = []) {
   const executed = [];
@@ -95,5 +95,86 @@ describe('applyMigrations', () => {
     expect(done).toEqual(['0001_init']);
     expect(client.executed.filter((s) => s === MIGRATIONS[0].sql)).toHaveLength(2);
     expect(client.inserts.map((p) => p[0])).toEqual(['0001_init']);
+  });
+});
+
+// Fake client that simulates the single catalog_meta row and the
+// conditional-UPDATE semantics D1 applies (meta.changes 0/1).
+function lockClient({ migratingSince = null, tableExists = true } = {}) {
+  const state = { migratingSince };
+  const queries = [];
+  return {
+    state,
+    queries,
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (!tableExists) {
+        throw new Error('Cloudflare rechazó la petición: no such table: catalog_meta');
+      }
+      if (/SET migrating_since = \?/.test(sql)) {
+        const [lockTs, staleCutoff] = params;
+        if (state.migratingSince === null || state.migratingSince < staleCutoff) {
+          state.migratingSince = lockTs;
+          return { results: [], meta: { changes: 1 } };
+        }
+        return { results: [], meta: { changes: 0 } };
+      }
+      if (/SET migrating_since = NULL/.test(sql)) {
+        state.migratingSince = null;
+        return { results: [], meta: { changes: 1 } };
+      }
+      return { results: [], meta: {} };
+    }
+  };
+}
+
+const NOW = () => '2026-06-12T10:00:00.000Z';
+
+describe('acquireMigrationLock / releaseMigrationLock', () => {
+  test('acquires a free lock and stamps migrating_since with now()', async () => {
+    const client = lockClient();
+    const got = await acquireMigrationLock(client, { now: NOW });
+    expect(got).toBe(true);
+    expect(client.state.migratingSince).toBe('2026-06-12T10:00:00.000Z');
+    const { sql, params } = client.queries[0];
+    expect(sql).toMatch(/UPDATE catalog_meta SET migrating_since = \? WHERE migrating_since IS NULL OR migrating_since < \?/);
+    // Default staleness window: 10 minutes before now.
+    expect(params).toEqual(['2026-06-12T10:00:00.000Z', '2026-06-12T09:50:00.000Z']);
+  });
+
+  test('refuses when another PC holds a fresh lock', async () => {
+    const client = lockClient({ migratingSince: '2026-06-12T09:55:00.000Z' }); // 5 min old
+    expect(await acquireMigrationLock(client, { now: NOW })).toBe(false);
+    expect(client.state.migratingSince).toBe('2026-06-12T09:55:00.000Z'); // untouched
+  });
+
+  test('steals a stale lock older than staleMinutes (orphaned migration)', async () => {
+    const client = lockClient({ migratingSince: '2026-06-12T09:30:00.000Z' }); // 30 min old
+    expect(await acquireMigrationLock(client, { now: NOW })).toBe(true);
+    expect(client.state.migratingSince).toBe('2026-06-12T10:00:00.000Z');
+  });
+
+  test('honours a custom staleMinutes window', async () => {
+    const client = lockClient({ migratingSince: '2026-06-12T09:55:00.000Z' }); // 5 min old
+    expect(await acquireMigrationLock(client, { now: NOW, staleMinutes: 3 })).toBe(true);
+  });
+
+  test('returns true without failing when catalog_meta does not exist yet (first migration)', async () => {
+    const client = lockClient({ tableExists: false });
+    expect(await acquireMigrationLock(client, { now: NOW })).toBe(true);
+  });
+
+  test('propagates non-missing-table errors instead of swallowing them', async () => {
+    const client = {
+      async query() { throw new Error('No se pudo conectar con Cloudflare — comprueba la conexión a internet'); }
+    };
+    await expect(acquireMigrationLock(client, { now: NOW })).rejects.toThrow(/No se pudo conectar/);
+  });
+
+  test('releaseMigrationLock sets migrating_since back to NULL', async () => {
+    const client = lockClient({ migratingSince: '2026-06-12T09:59:00.000Z' });
+    await releaseMigrationLock(client);
+    expect(client.state.migratingSince).toBeNull();
+    expect(client.queries[0].sql).toMatch(/UPDATE catalog_meta SET migrating_since = NULL/);
   });
 });
