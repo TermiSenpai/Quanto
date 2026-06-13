@@ -8,7 +8,9 @@ import {
   MAX_USER_NAME,
   MAX_CLOUD_TOKEN,
   MAX_CLOUD_ID,
-  DATA_SOURCES
+  DATA_SOURCES,
+  DEFAULT_ERROR_REPORTS_ENABLED,
+  DEFAULT_CHECK_UPDATES_ON_START
 } from '../lib/settings-validator.js';
 
 describe('validateSettingsPayload', () => {
@@ -138,6 +140,50 @@ describe('validateSettingsPayload · cloud', () => {
       user_name: 'Alberto',
       data_source: 'cloud',
       cloud: CLOUD
+    };
+    expect(validateSettingsPayload(payload)).toEqual(payload);
+  });
+});
+
+// --- v5 product toggles: error reports + update-on-start (Plan 7A) ---
+
+describe('validateSettingsPayload · product toggles', () => {
+  test('defaults are both true (opt-out)', () => {
+    expect(DEFAULT_ERROR_REPORTS_ENABLED).toBe(true);
+    expect(DEFAULT_CHECK_UPDATES_ON_START).toBe(true);
+  });
+
+  test('accepts boolean error_reports_enabled', () => {
+    expect(validateSettingsPayload({ error_reports_enabled: true }))
+      .toEqual({ error_reports_enabled: true });
+    expect(validateSettingsPayload({ error_reports_enabled: false }))
+      .toEqual({ error_reports_enabled: false });
+  });
+
+  test('accepts boolean check_updates_on_start', () => {
+    expect(validateSettingsPayload({ check_updates_on_start: true }))
+      .toEqual({ check_updates_on_start: true });
+    expect(validateSettingsPayload({ check_updates_on_start: false }))
+      .toEqual({ check_updates_on_start: false });
+  });
+
+  test('rejects non-boolean toggle values', () => {
+    expect(() => validateSettingsPayload({ error_reports_enabled: 'yes' })).toThrow();
+    expect(() => validateSettingsPayload({ error_reports_enabled: 1 })).toThrow();
+    expect(() => validateSettingsPayload({ check_updates_on_start: 'no' })).toThrow();
+    expect(() => validateSettingsPayload({ check_updates_on_start: null })).toThrow();
+  });
+
+  test('toggles are optional: a payload without them is unchanged', () => {
+    expect(validateSettingsPayload({ user_name: 'A' })).toEqual({ user_name: 'A' });
+  });
+
+  test('toggles round-trip alongside the rest of a v5 payload', () => {
+    const payload = {
+      user_name: 'Alberto',
+      data_source: 'file',
+      error_reports_enabled: false,
+      check_updates_on_start: false
     };
     expect(validateSettingsPayload(payload)).toEqual(payload);
   });
