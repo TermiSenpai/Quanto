@@ -1111,7 +1111,12 @@ ipcMain.handle('pdf:export', async (event, payload) => {
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: true
+        sandbox: true,
+        // Defense-in-depth: the quote templates are pure static HTML+CSS
+        // (printToPDF needs no JS), so disable the JS engine entirely.
+        // Even if a custom template slipped a script past the sanitizer,
+        // it could not run in this render window.
+        javascript: false
       }
     });
 

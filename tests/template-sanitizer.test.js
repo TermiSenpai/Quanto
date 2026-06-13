@@ -69,6 +69,40 @@ describe('rejects dangerous constructs (throws a clear Spanish error)', () => {
   test('rejects an external url() inside <style>', () => {
     expect(() => sanitizeTemplate('<style>body{background:url(//evil.com/x.png)}</style>')).toThrow(/extern|recurso|url/i);
   });
+
+  // --- @import bare-string external CSS (bypasses url()) ---
+  test('rejects @import "http://…" bare string', () => {
+    expect(() => sanitizeTemplate('<style>@import "http://evil.com/x.css";</style>')).toThrow(/extern|recurso|import/i);
+  });
+
+  test("rejects @import 'https://…' bare string (single quotes)", () => {
+    expect(() => sanitizeTemplate("<style>@import 'https://evil.com/x.css';</style>")).toThrow(/extern|recurso|import/i);
+  });
+
+  test('rejects @import "//evil/…" protocol-relative bare string', () => {
+    expect(() => sanitizeTemplate('<style>@import "//evil.com/x.css";</style>')).toThrow(/extern|recurso|import/i);
+  });
+
+  // --- entity/whitespace-obfuscated javascript:/vbscript: schemes ---
+  test('rejects a javascript: scheme with an entity-encoded colon (&#58;)', () => {
+    expect(() => sanitizeTemplate('<a href="javascript&#58;alert(1)">x</a>')).toThrow(/javascript/i);
+  });
+
+  test('rejects a javascript: scheme with a hex entity colon (&#x3a;)', () => {
+    expect(() => sanitizeTemplate('<a href="javascript&#x3a;alert(1)">x</a>')).toThrow(/javascript/i);
+  });
+
+  test('rejects a javascript: scheme with intra-scheme whitespace (tab)', () => {
+    expect(() => sanitizeTemplate('<a href="java\tscript:alert(1)">x</a>')).toThrow(/javascript/i);
+  });
+
+  test('rejects a javascript: scheme with intra-scheme whitespace (newline)', () => {
+    expect(() => sanitizeTemplate('<a href="java\nscript:alert(1)">x</a>')).toThrow(/javascript/i);
+  });
+
+  test('rejects a vbscript: scheme with an entity-encoded colon', () => {
+    expect(() => sanitizeTemplate('<a href="vbscript&#58;msgbox(1)">x</a>')).toThrow(/javascript|vbscript/i);
+  });
 });
 
 describe('keeps legitimate content intact', () => {
@@ -99,6 +133,21 @@ describe('keeps legitimate content intact', () => {
 
   test('allows a data: url() in CSS', () => {
     const html = '<div style="background:url(data:image/gif;base64,R0lGOD)">x</div>';
+    expect(sanitizeTemplate(html)).toBe(html);
+  });
+
+  test('allows a data: @import (self-contained, no network)', () => {
+    const html = '<style>@import "data:text/css,body{margin:0}";</style><p>x</p>';
+    expect(sanitizeTemplate(html)).toBe(html);
+  });
+
+  test('allows a template without any @import', () => {
+    const html = '<style>body{color:#111}</style><p>Hola</p>';
+    expect(sanitizeTemplate(html)).toBe(html);
+  });
+
+  test('allows a data: image href (base64 colon present, not a scheme)', () => {
+    const html = '<a href="data:image/png;base64,iVBORw0KGgo=">x</a>';
     expect(sanitizeTemplate(html)).toBe(html);
   });
 
