@@ -1061,6 +1061,9 @@ ipcMain.handle('dialog:open-external', async (event, url) => {
 // shows it; on boot the renderer swallows it).
 ipcMain.handle('update:check', async () => {
   const current = app.getVersion();
+  // Bound the request so «Buscar ahora» can't hang on a dead socket.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
     const fetchImpl = typeof fetch === 'function' ? fetch : null;
     if (!fetchImpl) {
@@ -1072,7 +1075,8 @@ ipcMain.handle('update:check', async () => {
         headers: {
           'Accept': 'application/vnd.github+json',
           'User-Agent': 'PackPrice-update-check'
-        }
+        },
+        signal: controller.signal
       }
     );
     if (!res || !res.ok) {
@@ -1089,7 +1093,12 @@ ipcMain.handle('update:check', async () => {
       : GITHUB_RELEASES_PAGE;
     return { ok: true, current, latest, isNewer: isNewerVersion(current, latest), url };
   } catch (err) {
+    if (err && err.name === 'AbortError') {
+      return { ok: false, current, error: 'No se pudo comprobar la versión: la conexión tardó demasiado.' };
+    }
     return { ok: false, current, error: err.message };
+  } finally {
+    clearTimeout(timeout);
   }
 });
 

@@ -127,6 +127,18 @@ Todos son perfiles técnicos básicos. UI en **español**; sin formación previa
 | D3 | **Firma de código** | ✅ **Resuelta (2026-06-12): sin certificado por ahora.** El manual documenta el aviso de SmartScreen con capturas y los pasos «Más información → Ejecutar de todas formas». Revisar cuando haya clientes de pago |
 | D4 | **Qué docs se publican** | ⏳ Pendiente: `PLAN_Calculadora.md` y el devlog contienen márgenes y precios reales del taller (cliente nº 1) — decidir antes de abrir el repo |
 
+### 4b.1 Tareas de release del propietario (no son código)
+
+Estas tareas las ejecuta el propietario **en el momento de abrir el repo /
+publicar la primera release pública**, no el desarrollo. Quedan listadas aquí
+para que no se pierdan:
+
+| # | Tarea de release | Detalle |
+|---|---|---|
+| R16 | **Semilla demo neutra** (tarea del propietario, no de código) | `config.default.js` contiene hoy el catálogo real del taller (cliente nº 1) y es a la vez el fixture que fija los importes exactos de `tests/calculo.test.js` y otros. Neutralizarlo es una **tarea de release**, no un cambio de la v5: (1) el propietario **archiva antes** el `config.js`/catálogo real a `\\NAS\…\archivo\` (paso de operaciones, principio rector §1b); (2) se sustituye `config.default.js` por un catálogo demo genérico marcado «datos de ejemplo — edítalos»; (3) se re-fijan los importes de los tests al nuevo seed (PR propio y acotado). Está atada a **D4** (qué números se publican), aún pendiente. **No se toca el seed en la v5.** Plan: `planes/v5-impl-plan-7-producto.md` §0 |
+| — | **`GITHUB_REPO` real** | El check de versión (R15) usa la constante `GITHUB_REPO` de `main.js` (hoy `'xkoistudio/packprice'`, **placeholder**). Antes de publicar la primera release, el propietario confirma el `owner/repo` real del repositorio público y, si difiere, lo ajusta. El DSN de informes de error (R19) es del desarrollador y ya está fijado |
+| — | **Titular del copyright en `LICENSE`** | `LICENSE` (Apache-2.0) en la raíz; confirmar la línea de copyright (`© xkoistudio`) con el propietario antes de abrir el repo |
+
 ## 5. Métricas de éxito
 
 1. **Cero presupuestos con precio desactualizado** tras un cambio de admin
@@ -185,3 +197,12 @@ Todos son perfiles técnicos básicos. UI en **español**; sin formación previa
   tiempo real** (R19) como excepción declarada y desactivable a la regla de
   no-telemetría — nunca datos de negocio; plantillas PDF (R20) con motor
   propio estilo QWeb y plantillas personalizadas como dato compartido.
+- **2026-06-13** — **Cierre de la v5 (`5.0.0-beta`).** Implementados R6–R20
+  (almacenamiento local/nube sin servidor, asistente, sin gate de admin,
+  auditoría + rollback, presupuestos con cliente + estados + recordatorio,
+  estadísticas SVG, 6 plantillas PDF + color de marca + personalizadas,
+  telemetría opt-out + diagnóstico + check de versión por GitHub). Publicado
+  el **manual de usuario** (`docs/MANUAL.md`) y el **devlog 13**. Versión
+  bumpeada `4.0.0-beta → 5.0.0-beta`. R16 (semilla demo) queda como tarea de
+  release del propietario (§4b.1), igual que confirmar `GITHUB_REPO` real y
+  el titular del copyright.

@@ -1,6 +1,6 @@
 {
   "name": "packprice",
-  "version": "4.0.0-beta",
+  "version": "5.0.0-beta",
   "description": "PackPrice - calculadora de packs (app de escritorio)",
   "main": "main.js",
   "author": "xkoistudio",
