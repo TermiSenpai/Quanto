@@ -51,6 +51,16 @@ contextBridge.exposeInMainWorld('packprice', {
   // --- Logs (electron-log) ---
   readLogs:           (lineLimit) => ipcRenderer.invoke('logs:read-last', lineLimit),
 
+  // --- Diagnostics + error-report toggle (Plan 7A: PRD R17/R19) ---
+  // `exportDiagnostics` builds a support bundle (logs + versions +
+  // storage presence + REDACTED settings — never the token or business
+  // data), asks where to save it and opens it; main owns the assembly.
+  // The error-report toggle (opt-out) is read/written here; the secret
+  // never crosses the bridge.
+  exportDiagnostics:       ()    => ipcRenderer.invoke('diagnostics:export'),
+  getErrorReportsEnabled:  ()    => ipcRenderer.invoke('error-reports:get'),
+  setErrorReportsEnabled:  (on)  => ipcRenderer.invoke('error-reports:set', on),
+
   // --- Audit log (admin config changes) ---
   listAuditEntries:   (data) => ipcRenderer.invoke('audit:list', data),
   previewConfigDiff:  (data) => ipcRenderer.invoke('audit:diff-preview', data),

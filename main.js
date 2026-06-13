@@ -25,6 +25,7 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 
 const { buildDefaultConfig } = require('./config.default');
@@ -58,8 +59,14 @@ const {
   renderQuote, BUILTIN_TEMPLATES, brandColors, listBuiltinTemplates, renderPreview
 } = require('./lib/pdf-templates');
 const { sanitizeTemplate } = require('./lib/template-sanitizer');
-const { validateSettingsPayload } = require('./lib/settings-validator');
+const {
+  validateSettingsPayload,
+  DEFAULT_ERROR_REPORTS_ENABLED
+} = require('./lib/settings-validator');
 const { redactSettings, mergeSettingsWrite } = require('./lib/settings-privacy');
+const { scrubError } = require('./lib/error-scrubber');
+const { reportError, DEFAULT_DSN } = require('./lib/error-reporter');
+const { buildDiagnostics } = require('./lib/diagnostics');
 const { isPathAllowed } = require('./lib/path-guard');
 const { initialThrottleState, nextThrottleState } = require('./lib/admin-throttle');
 const { createD1Client } = require('./lib/d1-client');
@@ -222,6 +229,92 @@ function writeSettings(settings) {
   }
   const v3 = migrateSettings(settings);
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(v3, null, 2), 'utf-8');
+}
+
+// ============================================================
+// Error telemetry (PRD R19) + diagnostics (PRD R17)
+// ============================================================
+// Opt-out: errors are scrubbed (lib/error-scrubber.js → strict
+// whitelist, no business data) and posted to the developer's
+// Sentry-compatible endpoint (lib/error-reporter.js) ONLY when the
+// per-PC toggle is on and a DSN is configured. The reporter never
+// throws; this wrapper is itself fully guarded so a telemetry bug can
+// never mask the original error.
+
+const TELEMETRY_DSN = DEFAULT_DSN;
+
+// The schema version bundled in this build = the highest numbered SQL
+// migration shipped under db/migrations/. Best-effort and cached; a
+// read failure degrades to null so diagnostics never breaks.
+let _bundledSchemaVersion;
+function bundledSchemaVersion() {
+  if (_bundledSchemaVersion !== undefined) return _bundledSchemaVersion;
+  try {
+    const migrations = loadMigrations(MIGRATIONS_DIR);
+    const last = migrations.length > 0 ? migrations[migrations.length - 1].id : '';
+    const m = /^(\d{4})/.exec(last);
+    _bundledSchemaVersion = m ? parseInt(m[1], 10) : null;
+  } catch (_) {
+    _bundledSchemaVersion = null;
+  }
+  return _bundledSchemaVersion;
+}
+
+/**
+ * Resolves the error-reports opt-out toggle, applying the default
+ * (ON) when the field is absent — pre-7A settings keep reporting
+ * without a migration. Tolerates a null/corrupt settings read.
+ */
+function errorReportsEnabled(settings) {
+  const s = settings || {};
+  return typeof s.error_reports_enabled === 'boolean'
+    ? s.error_reports_enabled
+    : DEFAULT_ERROR_REPORTS_ENABLED;
+}
+
+/**
+ * Builds the whitelisted meta attached to a scrubbed error. The schema
+ * version is best-effort (the cloud catalog_meta carries the live one;
+ * here we record only the storage mode and the bundled app/OS facts —
+ * never a token or business datum).
+ */
+function telemetryMeta(settings) {
+  const s = settings || {};
+  return {
+    app_version: app.getVersion(),
+    schema_version: null,
+    os: `${process.platform} ${os.release ? os.release() : ''}`.trim(),
+    arch: process.arch,
+    data_source: s.data_source || 'file'
+  };
+}
+
+/**
+ * Scrubs and reports an error, respecting the opt-out toggle. Fully
+ * guarded: any failure inside scrubbing/reporting is swallowed (and
+ * logged) so it can never propagate over the original error. Returns
+ * a promise that always resolves.
+ */
+async function reportScrubbedError(err, settings) {
+  try {
+    const enabled = errorReportsEnabled(settings);
+    const payload = scrubError(err, telemetryMeta(settings));
+    const result = await reportError(payload, {
+      dsn: TELEMETRY_DSN,
+      enabled,
+      fetchImpl: typeof fetch === 'function' ? fetch : undefined
+    });
+    if (result && result.error) {
+      logger.warn('error report failed (non-blocking)', { error: result.error });
+    }
+    return result;
+  } catch (reporterErr) {
+    // A bug in the reporter must NEVER mask the original error.
+    try {
+      logger.warn('error reporting threw (swallowed)', { error: reporterErr.message });
+    } catch (_) {}
+    return { sent: false };
+  }
 }
 
 // ============================================================
@@ -955,6 +1048,70 @@ ipcMain.handle('logs:read-last', (event, lineLimit) => {
   }
 });
 
+// --- Diagnostics export (PRD R17, blind support) ---
+//
+// Builds the diagnostics bundle (lib/diagnostics.js → logs + versions +
+// storage presence + REDACTED settings, never the token or business
+// data), lets the user pick where to save it via the native dialog,
+// writes it and opens it. Thin wiring: the assembly + the privacy
+// guarantee live in the pure lib module, which is unit-tested.
+ipcMain.handle('diagnostics:export', async () => {
+  try {
+    const settings = readSettings();
+    const bundle = buildDiagnostics({
+      userDataDir: SETTINGS_DIR,
+      appVersion: app.getVersion(),
+      schemaVersion: bundledSchemaVersion(),
+      dataSource: (settings && settings.data_source) || 'file'
+    });
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    const saveDialog = await dialog.showSaveDialog(mainWindow, {
+      title: 'Exportar diagnóstico',
+      defaultPath: `packprice-diagnostico-${stamp}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    });
+    if (saveDialog.canceled || !saveDialog.filePath) {
+      return { ok: false, cancelado: true };
+    }
+
+    fs.writeFileSync(saveDialog.filePath, JSON.stringify(bundle, null, 2), 'utf-8');
+    logger.info('diagnostics exported', { ruta: saveDialog.filePath });
+    // Open the saved file so the user can review / attach it. A failure
+    // to open is non-fatal — the file is already written.
+    try { await shell.openPath(saveDialog.filePath); } catch (_) {}
+    return { ok: true, ruta: saveDialog.filePath };
+  } catch (err) {
+    logger.error('diagnostics export failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+// --- Error-report toggle (PRD R19) ---
+//
+// The renderer's Privacy section reads/writes the opt-out toggle. We
+// persist it through the same validated settings path; the default
+// (ON) is applied when the field is absent. No token ever crosses here.
+ipcMain.handle('error-reports:get', () => {
+  try {
+    return { ok: true, enabled: errorReportsEnabled(readSettings()) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('error-reports:set', (event, enabled) => {
+  try {
+    const value = enabled === true;
+    const clean = validateSettingsPayload({ error_reports_enabled: value });
+    writeSettings(mergeSettingsWrite(readSettings(), clean));
+    logger.info('error reports toggle set', { enabled: value });
+    return { ok: true, enabled: value };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // --- Quote history (local, per-PC) ---
 //
 // Stored under <userData>/presupuestos.json. The renderer doesn't
@@ -1249,11 +1406,22 @@ app.whenReady().then(() => {
     userData: SETTINGS_DIR
   });
 
+  // Unhandled main-process errors: log locally (fail-fast surfacing,
+  // unchanged) AND route a scrubbed report to the developer endpoint
+  // when the opt-out toggle is on (PRD R19). Reporting is fully guarded
+  // inside reportScrubbedError so it can never mask the original error;
+  // we still read settings defensively here.
   process.on('uncaughtException', (err) => {
-    logger.error('uncaughtException', { message: err.message, stack: err.stack });
+    logger.error('uncaughtException', { message: err && err.message, stack: err && err.stack });
+    let settings = null;
+    try { settings = readSettings(); } catch (_) {}
+    void reportScrubbedError(err, settings);
   });
   process.on('unhandledRejection', (reason) => {
     logger.error('unhandledRejection', { reason: String(reason) });
+    let settings = null;
+    try { settings = readSettings(); } catch (_) {}
+    void reportScrubbedError(reason, settings);
   });
 
   createMainWindow();
