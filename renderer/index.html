@@ -677,6 +677,12 @@
 
       <!-- Editor -->
       <div id="admin-editor" class="hidden" style="display: contents;">
+        <!-- v5 cloud (UI-UX §2.5): the password gate is gone; the author
+             that will be recorded is shown instead. Hidden in file mode. -->
+        <div id="admin-editor-author" class="modal__author hidden">
+          <svg class="icon"><use href="#i-user"/></svg>
+          <span>Editando como <strong id="admin-editor-author-name">—</strong></span>
+        </div>
         <div class="modal__warn">
           <svg class="icon"><use href="#i-warn"/></svg>
           <span>Los demás usuarios verán los cambios al pulsar «Recargar» en su PackPrice. Se hace backup automático antes de cada escritura.</span>

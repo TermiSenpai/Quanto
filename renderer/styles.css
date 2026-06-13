@@ -1265,6 +1265,28 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
   line-height: 1.5;
 }
 
+/* v5 cloud editor (UI-UX §2.5): the author that will be recorded,
+   shown in place of the removed password gate. */
+.modal__author {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 28px;
+  font-size: 13px;
+  color: var(--text-secondary, #4a5263);
+  border-bottom: 1px solid var(--border, #e6e9ef);
+}
+.modal__author strong { color: var(--text, #1f2733); }
+
+/* Grouped change rows (save-confirmation summary, §2.5; reused by the
+   conflict modal, §2.3). */
+.conflict-entity { margin-bottom: 16px; }
+.conflict-entity__title { font-weight: 600; margin-bottom: 8px; }
+
+@media (max-width: 600px) {
+  .modal__author { padding: 10px 16px; }
+}
+
 .modal__body {
   display: flex;
   gap: 24px;

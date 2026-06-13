@@ -40,6 +40,7 @@ import {
   buildQuoteDraft
 } from './history.js';
 import { deriveDataStatus, formatFreshness, planRefreshTrigger } from './data-status.js';
+import { buildSaveSummary, totalChanges } from './save-summary.js';
 
 // ============================================================
 // Module state
@@ -566,13 +567,16 @@ async function loadCloudAndShowApp() {
 
   CFG = r.config;
   ensureDefaultPacks(CFG);
-  // Keep the relevant envelope fields for the indicator + banner.
+  // Keep the relevant envelope fields for the indicator + banner, plus
+  // the per-entity `versions` map (v5 writes): the editor sends it back
+  // on save as the optimistic-concurrency baseline (catalog:save).
   DATA_STATE = {
     source: r.source,
     catalogVersion: r.catalogVersion,
     fetchedAt: r.fetchedAt,
     offline: r.offline,
-    reason: r.reason
+    reason: r.reason,
+    versions: r.versions
   };
   hide('pantalla-bienvenida');
   hide('setup-wizard');
@@ -771,6 +775,21 @@ function isOffline() {
 }
 
 /**
+ * v5: are we in cloud storage mode? The catalog editor drops the
+ * password gate and uses save-confirmation + per-entity conflict UX
+ * (UI-UX §2.3/§2.5); file mode keeps its existing password gate.
+ */
+function isCloudMode() {
+  return !!(SETTINGS && SETTINGS.data_source === 'cloud');
+}
+
+/** Author recorded on cloud writes (UI-UX §2.5 «Editando como …»). */
+function cloudAuthorName() {
+  const s = SETTINGS || {};
+  return (s.cloud && s.cloud.user_name) || s.user_name || 'Equipo';
+}
+
+/**
  * Shows/hides the read-only offline banner (§2.2) and disables the
  * catalog editor (admin) while offline, with a plain-language tooltip.
  */
@@ -841,7 +860,8 @@ async function refreshCatalog() {
       catalogVersion: r.catalogVersion,
       fetchedAt: r.fetchedAt,
       offline: r.offline,
-      reason: r.reason
+      reason: r.reason,
+      versions: r.versions
     };
     initApp();
     if (state.packId && CFG.packs[state.packId]) {
@@ -2142,6 +2162,17 @@ async function reloadConfig() {
 
 async function openAdmin() {
   show('admin-overlay');
+
+  // v5 cloud (UI-UX §2.5): no password gate — the editor opens directly
+  // and the recorded author replaces the login. File mode keeps the
+  // password gate below, untouched. (Offline cloud already disables the
+  // entry button in refreshOfflineBanner, so editing only happens online.)
+  if (isCloudMode()) {
+    state.isAdmin = true;
+    await showAdminEditor();
+    return;
+  }
+
   if (state.isAdmin) {
     await showAdminEditor();
   } else {
@@ -2184,7 +2215,23 @@ async function showAdminEditor() {
   show('admin-editor');
 
   CFG_BACKUP = deepClone(CFG);
-  adminConfigInfoAtOpen = await window.packprice.getConfigInfo(SETTINGS.config_path);
+
+  // v5 cloud: no on-disk config info to snapshot (concurrency is
+  // per-entity via DATA_STATE.versions). Show the recorded author and
+  // skip the file-only getConfigInfo. File mode keeps its mtime+hash
+  // conflict baseline.
+  const authorBox = el('admin-editor-author');
+  if (isCloudMode()) {
+    adminConfigInfoAtOpen = null;
+    if (authorBox) {
+      authorBox.classList.remove('hidden');
+      const nameEl = el('admin-editor-author-name');
+      if (nameEl) nameEl.textContent = cloudAuthorName();
+    }
+  } else {
+    if (authorBox) authorBox.classList.add('hidden');
+    adminConfigInfoAtOpen = await window.packprice.getConfigInfo(SETTINGS.config_path);
+  }
   updateAdminFooter();
 
   showAdminTab(state.adminTab);
@@ -2300,6 +2347,14 @@ function escAttr(s) {
 }
 
 async function saveConfigToNas() {
+  // v5 cloud (UI-UX §2.5): confirmation modal with a grouped change
+  // summary + author, then a guarded per-entity write. Saving without
+  // confirming is impossible (the write only happens on confirm).
+  if (isCloudMode()) {
+    await saveCatalogCloud();
+    return;
+  }
+
   CFG.updated_at = new Date().toLocaleString('es-ES');
   CFG.modified_by = SETTINGS.user_name;
 
@@ -2383,6 +2438,188 @@ function cancelAdminChanges() {
     showAdminTab(state.adminTab);
     initApp();
   }
+}
+
+// ============================================================
+// v5 cloud: catalog save (confirmation) + per-entity conflict (§2.3/§2.5)
+// ============================================================
+
+// Spanish entity labels for the confirmation/conflict modals. Keeps
+// the technical entityType (English code) out of the user-facing copy.
+const ENTITY_LABEL = {
+  pack: 'Pack',
+  product: 'Producto',
+  supplier: 'Proveedor',
+  addon: 'Complemento',
+  parameters: 'Parámetros de cálculo',
+  tiers: 'Tramos por volumen',
+  company: 'Empresa'
+};
+
+function entityLabel(entityType, id) {
+  const base = ENTITY_LABEL[entityType] || entityType;
+  return id ? `${base} «${id}»` : base;
+}
+
+/**
+ * Cloud catalog save (UI-UX §2.5): derive the grouped change summary
+ * from CFG_BACKUP → CFG, confirm it (with the author), and only then
+ * call saveCatalog with the edited cfg + the versions we loaded as the
+ * optimistic-concurrency baseline. On a per-entity conflict we report it
+ * and reload. The write CANNOT happen without confirming.
+ */
+async function saveCatalogCloud() {
+  const summary = buildSaveSummary(CFG_BACKUP || {}, CFG);
+  if (summary.length === 0) {
+    await window.packprice.showInfo({
+      titulo: 'Sin cambios',
+      mensaje: 'No hay nada que guardar: el catálogo ya coincide con el guardado.'
+    });
+    return;
+  }
+
+  const confirmed = await showSaveConfirm(summary);
+  if (!confirmed) return;
+
+  const r = await window.packprice.saveCatalog({
+    newCfg: CFG,
+    expectedVersions: DATA_STATE.versions
+  });
+
+  if (r && r.ok) {
+    await afterCloudSaveClean(r);
+    return;
+  }
+
+  if (r && Array.isArray(r.conflicts) && r.conflicts.length > 0) {
+    // Per-entity conflict resolution lands in the next commit; for now
+    // report it plainly so a conflict is never a silent overwrite.
+    await window.packprice.showInfo({
+      titulo: 'Conflicto de edición',
+      mensaje: `${r.conflicts.length} entidad(es) cambiaron en el servidor mientras editabas. Recarga e inténtalo de nuevo.`
+    });
+    await reloadCloudCatalogQuietly();
+    return;
+  }
+
+  await window.packprice.showError({
+    titulo: 'Error al guardar',
+    mensaje: 'No se pudieron guardar los cambios en la nube.',
+    detalle: (r && r.error) || 'Error desconocido'
+  });
+}
+
+/** Refresh local state after a clean (no-conflict) cloud save. */
+async function afterCloudSaveClean(result) {
+  CFG_BACKUP = deepClone(CFG);
+  if (result && typeof result.catalogVersion === 'number') {
+    DATA_STATE.catalogVersion = result.catalogVersion;
+  }
+  // Pull the authoritative catalog (and fresh per-entity versions) so a
+  // subsequent save in the same session guards against the right baseline.
+  await reloadCloudCatalogQuietly();
+  await window.packprice.showInfo({
+    titulo: 'Guardado',
+    mensaje: 'Cambios guardados en la nube.'
+  });
+  updateAdminFooter();
+}
+
+/**
+ * Reloads the cloud catalog in place (no screen change), keeping the
+ * editor open. Used after a save to refresh DATA_STATE.versions and CFG.
+ */
+async function reloadCloudCatalogQuietly() {
+  const r = await window.packprice.refreshCatalog();
+  if (r && r.ok) {
+    CFG = r.config;
+    ensureDefaultPacks(CFG);
+    DATA_STATE = {
+      source: r.source,
+      catalogVersion: r.catalogVersion,
+      fetchedAt: r.fetchedAt,
+      offline: r.offline,
+      reason: r.reason,
+      versions: r.versions
+    };
+    CFG_BACKUP = deepClone(CFG);
+    refreshDataStatusUi();
+    if (!el('admin-editor').classList.contains('hidden')) {
+      showAdminTab(state.adminTab, { preserveScroll: true });
+    }
+  }
+}
+
+/**
+ * Save-confirmation modal (UI-UX §2.5). Reuses the admin diff overlay,
+ * listing the grouped changes + the author. Resolves true on confirm,
+ * false otherwise. The confirm button reads «Guardar N cambios».
+ */
+function showSaveConfirm(summary) {
+  const n = totalChanges(summary);
+  el('diff-body').innerHTML = renderSaveSummary(summary);
+
+  const confirmBtn = el('btn-diff-confirmar');
+  confirmBtn.innerHTML = `<svg class="icon"><use href="#i-save"/></svg> Guardar ${n} cambio${n === 1 ? '' : 's'}`;
+
+  show('diff-overlay');
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      hide('diff-overlay');
+      // Restore the file-mode default label so the shared overlay is reusable.
+      confirmBtn.innerHTML = '<svg class="icon"><use href="#i-save"/></svg> Confirmar y guardar';
+      confirmBtn.removeEventListener('click', onConfirm);
+      btnCancel.removeEventListener('click', onCancel);
+      btnClose.removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onOverlayClick);
+      document.removeEventListener('keydown', onKey);
+    };
+    const onConfirm = () => { cleanup(); resolve(true); };
+    const onCancel = () => { cleanup(); resolve(false); };
+    const onOverlayClick = (e) => { if (e.target.id === 'diff-overlay') onCancel(); };
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+
+    const btnCancel = el('btn-diff-cancelar');
+    const btnClose = el('btn-cerrar-diff');
+    const overlay = el('diff-overlay');
+
+    confirmBtn.addEventListener('click', onConfirm);
+    btnCancel.addEventListener('click', onCancel);
+    btnClose.addEventListener('click', onCancel);
+    overlay.addEventListener('click', onOverlayClick);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+/** Renders the grouped save summary (entity → its change lines). */
+function renderSaveSummary(summary) {
+  const n = totalChanges(summary);
+  const groups = summary.map((g) => `
+    <div class="conflict-entity">
+      <div class="conflict-entity__title">${escAttr(entityLabel(g.entityType, g.id))}</div>
+      <ul class="audit-changes audit-changes--preview">
+        ${g.lines.map(renderSummaryLine).join('')}
+      </ul>
+    </div>
+  `).join('');
+  return `
+    <p>Vas a guardar <strong>${n}</strong> cambio${n === 1 ? '' : 's'} como
+       <strong>${escAttr(cloudAuthorName())}</strong>:</p>
+    ${groups}
+  `;
+}
+
+/**
+ * Renders one summary line ("+ path: x" / "- …" / "~ a → b") into the
+ * same row styling the audit modal uses, classed by its sign.
+ */
+function renderSummaryLine(line) {
+  const sign = line.charAt(0);
+  const kind = sign === '+' ? 'add' : sign === '-' ? 'remove' : 'change';
+  return `<li class="audit-change audit-change--${kind}">
+    <code class="audit-change__path">${escAttr(line)}</code>
+  </li>`;
 }
 
 // ============================================================
