@@ -55,6 +55,16 @@ contextBridge.exposeInMainWorld('packprice', {
   listAuditEntries:   (data) => ipcRenderer.invoke('audit:list', data),
   previewConfigDiff:  (data) => ipcRenderer.invoke('audit:diff-preview', data),
 
+  // --- Cloud history (v5): audit + snapshots + forward-only restore ---
+  // Cloud-only. `listAudit` reads the D1 audit_log paginated by
+  // { limit, offset }; `listSnapshots` lists the versions;
+  // `restoreSnapshot({ version })` rolls back forward-only (creates a new
+  // version with that content, itself audited). No token/admin crosses
+  // the bridge — the author and the API token are added in main.
+  listAudit:          (data) => ipcRenderer.invoke('audit:list', data),
+  listSnapshots:      ()     => ipcRenderer.invoke('snapshots:list'),
+  restoreSnapshot:    (data) => ipcRenderer.invoke('snapshots:restore', data),
+
   // --- Quote history (local, per-PC) ---
   saveQuote:          (draft) => ipcRenderer.invoke('quotes:save', draft),
   listQuotes:         ()      => ipcRenderer.invoke('quotes:list'),

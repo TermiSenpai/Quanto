@@ -665,16 +665,69 @@ ipcMain.handle('config:force-write', (event, payload) => {
 
 // --- Audit log ---
 //
-// `audit:list` returns the last N entries of <NAS>/audit.log (oldest
-// to newest within the slice). `audit:diff-preview` is a pure helper
-// the renderer can use to compute the diff between the current admin
-// draft and the on-disk config, used by the "review changes" modal.
-ipcMain.handle('audit:list', (event, { ruta, limit }) => {
+// `audit:list` returns the change history. In CLOUD mode it reads the
+// D1 audit_log (newest-first, paginated by {limit, offset}); in FILE
+// mode it returns the last N entries of <NAS>/audit.log (oldest to
+// newest within the slice). Both answer the same { ok, entries }
+// envelope so the renderer handles one shape. `audit:diff-preview` is a
+// pure helper for the file-mode "review changes" modal.
+ipcMain.handle('audit:list', async (event, payload) => {
+  const settings = readSettings();
+  if (settings && settings.data_source === 'cloud') {
+    try {
+      const { limit, offset } = payload || {};
+      const entries = await cloudBootstrap.getAudit(settings, { limit, offset });
+      return { ok: true, entries };
+    } catch (err) {
+      logger.warn('audit:list (cloud) failed', { error: err.message });
+      return { ok: false, error: err.message };
+    }
+  }
+  const { ruta, limit } = payload || {};
   try {
     assertConfigPathAllowed(ruta);
     const lim = Number.isFinite(limit) ? Math.min(Math.max(1, limit), 5000) : 200;
     return { ok: true, entries: readRecentEntries(ruta, lim) };
   } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// --- Cloud snapshots (v5): version list + forward-only restore ---
+//
+// Cloud-only. File mode answers { ok:false, code:'NOT_CLOUD' } so the
+// renderer can hide the feature without a hard error. The token never
+// leaves main; the orchestration lives in lib/cloud-bootstrap.js.
+ipcMain.handle('snapshots:list', async () => {
+  const settings = readSettings();
+  if (!settings || settings.data_source !== 'cloud') {
+    return { ok: false, code: 'NOT_CLOUD' };
+  }
+  try {
+    const versions = await cloudBootstrap.getSnapshots(settings);
+    return { ok: true, versions };
+  } catch (err) {
+    logger.warn('snapshots:list failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('snapshots:restore', async (event, payload) => {
+  const settings = readSettings();
+  if (!settings || settings.data_source !== 'cloud') {
+    return { ok: false, code: 'NOT_CLOUD' };
+  }
+  try {
+    const { version } = payload || {};
+    const result = await cloudBootstrap.restore(settings, { version });
+    if (result.ok) {
+      logger.info('snapshots:restore success', { version, catalogVersion: result.catalogVersion });
+    } else {
+      logger.warn('snapshots:restore conflicts', { version });
+    }
+    return result;
+  } catch (err) {
+    logger.error('snapshots:restore failed', { error: err.message });
     return { ok: false, error: err.message };
   }
 });

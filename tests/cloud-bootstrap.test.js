@@ -713,3 +713,144 @@ describe('saveCatalog', () => {
     expect(readCache(cachePath).versions.product.URBAN).toBeUndefined();
   });
 });
+
+// ------------------------------------------------------------
+// getAudit / getSnapshots — cloud history read surface
+// ------------------------------------------------------------
+describe('getAudit', () => {
+  const AUDIT_ROWS = [
+    { id: 2, ts: 't2', user: 'Ana', entity_type: 'product', entity_id: 'BEAGLE', action: 'update', diff_json: '[]', catalog_version: 8 },
+    { id: 1, ts: 't1', user: 'Beto', entity_type: 'supplier', entity_id: 'ROLY', action: 'create', diff_json: '[]', catalog_version: 7 }
+  ];
+
+  test('builds the client from settings.cloud and returns mapped entries', async () => {
+    const seen = [];
+    const client = {
+      async query(sql, params) { seen.push({ sql, params }); return { results: AUDIT_ROWS, meta: {} }; }
+    };
+    const { bootstrap, created } = makeBootstrap(client);
+    const entries = await bootstrap.getAudit(SETTINGS, { limit: 2, offset: 0 });
+    expect(created).toEqual([{ token: 'tok-secret', accountId: 'acc-1', databaseId: 'db-1' }]);
+    expect(seen[0].params).toEqual([2, 0]);
+    expect(entries).toEqual([
+      { id: 2, ts: 't2', user: 'Ana', entityType: 'product', entityId: 'BEAGLE', action: 'update', diff: [], catalogVersion: 8 },
+      { id: 1, ts: 't1', user: 'Beto', entityType: 'supplier', entityId: 'ROLY', action: 'create', diff: [], catalogVersion: 7 }
+    ]);
+  });
+
+  test('passes settings into clientFromSettings (token never leaks in the result)', async () => {
+    const client = { async query() { return { results: AUDIT_ROWS, meta: {} }; } };
+    const { bootstrap } = makeBootstrap(client);
+    const entries = await bootstrap.getAudit(SETTINGS, {});
+    expect(JSON.stringify(entries)).not.toContain('tok-secret');
+  });
+});
+
+describe('getSnapshots', () => {
+  test('returns the snapshot list newest-first from settings.cloud', async () => {
+    const rows = [
+      { catalog_version: 8, ts: 't8' },
+      { catalog_version: 7, ts: 't7' }
+    ];
+    const client = { async query() { return { results: rows, meta: {} }; } };
+    const { bootstrap, created } = makeBootstrap(client);
+    const list = await bootstrap.getSnapshots(SETTINGS);
+    expect(created).toEqual([{ token: 'tok-secret', accountId: 'acc-1', databaseId: 'db-1' }]);
+    expect(list).toEqual([
+      { catalogVersion: 8, ts: 't8' },
+      { catalogVersion: 7, ts: 't7' }
+    ]);
+  });
+});
+
+// ------------------------------------------------------------
+// restore — forward-only rollback + cache refresh
+// ------------------------------------------------------------
+// A fake D1 world that serves getSnapshot, loadEntities (live rows +
+// versions), the writeEntities guarded-write traffic AND a final
+// loadEntities re-fetch (the cache refresh after a clean restore).
+function fakeRestoreWorld({ snapshotCfg, liveCfg, metaRow = META_ROW } = {}) {
+  const live = disassemble(liveCfg);
+  for (const table of ['packs', 'products', 'suppliers', 'addons']) {
+    live[table] = live[table].map((r) => ({ ...r, version: 3 }));
+  }
+  const snapshotJson = JSON.stringify({ ...snapshotCfg, catalog_version: 3 });
+  const queries = [];
+  return {
+    queries,
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (/FROM snapshots WHERE catalog_version = \?/.test(sql)) {
+        return { results: [{ catalog_version: params[0], ts: 't-snap', json: snapshotJson }], meta: {} };
+      }
+      if (/^UPDATE (\w+) SET version = version \+ 1/.test(sql)) {
+        return { results: [], meta: { changes: 1 } };
+      }
+      if (/^SELECT catalog_version FROM catalog_meta/.test(sql)) {
+        return { results: [{ catalog_version: metaRow.catalog_version }], meta: {} };
+      }
+      const exists = sql.match(/^SELECT (\w+) FROM (\w+) WHERE \w+ = \?$/);
+      if (exists) return { results: [], meta: {} };
+      const table = (sql.match(/FROM (\w+)/) || [])[1];
+      if (table === 'catalog_meta') return { results: [metaRow], meta: {} };
+      if (table && live[table] !== undefined) return { results: live[table], meta: {} };
+      return { results: [], meta: { changes: 1 } };
+    }
+  };
+}
+
+describe('restore', () => {
+  test('restores the snapshot, returns the new version and refreshes the cache', async () => {
+    const snapshotCfg = (() => { const c = buildDefaultConfig(); delete c.admin; return c; })();
+    const liveCfg = (() => { const c = buildDefaultConfig(); delete c.admin; c.products.BEAGLE.name = 'Editado'; return c; })();
+    const client = fakeRestoreWorld({ snapshotCfg, liveCfg });
+    const { bootstrap, created } = makeBootstrap(client);
+
+    const res = await bootstrap.restore(SETTINGS, { version: 3 });
+
+    expect(res.ok).toBe(true);
+    expect(res.catalogVersion).toBe(8); // live 7 → 8 (forward-only)
+    // Client built from settings.cloud only — never anything else.
+    expect(created[0]).toEqual({ token: 'tok-secret', accountId: 'acc-1', databaseId: 'db-1' });
+    // The restore went through writeEntities (audited + snapshotted).
+    expect(client.queries.some((q) => /^INSERT INTO audit_log/.test(q.sql))).toBe(true);
+    expect(client.queries.some((q) => /^INSERT INTO snapshots/.test(q.sql))).toBe(true);
+    // The cache was refreshed with the restored catalog.
+    const cached = readCache(cachePath);
+    expect(cached).toBeTruthy();
+    expect(cached.catalogVersion).toBeTypeOf('number');
+  });
+
+  test('uses the configured author (cloud user_name) for the restore', async () => {
+    const snapshotCfg = (() => { const c = buildDefaultConfig(); delete c.admin; return c; })();
+    const liveCfg = (() => { const c = buildDefaultConfig(); delete c.admin; c.products.BEAGLE.name = 'Editado'; return c; })();
+    const client = fakeRestoreWorld({ snapshotCfg, liveCfg });
+    const { bootstrap } = makeBootstrap(client);
+
+    await bootstrap.restore(SETTINGS, { version: 3 });
+    const audit = client.queries.find((q) => /^INSERT INTO audit_log/.test(q.sql));
+    expect(audit.params).toContain('Alberto'); // SETTINGS.cloud.user_name
+  });
+
+  test('never leaks the token in the returned shape', async () => {
+    const snapshotCfg = (() => { const c = buildDefaultConfig(); delete c.admin; return c; })();
+    const liveCfg = (() => { const c = buildDefaultConfig(); delete c.admin; c.products.BEAGLE.name = 'Editado'; return c; })();
+    const client = fakeRestoreWorld({ snapshotCfg, liveCfg });
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.restore(SETTINGS, { version: 3 });
+    const serialized = JSON.stringify(res);
+    expect(serialized).not.toContain('tok-secret');
+    expect(serialized).not.toContain('acc-1');
+  });
+
+  test('a missing version rejects with the Spanish error', async () => {
+    const client = {
+      async query(sql) {
+        if (/FROM snapshots WHERE catalog_version = \?/.test(sql)) return { results: [], meta: {} };
+        return { results: [], meta: {} };
+      }
+    };
+    const { bootstrap } = makeBootstrap(client);
+    await expect(bootstrap.restore(SETTINGS, { version: 999 })).rejects.toThrow(/versión/i);
+  });
+});
