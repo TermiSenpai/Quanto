@@ -1754,6 +1754,63 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 .audit-change--remove { background: #fdf3f3; }
 .audit-change--remove .audit-change__sign { color: #c63838; }
 
+/* v5 cloud Historial: action label in the audit entry head, e.g.
+   "editó Pack «crew»" between the author and the timestamp. */
+.audit-entry__action { color: #2c3543; }
+
+/* v5 cloud Historial: sub-view switcher (Auditoría / Versiones). */
+.history-subnav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--color-border, #d4dae3);
+}
+.history-subnav__item {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 4px;
+  margin-bottom: -1px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6a7484;
+  cursor: pointer;
+}
+.history-subnav__item.is-active {
+  color: var(--accent-primary, #2c3543);
+  border-bottom-color: var(--accent-primary, #2c3543);
+}
+
+/* «Cargar más» footer under the audit list. */
+.history-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+/* v5 cloud Historial: snapshot/versions list. */
+.snapshot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.snapshot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--color-border, #d4dae3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: var(--color-surface, #fff);
+}
+.snapshot-row__label {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .logs-pre {
   background: #11161f;
   color: #d6def0;

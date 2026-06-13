@@ -33,7 +33,9 @@ import {
 import {
   renderAuditTab,
   renderDiffPreview,
-  renderLogsModal
+  renderLogsModal,
+  renderCloudAuditList,
+  renderSnapshotsList
 } from './admin-extras.js';
 import {
   renderHistoryList,
@@ -95,8 +97,17 @@ const ADMIN_TAB_META = {
   addons:     { title: 'Complementos',          desc: 'Extras opcionales (nombre, mangas…) con su precio y a qué categorías aplican.' },
   tiers:      { title: 'Tramos por volumen',    desc: 'Rangos de unidades que activan cada tramo y su reducción de tiempo.' },
   packs:      { title: 'Packs',                 desc: 'Crea y edita packs: opciones, componentes y PVP por unidad o por componentes.' },
-  audit:      { title: 'Auditoría',              desc: 'Quién cambió qué y cuándo, leído desde audit.log junto al config.' }
+  audit:      { title: 'Historial',              desc: 'Quién cambió qué y cuándo. En la nube también puedes restaurar versiones anteriores.' }
 };
+
+// v5 cloud Historial: how many audit entries to fetch per page. «Cargar
+// más» appends another page at the next offset.
+const AUDIT_PAGE_SIZE = 50;
+
+// Cloud Historial scratch state (this session only): which sub-view is
+// active, the audit entries loaded so far and the next offset to fetch.
+// Reset every time the editor (re)opens the Historial tab in cloud mode.
+let historyState = { view: 'audit', auditEntries: [], auditOffset: 0, auditDone: false };
 
 // ============================================================
 // Bootstrap: decide which screen to show
@@ -2269,18 +2280,24 @@ function showAdminTab(tab, opts = {}) {
 
   const cont = el('admin-tab-content');
 
-  // Audit: async content, loaded via IPC.
+  // Historial tab (async content, loaded via IPC). Cloud mode shows two
+  // sub-views (auditoría + versiones, with restore); file mode shows the
+  // existing local audit only — no regression.
   if (tab === 'audit') {
-    cont.innerHTML = '<p class="hint">Cargando auditoría…</p>';
-    window.packprice.listAuditEntries({ ruta: SETTINGS.config_path, limit: 200 })
-      .then((r) => {
-        cont.innerHTML = (r && r.ok)
-          ? renderAuditTab(r.entries || [])
-          : `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>No se pudo leer audit.log: ${escAttr(r && r.error)}</span></div>`;
-      })
-      .catch((err) => {
-        cont.innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>${escAttr(err.message)}</span></div>`;
-      });
+    if (isCloudMode()) {
+      renderCloudHistoryTab(cont);
+    } else {
+      cont.innerHTML = '<p class="hint">Cargando auditoría…</p>';
+      window.packprice.listAuditEntries({ ruta: SETTINGS.config_path, limit: 200 })
+        .then((r) => {
+          cont.innerHTML = (r && r.ok)
+            ? renderAuditTab(r.entries || [])
+            : `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>No se pudo leer audit.log: ${escAttr(r && r.error)}</span></div>`;
+        })
+        .catch((err) => {
+          cont.innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>${escAttr(err.message)}</span></div>`;
+        });
+    }
     if (scrollPrev !== null && scroller) scroller.scrollTop = scrollPrev;
     return;
   }
@@ -2344,6 +2361,177 @@ function escAttr(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ============================================================
+// v5 cloud: Historial tab (auditoría + versiones + restaurar)
+// ============================================================
+// Two sub-views in cloud mode (UI-UX §2.5): «Auditoría» (who/when/what,
+// paginated) and «Versiones» (the snapshot list with «Restaurar esta
+// versión»). File mode never reaches here — showAdminTab routes it to
+// the existing local audit render instead. All data comes through
+// window.packprice.* (CSP intact).
+
+/**
+ * Renders the cloud Historial shell (the two-tab switcher + a body
+ * container) and loads the active sub-view. Resets the paging scratch
+ * state so re-entering the tab starts fresh.
+ */
+function renderCloudHistoryTab(cont) {
+  historyState = { view: historyState.view || 'audit', auditEntries: [], auditOffset: 0, auditDone: false };
+
+  cont.innerHTML = `
+    <div class="history-subnav" role="tablist">
+      <button type="button" class="history-subnav__item" data-history-view="audit">Auditoría</button>
+      <button type="button" class="history-subnav__item" data-history-view="versions">Versiones</button>
+    </div>
+    <div id="history-view-body"></div>
+  `;
+
+  cont.querySelectorAll('[data-history-view]').forEach((btn) => {
+    btn.addEventListener('click', () => switchHistoryView(btn.dataset.historyView));
+  });
+
+  switchHistoryView(historyState.view);
+}
+
+/** Switches the active cloud-history sub-view and (re)loads its body. */
+function switchHistoryView(view) {
+  historyState.view = view;
+  document.querySelectorAll('[data-history-view]').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.historyView === view);
+  });
+  if (view === 'versions') {
+    loadSnapshotsView();
+  } else {
+    // Re-entering the audit view reloads from the top (offset 0).
+    historyState.auditEntries = [];
+    historyState.auditOffset = 0;
+    historyState.auditDone = false;
+    loadAuditPage({ reset: true });
+  }
+}
+
+/**
+ * Loads one page of cloud audit entries and appends them. The cloud
+ * `audit:list` returns newest-first already, so we keep the order and
+ * grow the list downward. «Cargar más» bumps the offset until a short
+ * page tells us we reached the end.
+ */
+async function loadAuditPage({ reset } = {}) {
+  const body = el('history-view-body');
+  if (!body) return;
+  if (reset) body.innerHTML = '<p class="hint">Cargando auditoría…</p>';
+
+  let r;
+  try {
+    r = await window.packprice.listAudit({ limit: AUDIT_PAGE_SIZE, offset: historyState.auditOffset });
+  } catch (err) {
+    body.innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>${escAttr(err.message)}</span></div>`;
+    return;
+  }
+  if (!r || !r.ok) {
+    body.innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>No se pudo leer el historial: ${escAttr(r && r.error)}</span></div>`;
+    return;
+  }
+
+  const page = r.entries || [];
+  historyState.auditEntries = historyState.auditEntries.concat(page);
+  historyState.auditOffset += page.length;
+  if (page.length < AUDIT_PAGE_SIZE) historyState.auditDone = true;
+
+  renderAuditView(body);
+}
+
+/** Paints the accumulated audit entries plus the «Cargar más» control. */
+function renderAuditView(body) {
+  const more = historyState.auditDone
+    ? ''
+    : `<div class="history-more">
+         <button type="button" class="btn btn-secondary" id="btn-history-more">Cargar más</button>
+       </div>`;
+  body.innerHTML = renderCloudAuditList(historyState.auditEntries) + more;
+
+  const btnMore = el('btn-history-more');
+  if (btnMore) {
+    btnMore.addEventListener('click', async () => {
+      btnMore.disabled = true;
+      btnMore.textContent = 'Cargando…';
+      await loadAuditPage();
+    });
+  }
+}
+
+/** Loads and renders the snapshot list, wiring each restore button. */
+async function loadSnapshotsView() {
+  const body = el('history-view-body');
+  if (!body) return;
+  body.innerHTML = '<p class="hint">Cargando versiones…</p>';
+
+  let r;
+  try {
+    r = await window.packprice.listSnapshots();
+  } catch (err) {
+    body.innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>${escAttr(err.message)}</span></div>`;
+    return;
+  }
+  if (!r || !r.ok) {
+    body.innerHTML = `<div class="alert alert-error"><svg class="icon"><use href="#i-warn"/></svg><span>No se pudo leer la lista de versiones: ${escAttr(r && r.error)}</span></div>`;
+    return;
+  }
+
+  body.innerHTML = renderSnapshotsList(r.versions || []);
+  body.querySelectorAll('[data-action="restore-snapshot"]').forEach((btn) => {
+    btn.addEventListener('click', () => restoreSnapshotFlow(btn.dataset.version, btn.dataset.label));
+  });
+}
+
+/**
+ * Restore flow (UI-UX §2.5): confirm → restoreSnapshot → reload the
+ * catalog (so the editor + app reflect the restored state) → toast +
+ * refresh the audit list (the restore is itself a new audit entry). A
+ * failure shows a plain Spanish error and changes nothing.
+ */
+async function restoreSnapshotFlow(versionRaw, label) {
+  const version = Number(versionRaw);
+  if (!Number.isFinite(version)) return;
+
+  const option = await window.packprice.confirm({
+    titulo: 'Restaurar versión',
+    mensaje: `Vas a restaurar la versión ${version} del ${label || ''}. Se creará una versión nueva con ese contenido.`,
+    detalle: '¿Continuar?',
+    botones: ['Restaurar', 'Cancelar'],
+    defaultId: 1
+  });
+  if (option !== 0) return;
+
+  let r;
+  try {
+    r = await window.packprice.restoreSnapshot({ version });
+  } catch (err) {
+    await window.packprice.showError({
+      titulo: 'No se pudo restaurar',
+      mensaje: err.message || 'Error desconocido al restaurar la versión.'
+    });
+    return;
+  }
+
+  if (!r || !r.ok) {
+    await window.packprice.showError({
+      titulo: 'No se pudo restaurar',
+      mensaje: (r && r.error) || 'No se pudo restaurar la versión seleccionada.'
+    });
+    return;
+  }
+
+  // Reload the catalog so the editor (and the rest of the app) reflect
+  // the restored state. Land back on the audit view: reloadCloud…Quietly
+  // re-renders the active admin tab (here 'audit' → renderCloudHistoryTab,
+  // which reloads the audit page from offset 0), so the restore shows as
+  // the newest entry without a second manual render.
+  historyState.view = 'audit';
+  await reloadCloudCatalogQuietly();
+  showToast(`Restaurado a la versión ${version}`);
 }
 
 async function saveConfigToNas() {
