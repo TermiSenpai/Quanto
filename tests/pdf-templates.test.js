@@ -14,6 +14,8 @@ import {
   buildQuoteContext,
   brandColors,
   renderQuote,
+  renderPreview,
+  listBuiltinTemplates,
   APP_ACCENT
 } from '../lib/pdf-templates.js';
 
@@ -294,5 +296,43 @@ describe('renderQuote — brand colors in color templates', () => {
       });
       expect(html.toLowerCase()).toContain('#ff6600');
     }
+  });
+});
+
+describe('listBuiltinTemplates — gallery list', () => {
+  test('returns id+name only for every built-in, no html', () => {
+    const list = listBuiltinTemplates();
+    expect(list).toHaveLength(BUILTIN_TEMPLATES.length);
+    for (const item of list) {
+      expect(Object.keys(item).sort()).toEqual(['id', 'name']);
+      expect(typeof item.id).toBe('string');
+      expect(typeof item.name).toBe('string');
+    }
+  });
+});
+
+describe('renderPreview — settings preview (Task 6B)', () => {
+  test('renders the demo quote with no leftover mustaches', () => {
+    const html = renderPreview({ templateId: 'clasica' });
+    expect(html).toContain('<!doctype html>');
+    expect(html).not.toContain('{{');
+  });
+
+  test('applies the brand color to a color template', () => {
+    const html = renderPreview({ templateId: 'moderna', brandColor: '#0a8754' });
+    expect(html.toLowerCase()).toContain('#0a8754');
+  });
+
+  test('escapes the demo client name (XSS guarantee even in preview)', () => {
+    const html = renderPreview({ templateId: 'clasica' });
+    expect(html).not.toContain('<demo>');
+    expect(html).toContain('&lt;demo&gt;');
+  });
+
+  test('renders a provided pre-sanitized custom template', () => {
+    const custom = { html: '<!doctype html><html><body><h1>{{company.name}}</h1></body></html>' };
+    const html = renderPreview({ custom, company: { name: 'Taller Demo' } });
+    expect(html).toContain('Taller Demo');
+    expect(html).not.toContain('{{');
   });
 });

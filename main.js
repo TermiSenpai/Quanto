@@ -54,7 +54,9 @@ const {
   getQuote,
   updateQuote
 } = require('./lib/history');
-const { renderQuote, BUILTIN_TEMPLATES, brandColors } = require('./lib/pdf-templates');
+const {
+  renderQuote, BUILTIN_TEMPLATES, brandColors, listBuiltinTemplates, renderPreview
+} = require('./lib/pdf-templates');
 const { sanitizeTemplate } = require('./lib/template-sanitizer');
 const { validateSettingsPayload } = require('./lib/settings-validator');
 const { redactSettings, mergeSettingsWrite } = require('./lib/settings-privacy');
@@ -1139,6 +1141,90 @@ ipcMain.handle('pdf:export', async (event, payload) => {
       try { fs.unlinkSync(tmpHtmlPath); } catch (_) {}
     }
   }
+});
+
+// --- PDF template gallery / preview / custom save (Task 6B) ---
+//
+// The renderer is a native ES module with no build step and CANNOT
+// require the CommonJS lib/pdf-templates.js. So the gallery list, the
+// preview HTML and the custom-template save all cross the IPC boundary:
+//   pdf:list-templates → [{id,name}] (built-ins + cloud custom)
+//   pdf:preview        → demo-quote HTML for a sandboxed iframe
+//   pdf:save-template  → sanitize + persist a custom template (cloud)
+// The API token never leaves main; the preview HTML is rendered here
+// (same path as a real export) and shown only inside a sandboxed iframe
+// in the renderer (no scripts), never injected into the main DOM.
+
+// Lists the templates for the settings gallery: the built-ins always,
+// plus the company's custom templates in cloud mode. A cloud-list
+// failure (offline) degrades to the built-ins so the gallery still works.
+ipcMain.handle('pdf:list-templates', async () => {
+  const builtins = listBuiltinTemplates();
+  const settings = readSettings();
+  if (!settings || settings.data_source !== 'cloud') {
+    return { ok: true, templates: builtins, builtinIds: builtins.map((t) => t.id), cloud: false };
+  }
+  try {
+    const custom = await cloudBootstrap.listPdfTemplates(settings);
+    return {
+      ok: true,
+      templates: [...builtins, ...custom],
+      builtinIds: builtins.map((t) => t.id),
+      cloud: true
+    };
+  } catch (err) {
+    logger.warn('pdf:list-templates cloud list failed, builtins only', { error: err.message });
+    return { ok: true, templates: builtins, builtinIds: builtins.map((t) => t.id), cloud: true, partial: true };
+  }
+});
+
+// Renders the demo-quote preview for the chosen template + brand color.
+// Built-in ids render straight from code; any other id is a cloud custom
+// template (loaded, sanitized, then rendered). Returns the HTML string —
+// the renderer drops it into a sandboxed iframe's srcdoc.
+ipcMain.handle('pdf:preview', async (event, payload) => {
+  const { templateId, brandColor } = payload || {};
+  try {
+    const requested = typeof templateId === 'string' ? templateId.trim() : '';
+    const isBuiltin = !requested || BUILTIN_TEMPLATE_IDS.has(requested);
+    if (isBuiltin) {
+      const html = renderPreview({ templateId: requested || 'clasica', brandColor });
+      return { ok: true, html };
+    }
+    // Custom template: cloud-only. Load + sanitize before previewing.
+    const settings = readSettings();
+    if (!settings || settings.data_source !== 'cloud') {
+      return { ok: false, error: 'Las plantillas personalizadas solo están disponibles en modo nube.' };
+    }
+    const tpl = await cloudBootstrap.getPdfTemplate(settings, requested);
+    if (!tpl) return { ok: false, error: 'No se encontró la plantilla seleccionada.' };
+    const combined = tpl.css ? `<style>${tpl.css}</style>${tpl.html}` : tpl.html;
+    const safe = sanitizeTemplate(combined);
+    const html = renderPreview({ custom: { html: safe }, brandColor });
+    return { ok: true, html };
+  } catch (err) {
+    logger.warn('pdf:preview failed', { error: err.message });
+    return { ok: false, error: 'No se pudo generar la vista previa de la plantilla.' };
+  }
+});
+
+// Saves a user-authored custom template (cloud only). The HTML is
+// sanitized in the bootstrap before it is ever stored; a rejected
+// template returns { ok:false, error } with a plain Spanish message that
+// the renderer shows verbatim. The token never leaves main.
+ipcMain.handle('pdf:save-template', async (event, payload) => {
+  const { name, html } = payload || {};
+  const settings = readSettings();
+  if (!settings || settings.data_source !== 'cloud') {
+    return { ok: false, error: 'Las plantillas personalizadas solo están disponibles en modo nube.' };
+  }
+  const result = await cloudBootstrap.savePdfTemplate(settings, { name, html });
+  if (result.ok) {
+    logger.info('pdf:save-template saved', { id: result.id });
+  } else {
+    logger.warn('pdf:save-template rejected', { error: result.error });
+  }
+  return result;
 });
 
 // ============================================================

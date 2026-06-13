@@ -1108,3 +1108,74 @@ describe('outbox flush on sync', () => {
     expect(readOutbox(tmpDir).quotes.map((q) => q.id)).toEqual(['uuid-1']);
   });
 });
+
+// ------------------------------------------------------------
+// savePdfTemplate (Task 6B) — sanitize, slug + dedup, persist
+// ------------------------------------------------------------
+describe('savePdfTemplate', () => {
+  // A client whose query() returns the seeded list on SELECT and records
+  // the INSERT call for assertions.
+  function tplClient(existing = []) {
+    const calls = [];
+    const client = {
+      query: vi.fn(async (sql, params) => {
+        calls.push({ sql, params });
+        if (/SELECT id, name FROM pdf_templates/.test(sql)) {
+          return { results: existing };
+        }
+        return { results: [] };
+      })
+    };
+    return { client, calls };
+  }
+
+  test('sanitizes, derives a slug id and inserts (happy path)', async () => {
+    const { client, calls } = tplClient([]);
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.savePdfTemplate(SETTINGS, {
+      name: 'Mi Plantilla Bonita',
+      html: '<!doctype html><html><body><style>p{color:#111}</style><p>{{quote.id}}</p></body></html>'
+    });
+    expect(res.ok).toBe(true);
+    expect(res.id).toBe('mi-plantilla-bonita');
+    const insert = calls.find((c) => /INSERT INTO pdf_templates/.test(c.sql));
+    expect(insert).toBeTruthy();
+    expect(insert.params[0]).toBe('mi-plantilla-bonita');
+    expect(insert.params[1]).toBe('Mi Plantilla Bonita');
+  });
+
+  test('rejects a template with a <script> (sanitizer message, not stored)', async () => {
+    const { client, calls } = tplClient([]);
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.savePdfTemplate(SETTINGS, {
+      name: 'Maliciosa',
+      html: '<html><body><script>alert(1)</script></body></html>'
+    });
+    expect(res.ok).toBe(false);
+    expect(typeof res.error).toBe('string');
+    expect(res.error.length).toBeGreaterThan(0);
+    // Nothing was inserted.
+    expect(calls.some((c) => /INSERT INTO pdf_templates/.test(c.sql))).toBe(false);
+  });
+
+  test('dedups the slug id against existing templates', async () => {
+    const { client, calls } = tplClient([{ id: 'mi-plantilla', name: 'Mi plantilla' }]);
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.savePdfTemplate(SETTINGS, {
+      name: 'Mi plantilla',
+      html: '<html><body><p>{{quote.id}}</p></body></html>'
+    });
+    expect(res.ok).toBe(true);
+    expect(res.id).toBe('mi-plantilla-2');
+    const insert = calls.find((c) => /INSERT INTO pdf_templates/.test(c.sql));
+    expect(insert.params[0]).toBe('mi-plantilla-2');
+  });
+
+  test('rejects an empty name or empty html before touching the network', async () => {
+    const { client, calls } = tplClient([]);
+    const { bootstrap } = makeBootstrap(client);
+    expect((await bootstrap.savePdfTemplate(SETTINGS, { name: '  ', html: '<p>x</p>' })).ok).toBe(false);
+    expect((await bootstrap.savePdfTemplate(SETTINGS, { name: 'X', html: '   ' })).ok).toBe(false);
+    expect(calls.length).toBe(0);
+  });
+});

@@ -90,6 +90,17 @@ contextBridge.exposeInMainWorld('packprice', {
   // --- PDF export ---
   exportPdf:          (payload) => ipcRenderer.invoke('pdf:export', payload),
 
+  // --- PDF templates: settings gallery + preview + custom save (Task 6B) ---
+  // The renderer can't require the CommonJS templates module, so the
+  // gallery list and the preview HTML come over IPC. `previewPdfTemplate`
+  // returns { ok, html } — the renderer shows it in a SANDBOXED iframe
+  // (srcdoc, no scripts), never in the main DOM. `savePdfTemplate` is
+  // cloud-only: main sanitizes the HTML before storing it; on rejection it
+  // answers { ok:false, error } with a plain Spanish message.
+  listPdfTemplatesAll: ()        => ipcRenderer.invoke('pdf:list-templates'),
+  previewPdfTemplate:  (payload) => ipcRenderer.invoke('pdf:preview', payload),
+  savePdfTemplate:     (payload) => ipcRenderer.invoke('pdf:save-template', payload),
+
   // --- Cloud mode (v5): first-run wizard + catalog read path ---
   // The API token travels INTO main here and never comes back: the
   // configs returned carry no token and no admin section.

@@ -950,7 +950,7 @@
 
   <!-- ================== MODAL: AJUSTES LOCALES ================== -->
   <div id="ajustes-overlay" class="overlay hidden">
-    <div class="modal modal--sm" role="dialog" aria-labelledby="ajustes-title">
+    <div class="modal" role="dialog" aria-labelledby="ajustes-title">
       <header class="modal__head">
         <div class="modal__head-title">
           <span class="modal__head-icon"><svg class="icon icon--lg"><use href="#i-settings"/></svg></span>
@@ -1014,6 +1014,75 @@
               <input type="checkbox" id="aj-mostrar-iva" checked>
               <span class="toggle__slider"></span>
             </label>
+          </div>
+
+          <hr class="divider">
+
+          <!-- PDF template gallery + preview + brand color (Plan 6 · UI-UX §2.5).
+               Shared data (company.pdf_template / company.brand_color), so all
+               PCs print alike. The preview is a SANDBOXED iframe (no scripts);
+               its HTML comes from main (pdf:preview), never injected here. -->
+          <div id="aj-pdf-section">
+            <div class="pdf-tpl__head">
+              <span class="modal__head-icon"><svg class="icon"><use href="#i-clipboard"/></svg></span>
+              <div>
+                <h3 class="h-card" style="margin-bottom: 2px;">Plantilla de presupuesto</h3>
+                <p class="text-secondary" style="font-size: 12px; margin: 0;">El diseño del PDF para todos los equipos. Elige una plantilla y previsualízala con un presupuesto de ejemplo.</p>
+              </div>
+            </div>
+
+            <div class="pdf-tpl">
+              <div class="pdf-tpl__gallery" id="aj-tpl-gallery" role="radiogroup" aria-label="Plantilla de presupuesto">
+                <!-- cards rendered by app.js (renderPdfTemplateGallery) -->
+              </div>
+
+              <div class="pdf-tpl__side">
+                <div class="field">
+                  <label class="field__label" for="aj-brand-color">Color de marca</label>
+                  <div class="field__row">
+                    <input type="color" id="aj-brand-color" class="color-input" value="#3D7BD9" aria-label="Color de marca">
+                    <span class="field__hint" style="margin: 0;">Las plantillas con color (Moderna, Corporativa) usan este tono; el oscuro y el suave se derivan solos.</span>
+                  </div>
+                </div>
+
+                <div class="pdf-tpl__preview">
+                  <div class="pdf-tpl__preview-label">Vista previa</div>
+                  <!-- sandbox WITHOUT allow-scripts: srcdoc renders isolated,
+                       same-origin about:srcdoc under default-src 'self'. -->
+                  <iframe id="aj-tpl-preview" class="pdf-tpl__frame" sandbox title="Vista previa del presupuesto"></iframe>
+                </div>
+              </div>
+            </div>
+
+            <!-- Custom templates are a cloud feature. The add button shows
+                 only in cloud mode; file mode shows the note instead. -->
+            <div class="pdf-tpl__custom">
+              <button id="btn-aj-tpl-add" class="btn btn-secondary hidden" type="button">
+                <svg class="icon"><use href="#i-plus"/></svg> Añadir plantilla personalizada…
+              </button>
+              <p id="aj-tpl-custom-note" class="field__hint hidden">Las plantillas personalizadas necesitan el modo nube. En modo local solo están disponibles las 6 integradas.</p>
+            </div>
+
+            <!-- Inline importer for a custom HTML+CSS template (cloud mode).
+                 Hidden until «Añadir…» is clicked. -->
+            <div id="aj-tpl-add-form" class="pdf-tpl__addform hidden">
+              <div class="field">
+                <label class="field__label" for="aj-tpl-name">Nombre de la plantilla</label>
+                <input type="text" id="aj-tpl-name" class="input" placeholder="Mi plantilla">
+              </div>
+              <div class="field">
+                <label class="field__label" for="aj-tpl-html">HTML + CSS de la plantilla</label>
+                <textarea id="aj-tpl-html" class="input input--mono" rows="6" placeholder="<!doctype html>… (usa &#123;&#123;company.name&#125;&#125;, &#123;&#123;totals.total&#125;&#125;, etc.)"></textarea>
+                <span class="field__hint">Se valida al guardar: se rechazan scripts, iframes y recursos externos. El CSS va en una etiqueta &lt;style&gt; dentro del HTML.</span>
+              </div>
+              <div id="aj-tpl-add-error" class="field__error hidden"></div>
+              <div class="field__row" style="justify-content: flex-end;">
+                <button id="btn-aj-tpl-add-cancel" class="btn btn-ghost" type="button">Cancelar</button>
+                <button id="btn-aj-tpl-add-save" class="btn btn-primary" type="button">
+                  <svg class="icon"><use href="#i-save"/></svg> Guardar plantilla
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

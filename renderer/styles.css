@@ -2176,9 +2176,101 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 .stats-note h3 { font-size: 18px; margin-bottom: 8px; }
 .stats-note p { margin-bottom: 16px; }
 
+/* --- PDF template gallery + preview + brand color (Plan 6 · UI-UX §2.5) --- */
+.pdf-tpl__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+/* Gallery (left) + side panel with color + preview (right). */
+.pdf-tpl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 18px;
+  align-items: start;
+}
+.pdf-tpl__gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.pdf-tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-secondary);
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.pdf-tpl-card:hover { border-color: var(--border-strong); }
+.pdf-tpl-card.is-selected {
+  border-color: var(--accent-primary);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-primary);
+}
+.pdf-tpl-card__name { font-weight: 600; font-size: 14px; }
+.pdf-tpl-card__tag {
+  font-size: 11px;
+  color: var(--fg-secondary);
+}
+.pdf-tpl-card__check {
+  align-self: flex-end;
+  color: var(--accent-primary);
+  visibility: hidden;
+}
+.pdf-tpl-card.is-selected .pdf-tpl-card__check { visibility: visible; }
+
+.pdf-tpl__side { display: flex; flex-direction: column; gap: 14px; }
+.color-input {
+  width: 44px;
+  height: 36px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.pdf-tpl__preview-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-secondary);
+  margin-bottom: 6px;
+}
+.pdf-tpl__frame {
+  width: 100%;
+  height: 360px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+
+.pdf-tpl__custom {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pdf-tpl__addform {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 @media (max-width: 880px) {
   .wizard-cards { grid-template-columns: 1fr; }
   .offline-banner { padding: 10px 16px; }
   .reminder-banner { padding: 10px 16px; }
   .stats-grid { grid-template-columns: 1fr; }
+  .pdf-tpl { grid-template-columns: 1fr; }
 }

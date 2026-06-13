@@ -8,7 +8,7 @@
 // ============================================================
 
 import { describe, test, expect, vi } from 'vitest';
-import { loadPdfTemplate, listPdfTemplates } from '../lib/cloud-pdf-templates.js';
+import { loadPdfTemplate, listPdfTemplates, insertPdfTemplate } from '../lib/cloud-pdf-templates.js';
 
 function fakeClient(rowsBySql) {
   return {
@@ -75,5 +75,23 @@ describe('listPdfTemplates', () => {
   test('returns an empty array when there are none', async () => {
     const client = fakeClient([['FROM pdf_templates', []]]);
     expect(await listPdfTemplates(client)).toEqual([]);
+  });
+});
+
+describe('insertPdfTemplate', () => {
+  test('inserts id+name+html with bound parameters (no interpolation)', async () => {
+    const client = { query: vi.fn(async () => ({ results: [] })) };
+    const out = await insertPdfTemplate(client, {
+      id: 'mi-plantilla', name: 'Mi plantilla', html: '<p>{{quote.id}}</p>', now: '2026-06-13T00:00:00Z'
+    });
+    expect(out).toEqual({ id: 'mi-plantilla', name: 'Mi plantilla' });
+    const [sql, params] = client.query.mock.calls[0];
+    expect(sql).toMatch(/INSERT INTO pdf_templates/);
+    // id, name, html bound; css empty; timestamps from `now`.
+    expect(params[0]).toBe('mi-plantilla');
+    expect(params[1]).toBe('Mi plantilla');
+    expect(params[2]).toBe('<p>{{quote.id}}</p>');
+    expect(params[3]).toBe('');
+    expect(params).toContain('2026-06-13T00:00:00Z');
   });
 });

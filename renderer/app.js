@@ -42,6 +42,7 @@ import {
   buildQuoteDraft
 } from './history.js';
 import { deriveDataStatus, formatFreshness, planRefreshTrigger } from './data-status.js';
+import { buildGalleryModel } from './pdf-gallery.js';
 import { buildSaveSummary, totalChanges } from './save-summary.js';
 import { computeReminder } from './quote-reminder.js';
 import {
@@ -88,6 +89,16 @@ const STATS_PERIOD_LABELS = {
   season: 'la temporada', '30d': 'los últimos 30 días',
   year: 'el último año', range: 'el rango elegido'
 };
+
+// v5 / Plan 6: PDF template gallery scratch state for the settings modal.
+// The list (built-ins + cloud custom) and the built-in id set arrive over
+// IPC (the renderer can't require the CommonJS templates module). The
+// chosen id + brand color live on CFG.company (shared catalog data) and
+// are persisted via the normal company save path (cloud saveCatalog /
+// file config write). `selectedId` mirrors CFG.company.pdf_template while
+// the modal is open so the preview/selection stay in sync without
+// re-reading CFG on every interaction.
+let pdfTpl = { templates: [], builtinIds: new Set(), selectedId: null, cloud: false };
 
 const state = {
   packId: null,
@@ -1141,6 +1152,18 @@ function bindEvents() {
   el('ajustes-overlay').addEventListener('click', (e) => {
     if (e.target.id === 'ajustes-overlay') closeSettings();
   });
+
+  // Settings · PDF template gallery (Plan 6). Gallery card clicks are
+  // bound per-render in renderPdfTemplateGallery; these are the stable
+  // controls.
+  const brandColor = el('aj-brand-color');
+  if (brandColor) brandColor.addEventListener('change', onBrandColorChange);
+  const btnTplAdd = el('btn-aj-tpl-add');
+  if (btnTplAdd) btnTplAdd.addEventListener('click', openPdfTemplateAddForm);
+  const btnTplAddCancel = el('btn-aj-tpl-add-cancel');
+  if (btnTplAddCancel) btnTplAddCancel.addEventListener('click', closePdfTemplateAddForm);
+  const btnTplAddSave = el('btn-aj-tpl-add-save');
+  if (btnTplAddSave) btnTplAddSave.addEventListener('click', savePdfTemplate);
 
   // Result actions: copies a summary to the clipboard.
   const btnCopy = el('btn-copiar-resumen');
@@ -4033,6 +4056,253 @@ function openSettings() {
   if (tRemember) tRemember.checked = remember;
   if (tVat) tVat.checked = showVat;
   show('ajustes-overlay');
+
+  // Plan 6: load the PDF template gallery + preview every time the modal
+  // opens so it reflects the latest CFG.company + cloud custom templates.
+  loadPdfTemplateSection();
+}
+
+// ============================================================
+// Settings · PDF template gallery + preview + brand color (Plan 6)
+// ============================================================
+
+/** The default brand color (mirrors lib/pdf-templates.APP_ACCENT). */
+const PDF_BRAND_DEFAULT = '#3D7BD9';
+
+/**
+ * Loads the template list (built-ins + cloud custom) over IPC and paints
+ * the gallery, the brand-color input and the first preview. The renderer
+ * can't require the templates module (CommonJS, no build), so everything
+ * comes from main.
+ */
+async function loadPdfTemplateSection() {
+  const company = (CFG && CFG.company) || {};
+  // Brand color input reflects the stored value (or the app default).
+  const brandInput = el('aj-brand-color');
+  if (brandInput) brandInput.value = normalizeBrandColor(company.brand_color);
+
+  // Custom-template controls depend on the storage mode.
+  const addBtn = el('btn-aj-tpl-add');
+  const note = el('aj-tpl-custom-note');
+  const cloud = isCloudMode();
+  if (addBtn) addBtn.classList.toggle('hidden', !cloud);
+  if (note) note.classList.toggle('hidden', cloud);
+  // Always start with the add form collapsed.
+  const addForm = el('aj-tpl-add-form');
+  if (addForm) addForm.classList.add('hidden');
+
+  let res;
+  try {
+    res = await window.packprice.listPdfTemplatesAll();
+  } catch (_) {
+    res = null;
+  }
+  const templates = (res && res.templates) || [{ id: 'clasica', name: 'Clásica' }];
+  pdfTpl = {
+    templates,
+    builtinIds: new Set((res && res.builtinIds) || templates.map((t) => t.id)),
+    cloud: !!(res && res.cloud),
+    selectedId: null
+  };
+
+  renderPdfTemplateGallery();
+  await refreshPdfPreview();
+}
+
+/** Normalizes a stored brand color to a #RRGGBB for the color input. */
+function normalizeBrandColor(hex) {
+  if (typeof hex !== 'string') return PDF_BRAND_DEFAULT;
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return PDF_BRAND_DEFAULT;
+  let h = m[1];
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  return '#' + h.toLowerCase();
+}
+
+/** Renders the gallery cards from the loaded list + current selection. */
+function renderPdfTemplateGallery() {
+  const gallery = el('aj-tpl-gallery');
+  if (!gallery) return;
+
+  const company = (CFG && CFG.company) || {};
+  const model = buildGalleryModel(pdfTpl.templates, company.pdf_template, {
+    defaultId: 'clasica',
+    builtinIds: pdfTpl.builtinIds
+  });
+  pdfTpl.selectedId = model.selectedId;
+
+  gallery.innerHTML = model.cards.map((c) => `
+    <button type="button" class="pdf-tpl-card${c.isSelected ? ' is-selected' : ''}"
+            role="radio" aria-checked="${c.isSelected ? 'true' : 'false'}"
+            data-tpl-id="${escAttr(c.id)}">
+      <span class="pdf-tpl-card__check"><svg class="icon"><use href="#i-check"/></svg></span>
+      <span class="pdf-tpl-card__name">${escapeHTML(c.name)}</span>
+      <span class="pdf-tpl-card__tag">${c.isBuiltin ? 'Integrada' : 'Personalizada'}</span>
+    </button>
+  `).join('');
+
+  gallery.querySelectorAll('.pdf-tpl-card').forEach((card) => {
+    card.addEventListener('click', () => selectPdfTemplate(card.dataset.tplId));
+  });
+}
+
+/**
+ * Selects a template: update CFG.company, repaint the gallery + preview,
+ * then persist the choice to shared data (cloud: saveCatalog; file:
+ * config write). Persistence failures surface but never block the live
+ * preview, which already reflects the choice.
+ */
+async function selectPdfTemplate(id) {
+  if (!id || id === pdfTpl.selectedId) return;
+  if (!CFG.company) CFG.company = {};
+  CFG.company.pdf_template = id;
+  pdfTpl.selectedId = id;
+  renderPdfTemplateGallery();
+  await refreshPdfPreview();
+  await persistCompanyField();
+}
+
+/** Brand-color change: update CFG.company, refresh preview, persist. */
+async function onBrandColorChange() {
+  const value = normalizeBrandColor(el('aj-brand-color').value);
+  if (!CFG.company) CFG.company = {};
+  CFG.company.brand_color = value;
+  await refreshPdfPreview();
+  await persistCompanyField();
+}
+
+/**
+ * Renders the demo-quote preview for the current selection + brand color
+ * into the sandboxed iframe (srcdoc, no scripts). The HTML is built in
+ * main (pdf:preview) — never injected into the renderer DOM.
+ */
+async function refreshPdfPreview() {
+  const frame = el('aj-tpl-preview');
+  if (!frame) return;
+  const brandColor = normalizeBrandColor((CFG && CFG.company && CFG.company.brand_color) || el('aj-brand-color').value);
+  let r;
+  try {
+    r = await window.packprice.previewPdfTemplate({
+      templateId: pdfTpl.selectedId || 'clasica',
+      brandColor
+    });
+  } catch (_) {
+    r = null;
+  }
+  // srcdoc + sandbox (no allow-scripts): the template HTML renders
+  // isolated and inert, same-origin about:srcdoc under default-src 'self'.
+  frame.srcdoc = (r && r.ok && r.html)
+    ? r.html
+    : '<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;color:#888;padding:16px;">No se pudo generar la vista previa.</body>';
+}
+
+/**
+ * Persists CFG.company (which carries pdf_template + brand_color) to
+ * shared data. Cloud mode goes through the guarded saveCatalog with the
+ * loaded version baseline; file mode writes the whole config. Both keep
+ * CFG_BACKUP and DATA_STATE.versions coherent for any later catalog edit.
+ * A discreet toast confirms; errors are shown plainly but don't revert
+ * the in-memory choice (the preview already reflects it).
+ */
+async function persistCompanyField() {
+  if (isCloudMode()) {
+    if (isOffline()) {
+      // Editing shared data needs a live connection (UI-UX §2.2).
+      showToast('Sin conexión: no se pudo guardar');
+      return;
+    }
+    const r = await window.packprice.saveCatalog({
+      newCfg: CFG,
+      expectedVersions: DATA_STATE.versions
+    });
+    if (r && r.ok) {
+      if (typeof r.catalogVersion === 'number') DATA_STATE.catalogVersion = r.catalogVersion;
+      // Pull fresh per-entity versions so a later save guards correctly.
+      await reloadCloudCatalogQuietly();
+      showToast('Plantilla guardada');
+      return;
+    }
+    if (r && Array.isArray(r.conflicts) && r.conflicts.length > 0) {
+      await window.packprice.showError({
+        titulo: 'No se pudo guardar',
+        mensaje: 'Otro equipo cambió los datos de la empresa. Vuelve a abrir Ajustes para ver lo último.'
+      });
+      return;
+    }
+    await window.packprice.showError({
+      titulo: 'No se pudo guardar',
+      mensaje: (r && r.error) || 'Error desconocido al guardar la plantilla.'
+    });
+    return;
+  }
+
+  // File mode: write the whole config (company carries the fields).
+  CFG.updated_at = new Date().toLocaleString('es-ES');
+  CFG.modified_by = SETTINGS.user_name;
+  const r = await window.packprice.writeConfig({
+    ruta: SETTINGS.config_path,
+    configNuevo: CFG,
+    infoEsperada: adminConfigInfoAtOpen
+  });
+  if (r && r.ok) {
+    adminConfigInfoAtOpen = r.info;
+    CFG_BACKUP = deepClone(CFG);
+    showToast('Plantilla guardada');
+    return;
+  }
+  await window.packprice.showError({
+    titulo: 'No se pudo guardar',
+    mensaje: (r && r.error) || 'No se pudo guardar la plantilla en el archivo de configuración.'
+  });
+}
+
+/** Shows the custom-template import form (cloud mode). */
+function openPdfTemplateAddForm() {
+  el('aj-tpl-name').value = '';
+  el('aj-tpl-html').value = '';
+  hide('aj-tpl-add-error');
+  el('aj-tpl-add-error').textContent = '';
+  show('aj-tpl-add-form');
+  el('aj-tpl-name').focus();
+}
+
+function closePdfTemplateAddForm() {
+  hide('aj-tpl-add-form');
+}
+
+/**
+ * Sends a custom HTML+CSS template to main, which sanitizes it and saves
+ * it to the shared store. A sanitize rejection returns { ok:false, error
+ * } with a plain Spanish message shown verbatim. On success the gallery
+ * reloads (the new template appears) and it becomes the selection.
+ */
+async function savePdfTemplate() {
+  const name = el('aj-tpl-name').value.trim();
+  const html = el('aj-tpl-html').value;
+  const errEl = el('aj-tpl-add-error');
+  hide('aj-tpl-add-error');
+
+  const saveBtn = el('btn-aj-tpl-add-save');
+  const original = saveBtn.innerHTML;
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = '<span class="spinner"></span> Guardando…';
+  try {
+    const r = await window.packprice.savePdfTemplate({ name, html });
+    if (!r || !r.ok) {
+      // The sanitizer's Spanish message is user-facing; show it verbatim.
+      errEl.textContent = (r && r.error) || 'No se pudo guardar la plantilla.';
+      show('aj-tpl-add-error');
+      return;
+    }
+    closePdfTemplateAddForm();
+    // Reload the list so the new template shows, then select it.
+    await loadPdfTemplateSection();
+    await selectPdfTemplate(r.id);
+    showToast('Plantilla añadida');
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = original;
+  }
 }
 
 function closeSettings() {
