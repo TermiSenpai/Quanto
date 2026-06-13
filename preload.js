@@ -42,6 +42,12 @@ contextBridge.exposeInMainWorld('packprice', {
   showInfo:           (d) => ipcRenderer.invoke('dialog:info', d),
   showError:          (d) => ipcRenderer.invoke('dialog:error', d),
 
+  // --- Open an external https URL in the system browser ---
+  // Used by the cloud wizard's "Abrir Cloudflare" buttons; the
+  // navigation/network happens in main (shell.openExternal), never
+  // in the renderer, so the CSP stays `default-src 'self'`.
+  openExternal:       (url) => ipcRenderer.invoke('dialog:open-external', url),
+
   // --- Logs (electron-log) ---
   readLogs:           (lineLimit) => ipcRenderer.invoke('logs:read-last', lineLimit),
 

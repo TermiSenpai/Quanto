@@ -191,15 +191,215 @@
     </main>
   </section>
 
+  <!-- ================== PANTALLA: ASISTENTE PRIMER ARRANQUE ================== -->
+  <!-- v5: shown when no data source is configured (no data_source in
+       settings and no legacy config path). Two choices — Local (file
+       mode, reuses the existing path picker) and Nube (Cloudflare D1,
+       3 guided steps). English ids; Spanish copy from UI-UX §2.0. -->
+  <section id="setup-wizard" class="pantalla split hidden">
+    <aside class="split__left">
+      <div class="topbar__brand">
+        <span class="topbar__brand-icon"><svg class="icon icon--lg"><use href="#i-pack"/></svg></span>
+        <span class="topbar__brand-title">PackPrice</span>
+      </div>
+
+      <div class="split__hero">
+        <span class="badge badge--inverse"><svg class="icon"><use href="#i-info"/></svg> Primer arranque</span>
+        <h1>¿Dónde guardamos tus datos?</h1>
+        <p>Elige una vez. Podrás cambiar de origen más adelante desde los ajustes — local y nube son intercambiables.</p>
+      </div>
+
+      <div>
+        <p class="split__foot-line text-mono">v4.0.0-beta · uso interno taller</p>
+      </div>
+    </aside>
+
+    <main class="split__right">
+
+      <!-- Paso 0: elegir Local vs Nube -->
+      <div id="wizard-choice" class="wizard-view">
+        <header>
+          <h2>Elige cómo trabajar</h2>
+          <p class="text-secondary" style="margin-top: 6px;">Las dos opciones son válidas y reversibles.</p>
+        </header>
+
+        <div class="wizard-cards">
+          <button id="wizard-pick-local" class="wizard-card" type="button">
+            <span class="wizard-card__icon"><svg class="icon icon--lg"><use href="#i-folder"/></svg></span>
+            <span class="wizard-card__title">Local</span>
+            <span class="wizard-card__desc">En este equipo o en una carpeta de red (NAS).</span>
+            <span class="wizard-card__cta">Elegir local <svg class="icon"><use href="#i-arrow-right"/></svg></span>
+          </button>
+
+          <button id="wizard-pick-cloud" class="wizard-card" type="button">
+            <span class="wizard-card__icon"><svg class="icon icon--lg"><use href="#i-layers"/></svg></span>
+            <span class="wizard-card__title">Nube</span>
+            <span class="wizard-card__desc">En tu cuenta de Cloudflare (gratis), accesible desde todos tus equipos.</span>
+            <span class="wizard-card__cta">Elegir nube <svg class="icon"><use href="#i-arrow-right"/></svg></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Rama Local: nombre + selector de ruta (modo archivo actual) -->
+      <div id="wizard-local" class="wizard-view hidden">
+        <div class="back-row">
+          <button id="btn-wizard-local-back" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#i-chevron-left"/></svg> Volver
+          </button>
+          <span class="label-eyebrow">MODO LOCAL</span>
+        </div>
+
+        <header>
+          <h2>Configuración local</h2>
+          <p class="text-secondary" style="margin-top: 6px;">Indica tu nombre y la ruta del config compartido del taller.</p>
+        </header>
+
+        <form class="form-stack" onsubmit="return false;">
+          <div class="field">
+            <label class="field__label" for="wiz-nombre">Tu nombre</label>
+            <input type="text" id="wiz-nombre" class="input" placeholder="Ej: Alberto, Fede, …" autocomplete="off">
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="wiz-ruta">Archivo de configuración (config.js en el NAS)</label>
+            <div class="field__row">
+              <input type="text" id="wiz-ruta" class="input input--mono" placeholder="\\172.26.0.154\Paep\Packs\config.js">
+              <button id="btn-wiz-explorar" class="btn btn-secondary" type="button">
+                <svg class="icon"><use href="#i-folder"/></svg> Explorar
+              </button>
+            </div>
+          </div>
+
+          <div class="alert alert-info">
+            <svg class="icon"><use href="#i-info"/></svg>
+            <span>Si el archivo no existe, PackPrice puede crearlo con valores por defecto al continuar.</span>
+          </div>
+
+          <div id="wiz-local-error" class="alert alert-error hidden"></div>
+        </form>
+
+        <div class="split__right-actions">
+          <span class="help">¿Necesitas ayuda? Contacta con tu administrador</span>
+          <button id="btn-wiz-local-empezar" class="btn btn-primary" disabled>
+            Empezar <svg class="icon"><use href="#i-arrow-right"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Rama Nube: 3 pasos guiados con barra de progreso -->
+      <div id="wizard-cloud" class="wizard-view hidden">
+        <div class="back-row">
+          <button id="btn-wizard-cloud-back" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#i-chevron-left"/></svg> Volver
+          </button>
+          <span class="label-eyebrow">MODO NUBE</span>
+        </div>
+
+        <div class="wizard-steps" id="wizard-steps">
+          <span class="wizard-steps__dot is-current" data-step="1">1</span>
+          <span class="wizard-steps__line"></span>
+          <span class="wizard-steps__dot" data-step="2">2</span>
+          <span class="wizard-steps__line"></span>
+          <span class="wizard-steps__dot" data-step="3">3</span>
+        </div>
+
+        <!-- Paso 1: cuenta -->
+        <div id="cloud-step-1" class="cloud-step">
+          <header>
+            <h2>¿Tienes cuenta de Cloudflare?</h2>
+            <p class="text-secondary" style="margin-top: 6px;">Es gratis. Si aún no tienes una, créala en un minuto y vuelve aquí.</p>
+          </header>
+
+          <div class="field">
+            <label class="field__label" for="cloud-nombre">Tu nombre</label>
+            <input type="text" id="cloud-nombre" class="input" placeholder="Ej: Alberto, Fede, …" autocomplete="off">
+            <span class="field__hint">Quedará registrado como autor de los cambios.</span>
+          </div>
+
+          <div class="split__right-actions">
+            <button id="btn-cloud-signup" class="btn btn-ghost" type="button">
+              <svg class="icon"><use href="#i-share"/></svg> Crear cuenta de Cloudflare
+            </button>
+            <button id="btn-cloud-step1-next" class="btn btn-primary" type="button">
+              Ya tengo cuenta <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Paso 2: clave de acceso (token) -->
+        <div id="cloud-step-2" class="cloud-step hidden">
+          <header>
+            <h2>Crea tu clave de acceso</h2>
+            <p class="text-secondary" style="margin-top: 6px;">Abre la página del token, créala con la plantilla indicada y pégala aquí. La comprobamos al instante.</p>
+          </header>
+
+          <div class="split__right-actions" style="justify-content: flex-start;">
+            <button id="btn-cloud-open-token" class="btn btn-secondary" type="button">
+              <svg class="icon"><use href="#i-key"/></svg> Abrir la página del token
+            </button>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="cloud-token">Pega aquí tu clave</label>
+            <input type="password" id="cloud-token" class="input input--mono" placeholder="Clave de acceso de Cloudflare" autocomplete="off">
+            <span class="field__hint">La clave se guarda solo en este equipo y nunca se comparte.</span>
+          </div>
+
+          <div id="cloud-token-error" class="alert alert-error hidden"></div>
+
+          <div class="split__right-actions">
+            <button id="btn-cloud-step2-back" class="btn btn-ghost" type="button">
+              <svg class="icon"><use href="#i-chevron-left"/></svg> Atrás
+            </button>
+            <button id="btn-cloud-step2-next" class="btn btn-primary" type="button" disabled>
+              Comprobar clave <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Paso 3: automático (cuenta + aprovisionamiento) -->
+        <div id="cloud-step-3" class="cloud-step hidden">
+          <header>
+            <h2>Conectando tu base de datos</h2>
+            <p class="text-secondary" style="margin-top: 6px;">Sin preguntas técnicas: lo hacemos por ti.</p>
+          </header>
+
+          <!-- Selector de cuenta (solo si el token da acceso a varias) -->
+          <div id="cloud-account-pick" class="field hidden">
+            <label class="field__label" for="cloud-account">Tu clave da acceso a varias cuentas. Elige una:</label>
+            <select id="cloud-account" class="input"></select>
+            <div class="split__right-actions" style="margin-top: 12px;">
+              <button id="btn-cloud-step3-back" class="btn btn-ghost" type="button">
+                <svg class="icon"><use href="#i-chevron-left"/></svg> Atrás
+              </button>
+              <button id="btn-cloud-provision" class="btn btn-primary" type="button">
+                Conectar <svg class="icon"><use href="#i-arrow-right"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Progreso del aprovisionamiento -->
+          <div id="cloud-progress" class="cloud-progress hidden">
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="cloud-progress-msg" aria-live="polite">Buscando tu base de datos…</span>
+          </div>
+
+          <div id="cloud-step3-error" class="alert alert-error hidden"></div>
+        </div>
+      </div>
+
+    </main>
+  </section>
+
   <!-- ================== PANTALLA: ERROR DE CARGA ================== -->
   <section id="pantalla-error" class="pantalla pantalla-centro hidden">
     <div class="error-card">
       <div class="error-card__head">
         <span class="error-card__icon"><svg class="icon icon--lg"><use href="#i-warn"/></svg></span>
-        <h2>No se pudo cargar la configuración</h2>
+        <h2 id="error-titulo">No se pudo cargar la configuración</h2>
       </div>
       <p id="error-detalle" class="alert alert-error"></p>
-      <p class="text-secondary">Comprueba que el NAS está accesible y la ruta del config es correcta.</p>
+      <p id="error-hint" class="text-secondary">Comprueba que el NAS está accesible y la ruta del config es correcta.</p>
       <div class="error-card__actions">
         <button id="btn-error-reintentar" class="btn btn-primary">
           <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
@@ -209,6 +409,10 @@
         </button>
         <button id="btn-error-cambiar-ruta" class="btn btn-ghost">
           <svg class="icon"><use href="#i-folder"/></svg> Cambiar ubicación…
+        </button>
+        <!-- v5 cloud: shown only on NO_CLOUD_NO_CACHE (UI-UX §2.4) -->
+        <button id="btn-error-modo-local" class="btn btn-secondary hidden">
+          <svg class="icon"><use href="#i-folder"/></svg> Usar modo local…
         </button>
       </div>
     </div>

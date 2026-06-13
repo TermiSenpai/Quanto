@@ -22,7 +22,7 @@
 
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -754,6 +754,27 @@ ipcMain.handle('dialog:error', async (event, { titulo, mensaje, detalle }) => {
     message: mensaje,
     detail: detalle || ''
   });
+});
+
+// --- Open an external URL in the system browser (cloud wizard) ---
+//
+// The first-run wizard (UI-UX §2.0) needs "Abrir Cloudflare" buttons
+// that send the user to the Cloudflare sign-up / API-token pages.
+// Opening happens HERE, in main, via shell.openExternal — the
+// renderer never navigates or fetches (CSP stays `default-src 'self'`).
+// We only ever open https URLs so a crafted payload cannot launch a
+// local file or a custom protocol handler.
+ipcMain.handle('dialog:open-external', async (event, url) => {
+  try {
+    const parsed = new URL(String(url));
+    if (parsed.protocol !== 'https:') {
+      return { ok: false, error: 'Solo se pueden abrir enlaces https.' };
+    }
+    await shell.openExternal(parsed.href);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 // --- Logs (electron-log) ---

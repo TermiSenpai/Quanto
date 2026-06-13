@@ -50,6 +50,14 @@ let CFG_BACKUP = null;           // copy for "Cancel changes"
 let eventsBound = false;
 let lastResult = null;           // useful for "Copy summary"
 
+// v5 cloud: the last catalog load envelope drives the topbar indicator
+// and the offline banner. In file mode it stays { source: 'file' }.
+let DATA_STATE = { source: 'file' };
+// Cloud wizard scratch state (token + accounts between steps). The
+// token only lives here transiently and travels into main via
+// provisionCloud; it is never written to CFG or surfaced after.
+let wizardCloud = { token: '', accounts: [], userName: '' };
+
 const state = {
   packId: null,
   isAdmin: false,
@@ -88,8 +96,21 @@ const ADMIN_TAB_META = {
 async function bootstrap() {
   SETTINGS = await window.packprice.readSettings();
 
-  if (!SETTINGS || !SETTINGS.config_path || !SETTINGS.user_name) {
-    showWelcome();
+  // v5: cloud mode is configured → drive the screens off the cloud
+  // read path (cloud → cache → error). The file-mode path below is
+  // unchanged.
+  if (SETTINGS && SETTINGS.data_source === 'cloud') {
+    await loadCloudAndShowApp();
+    return;
+  }
+
+  // No data source configured at all (no legacy file path AND not
+  // cloud) → first-run wizard. A pre-v5 install with a config_path +
+  // user_name still boots straight into file mode (no wizard), so
+  // upgrades are seamless.
+  const hasFileSetup = SETTINGS && SETTINGS.config_path && SETTINGS.user_name;
+  if (!hasFileSetup) {
+    showSetupWizard();
     return;
   }
 
@@ -197,6 +218,332 @@ function showWelcomeError(message) {
   show('bv-error');
 }
 
+// ============================================================
+// v5 first-run wizard (UI-UX §2.0): Local vs Nube
+// ============================================================
+// Shown when no data source is configured. The Local branch reuses
+// the existing file-path picker; the Nube branch walks 3 guided steps
+// (account → token → provision). All network/navigation happens in
+// main — the renderer only calls window.packprice.* (CSP intact).
+
+let wizardEventsBound = false;
+
+// The Cloudflare token-creation page, pre-filled via query template so
+// the user only has to click "Create token". Plain https URL opened in
+// the system browser by main (shell.openExternal), never here.
+const CLOUDFLARE_SIGNUP_URL = 'https://dash.cloudflare.com/sign-up';
+const CLOUDFLARE_TOKEN_URL = 'https://dash.cloudflare.com/profile/api-tokens';
+
+function showSetupWizard() {
+  hide('pantalla-app');
+  hide('pantalla-bienvenida');
+  hide('pantalla-error');
+  show('setup-wizard');
+  showWizardView('wizard-choice');
+  bindWizardEvents();
+}
+
+/** Toggles the wizard sub-views (choice / local / cloud). */
+function showWizardView(id) {
+  ['wizard-choice', 'wizard-local', 'wizard-cloud'].forEach(v => {
+    el(v).classList.toggle('hidden', v !== id);
+  });
+}
+
+function bindWizardEvents() {
+  if (wizardEventsBound) return;
+  wizardEventsBound = true;
+
+  // --- Choice ---
+  el('wizard-pick-local').addEventListener('click', openWizardLocal);
+  el('wizard-pick-cloud').addEventListener('click', openWizardCloud);
+
+  // --- Local branch ---
+  el('btn-wizard-local-back').addEventListener('click', () => showWizardView('wizard-choice'));
+  el('btn-wiz-explorar').addEventListener('click', async () => {
+    const r = await window.packprice.selectConfigFile();
+    if (!r.cancelado) {
+      el('wiz-ruta').value = r.ruta;
+      validateWizardLocalForm();
+    }
+  });
+  el('wiz-nombre').addEventListener('input', validateWizardLocalForm);
+  el('wiz-ruta').addEventListener('input', validateWizardLocalForm);
+  el('btn-wiz-local-empezar').addEventListener('click', startWizardLocal);
+
+  // --- Cloud branch ---
+  el('btn-wizard-cloud-back').addEventListener('click', () => showWizardView('wizard-choice'));
+  el('btn-cloud-signup').addEventListener('click', () => openExternalSafe(CLOUDFLARE_SIGNUP_URL));
+  el('btn-cloud-step1-next').addEventListener('click', cloudStep1Next);
+  el('btn-cloud-open-token').addEventListener('click', () => openExternalSafe(CLOUDFLARE_TOKEN_URL));
+  el('cloud-token').addEventListener('input', () => {
+    el('btn-cloud-step2-next').disabled = el('cloud-token').value.trim().length === 0;
+  });
+  el('btn-cloud-step2-back').addEventListener('click', () => showCloudStep(1));
+  el('btn-cloud-step2-next').addEventListener('click', cloudStep2TestToken);
+  el('btn-cloud-step3-back').addEventListener('click', () => showCloudStep(2));
+  el('btn-cloud-provision').addEventListener('click', cloudProvision);
+}
+
+// --- Local branch -------------------------------------------------
+
+function openWizardLocal() {
+  showWizardView('wizard-local');
+  hide('wiz-local-error');
+  validateWizardLocalForm();
+  // Suggest the NAS default path, same as the legacy welcome did.
+  window.packprice.getDefaultConfigPath()
+    .then((suggestion) => {
+      const input = el('wiz-ruta');
+      if (!input.value && suggestion && suggestion.sugerida) {
+        input.value = suggestion.sugerida;
+        validateWizardLocalForm();
+      }
+    })
+    .catch(() => { /* a suggestion must never block the UI */ });
+  setTimeout(() => el('wiz-nombre').focus(), 50);
+}
+
+function validateWizardLocalForm() {
+  const name = el('wiz-nombre').value.trim();
+  const filePath = el('wiz-ruta').value.trim();
+  el('btn-wiz-local-empezar').disabled = !(name && filePath);
+}
+
+async function startWizardLocal() {
+  const name = el('wiz-nombre').value.trim();
+  const filePath = el('wiz-ruta').value.trim();
+  hide('wiz-local-error');
+
+  const btn = el('btn-wiz-local-empezar');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = 'Comprobando ruta…';
+  try {
+    const ok = await ensureConfigFileReady(name, filePath, (msg) => {
+      el('wiz-local-error').textContent = msg;
+      show('wiz-local-error');
+    });
+    if (!ok) return;
+
+    // Persist file mode explicitly (data_source: 'file') so a later
+    // boot never re-shows the wizard.
+    SETTINGS = { config_path: filePath, user_name: name, data_source: 'file' };
+    const saved = await window.packprice.writeSettings(SETTINGS);
+    if (!saved.ok) {
+      el('wiz-local-error').textContent = `No se pudo guardar la configuración local: ${saved.error}`;
+      show('wiz-local-error');
+      return;
+    }
+    hide('setup-wizard');
+    await loadConfigAndShowApp();
+  } finally {
+    btn.innerHTML = original;
+    validateWizardLocalForm();
+  }
+}
+
+/**
+ * Shared file-mode setup helper: ensures the config exists (offering to
+ * create it with defaults) or is readable, reporting plain errors via
+ * `onError`. Returns true when the path is ready to use.
+ */
+async function ensureConfigFileReady(name, filePath, onError) {
+  const exist = await window.packprice.configExists(filePath);
+  if (!exist.existe) {
+    if (!exist.escribible) {
+      onError('No se puede crear el archivo en esa ruta. Comprueba que el NAS está accesible y tienes permisos de escritura.');
+      return false;
+    }
+    const option = await window.packprice.confirm({
+      titulo: 'Archivo no encontrado',
+      mensaje: '¿Crear config.js con los valores por defecto?',
+      detalle: `No se encontró un archivo de configuración en:\n${filePath}\n\nSe creará uno nuevo con los valores por defecto del plan.`,
+      botones: ['Crear con valores por defecto', 'Cancelar'],
+      defaultId: 0
+    });
+    if (option !== 0) return false;
+    const created = await window.packprice.createDefaultConfig({ ruta: filePath, modificadoPor: name });
+    if (!created.ok) {
+      onError(`No se pudo crear el archivo: ${created.error}`);
+      return false;
+    }
+    return true;
+  }
+  const r = await window.packprice.readConfig(filePath);
+  if (!r.ok) {
+    onError(`No se pudo leer el archivo: ${r.error}`);
+    return false;
+  }
+  return true;
+}
+
+// --- Cloud branch -------------------------------------------------
+
+function openWizardCloud() {
+  wizardCloud = { token: '', accounts: [], userName: '' };
+  showWizardView('wizard-cloud');
+  showCloudStep(1);
+  // Prefill the author name from settings if we already have one.
+  const nameInput = el('cloud-nombre');
+  if (nameInput && SETTINGS && SETTINGS.user_name) nameInput.value = SETTINGS.user_name;
+  setTimeout(() => nameInput && nameInput.focus(), 50);
+}
+
+/** Switches the visible cloud step and updates the progress dots. */
+function showCloudStep(n) {
+  [1, 2, 3].forEach(i => {
+    el(`cloud-step-${i}`).classList.toggle('hidden', i !== n);
+  });
+  document.querySelectorAll('#wizard-steps .wizard-steps__dot').forEach(dot => {
+    const step = Number(dot.dataset.step);
+    dot.classList.toggle('is-current', step === n);
+    dot.classList.toggle('is-done', step < n);
+  });
+}
+
+function cloudStep1Next() {
+  wizardCloud.userName = el('cloud-nombre').value.trim();
+  showCloudStep(2);
+  el('btn-cloud-step2-next').disabled = el('cloud-token').value.trim().length === 0;
+  setTimeout(() => el('cloud-token').focus(), 50);
+}
+
+async function cloudStep2TestToken() {
+  const token = el('cloud-token').value.trim();
+  hide('cloud-token-error');
+  if (!token) return;
+
+  const btn = el('btn-cloud-step2-next');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Comprobando…';
+  try {
+    const r = await window.packprice.testCloudToken({ token });
+    if (!r || !r.ok) {
+      // Plain language, never an HTTP code (UI-UX §2.0).
+      el('cloud-token-error').textContent = 'Esa clave no funciona — vuelve a copiarla y pégala de nuevo.';
+      show('cloud-token-error');
+      return;
+    }
+    wizardCloud.token = token;
+    wizardCloud.accounts = r.accounts || [];
+    showCloudStep(3);
+    prepareCloudStep3();
+  } finally {
+    btn.innerHTML = original;
+    btn.disabled = el('cloud-token').value.trim().length === 0;
+  }
+}
+
+/**
+ * Step 3 entry: if the token grants access to several accounts, show
+ * a picker; otherwise provision straight away with the only account.
+ */
+function prepareCloudStep3() {
+  hide('cloud-step3-error');
+  const accounts = wizardCloud.accounts;
+  const pick = el('cloud-account-pick');
+  const progress = el('cloud-progress');
+
+  if (accounts.length > 1) {
+    const select = el('cloud-account');
+    select.innerHTML = accounts
+      .map(a => `<option value="${escAttr(a.id)}">${escapeHTML(a.name)}</option>`)
+      .join('');
+    pick.classList.remove('hidden');
+    progress.classList.add('hidden');
+    return;
+  }
+
+  // 0 or 1 accounts: no choice to make, provision directly. (0 is
+  // unusual — testToken succeeded — but provision will surface a clear
+  // error if the account is unusable.)
+  pick.classList.add('hidden');
+  const accountId = accounts[0] ? accounts[0].id : undefined;
+  cloudProvision(accountId);
+}
+
+async function cloudProvision(accountIdArg) {
+  hide('cloud-step3-error');
+  el('cloud-account-pick').classList.add('hidden');
+  const progress = el('cloud-progress');
+  const msg = el('cloud-progress-msg');
+  progress.classList.remove('hidden');
+  msg.textContent = 'Buscando tu base de datos…';
+
+  // The accountId comes from the picker (if shown) or the single
+  // account resolved earlier. Guard against the click-event arg.
+  const accountId = (typeof accountIdArg === 'string')
+    ? accountIdArg
+    : el('cloud-account').value || (wizardCloud.accounts[0] && wizardCloud.accounts[0].id);
+
+  // Persist the author name first so provision (which reads settings
+  // for the audit author) has it.
+  if (wizardCloud.userName) {
+    await window.packprice.writeSettings({ user_name: wizardCloud.userName });
+    SETTINGS = { ...(SETTINGS || {}), user_name: wizardCloud.userName };
+  }
+
+  // A gentle "creating…" message after a beat — provision finds or
+  // creates the base; we cannot observe which from here, so we phrase
+  // it as ongoing work (UI-UX §2.0).
+  const creatingTimer = setTimeout(() => {
+    msg.textContent = 'Preparando tu base de datos…';
+  }, 1500);
+
+  let r;
+  try {
+    r = await window.packprice.provisionCloud({ token: wizardCloud.token, accountId });
+  } finally {
+    clearTimeout(creatingTimer);
+  }
+
+  if (!r || !r.ok) {
+    progress.classList.add('hidden');
+    el('cloud-step3-error').textContent = cloudProvisionError(r);
+    show('cloud-step3-error');
+    // Let the user retry: show the account picker again if there was a
+    // choice, else a back-to-token path via the step-2 back button.
+    if (wizardCloud.accounts.length > 1) {
+      el('cloud-account-pick').classList.remove('hidden');
+    }
+    return;
+  }
+
+  msg.textContent = r.seeded ? 'Base creada — conectando…' : 'Encontrada — conectando…';
+
+  // main has already persisted data_source: 'cloud' + the connection.
+  // Re-read settings so SETTINGS reflects cloud mode, then boot.
+  SETTINGS = await window.packprice.readSettings();
+  hide('setup-wizard');
+  await loadCloudAndShowApp();
+}
+
+/** Plain-language message for a failed provision (never an HTTP code). */
+function cloudProvisionError(r) {
+  if (!r) return 'No se pudo conectar con la nube. Revisa tu conexión y vuelve a intentarlo.';
+  if (r.code === 'MIGRATION_LOCKED') {
+    return 'Otro equipo está preparando la base de datos ahora mismo. Espera un minuto y reinténtalo.';
+  }
+  if (r.code === 'MIGRATION_FAILED') {
+    return 'No se pudo actualizar la base de datos. No se ha cambiado nada; vuelve a intentarlo más tarde.';
+  }
+  return 'No se pudo conectar con la nube. Revisa tu conexión y vuelve a intentarlo.';
+}
+
+/** Opens an external https URL via main; reports a plain error if it fails. */
+async function openExternalSafe(url) {
+  const r = await window.packprice.openExternal(url);
+  if (r && !r.ok) {
+    await window.packprice.showError({
+      titulo: 'No se pudo abrir el navegador',
+      mensaje: 'Abre esta dirección manualmente en tu navegador:',
+      detalle: url
+    });
+  }
+}
+
 async function loadConfigAndShowApp() {
   const r = await window.packprice.readConfig(SETTINGS.config_path);
   if (!r.ok) {
@@ -206,7 +553,43 @@ async function loadConfigAndShowApp() {
 
   CFG = r.config;
   ensureDefaultPacks(CFG);
+  // File mode: the indicator reads "Modo local"; no offline banner.
+  DATA_STATE = { source: 'file' };
   hide('pantalla-bienvenida');
+  hide('setup-wizard');
+  hide('pantalla-error');
+  show('pantalla-app');
+  initApp();
+}
+
+// ============================================================
+// v5 cloud: boot from D1 (with cache fallback), drive the screens
+// off the loadCatalog envelope shape returned by main:
+//   { ok, config, source, catalogVersion, fetchedAt, offline,
+//     reason, code, cloudError }
+// ============================================================
+async function loadCloudAndShowApp() {
+  const r = await window.packprice.loadCatalog();
+
+  if (!r || !r.ok) {
+    // The only non-ok cloud boot is NO_CLOUD_NO_CACHE (no network and
+    // this PC has never cached the catalog) — UI-UX §2.4.
+    await showCloudErrorScreen(r);
+    return;
+  }
+
+  CFG = r.config;
+  ensureDefaultPacks(CFG);
+  // Keep the relevant envelope fields for the indicator + banner.
+  DATA_STATE = {
+    source: r.source,
+    catalogVersion: r.catalogVersion,
+    fetchedAt: r.fetchedAt,
+    offline: r.offline,
+    reason: r.reason
+  };
+  hide('pantalla-bienvenida');
+  hide('setup-wizard');
   hide('pantalla-error');
   show('pantalla-app');
   initApp();
@@ -230,7 +613,16 @@ function ensureDefaultPacks(cfg) {
 async function showErrorScreen(detail) {
   hide('pantalla-app');
   hide('pantalla-bienvenida');
+  hide('setup-wizard');
   show('pantalla-error');
+
+  // Reset to the file-mode copy (it may have been switched to the cloud
+  // variant on a previous boot) and hide the cloud-only action.
+  el('error-titulo').textContent = 'No se pudo cargar la configuración';
+  el('error-hint').textContent = 'Comprueba que el NAS está accesible y la ruta del config es correcta.';
+  el('error-hint').classList.remove('hidden');
+  el('btn-error-cambiar-ruta').classList.remove('hidden');
+  el('btn-error-modo-local').classList.add('hidden');
   el('error-detalle').textContent = detail;
 
   const exist = await window.packprice.configExists(SETTINGS.config_path);
@@ -280,12 +672,46 @@ async function showErrorScreen(detail) {
   };
 }
 
+/**
+ * v5 cloud boot error (UI-UX §2.4): no network and no cached catalog
+ * (code NO_CLOUD_NO_CACHE). Two exits — retry the cloud read, or fall
+ * back to local file mode by re-running the wizard's local branch.
+ */
+async function showCloudErrorScreen(result) {
+  hide('pantalla-app');
+  hide('pantalla-bienvenida');
+  hide('setup-wizard');
+  show('pantalla-error');
+
+  el('error-titulo').textContent = 'No se pudo cargar el catálogo';
+  el('error-detalle').textContent =
+    'No hay conexión y este equipo aún no tiene datos guardados.';
+  // The generic NAS hint does not apply here; hide it.
+  el('error-hint').classList.add('hidden');
+
+  // File-mode actions don't apply in cloud mode: only Reintentar +
+  // "Usar modo local…".
+  el('btn-error-crear-default').classList.add('hidden');
+  el('btn-error-cambiar-ruta').classList.add('hidden');
+  el('btn-error-modo-local').classList.remove('hidden');
+
+  el('btn-error-reintentar').onclick = async () => {
+    await loadCloudAndShowApp();
+  };
+  el('btn-error-modo-local').onclick = () => {
+    // Reuse the wizard's local branch: pick a config file and switch
+    // this PC to file mode. The wizard persists data_source: 'file'.
+    showSetupWizard();
+    openWizardLocal();
+  };
+}
+
 // ============================================================
 // Main app initialization
 // ============================================================
 
 function initApp() {
-  el('info-usuario').textContent = SETTINGS.user_name;
+  el('info-usuario').textContent = (SETTINGS && SETTINGS.user_name) || '—';
   el('info-fecha-cfg').textContent = shortConfigDate(CFG.updated_at);
   el('cfg-version').textContent = CFG.version || '?';
 
