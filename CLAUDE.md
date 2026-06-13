@@ -21,7 +21,7 @@ low-maintenance** codebase that stays cheap to own for years, for a workshop of
 | The v4 configurability plan (products/suppliers/addons, unified engine) | `planes/v4-configurabilidad-total.md` |
 | Product requirements (what & why, success metrics) | `docs/PRD.md` |
 | Design system + UI states (incl. v5 cloud states) | `docs/UI-UX.md` |
-| The v5 cloud-sync plan (Cloudflare D1 + Worker, cache, phases) | `planes/v5-cloud-sync.md` |
+| The v5 cloud-sync plan (Cloudflare D1 direct REST, no server, cache, phases) | `planes/v5-cloud-sync.md` |
 | Build & distribution | `README-build.md` |
 
 ---
