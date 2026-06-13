@@ -310,3 +310,49 @@ describe('validateConfigSchema (throwing wrapper)', () => {
     expect(() => validateConfigSchema(makeConfig())).not.toThrow();
   });
 });
+
+describe('company — optional PDF settings (Plan 6)', () => {
+  test('the default config seeds pdf_template and brand_color and still validates', () => {
+    const cfg = makeConfig();
+    expect(cfg.company.pdf_template).toBe('clasica');
+    expect(cfg.company.brand_color).toBe('#3D7BD9');
+    expect(collectConfigErrors(cfg)).toEqual([]);
+  });
+
+  test('accepts a company without pdf_template / brand_color', () => {
+    const cfg = makeConfig();
+    delete cfg.company.pdf_template;
+    delete cfg.company.brand_color;
+    expect(collectConfigErrors(cfg)).toEqual([]);
+  });
+
+  test('accepts an empty brand_color (treated as unset)', () => {
+    const cfg = makeConfig();
+    cfg.company.brand_color = '';
+    expect(collectConfigErrors(cfg)).toEqual([]);
+  });
+
+  test('accepts a 3-digit and a 6-digit hex brand_color', () => {
+    for (const hex of ['#08f', '#0088FF', '#abc', '#AABBCC']) {
+      const cfg = makeConfig();
+      cfg.company.brand_color = hex;
+      expect(collectConfigErrors(cfg)).toEqual([]);
+    }
+  });
+
+  test('rejects a malformed brand_color', () => {
+    for (const bad of ['red', '#12', '#xyzxyz', '3D7BD9', '#1234', 42]) {
+      const cfg = makeConfig();
+      cfg.company.brand_color = bad;
+      const errors = collectConfigErrors(cfg);
+      expect(errors.some(e => /brand_color/.test(e))).toBe(true);
+    }
+  });
+
+  test('rejects a non-string pdf_template', () => {
+    const cfg = makeConfig();
+    cfg.company.pdf_template = 42;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /pdf_template/.test(e))).toBe(true);
+  });
+});

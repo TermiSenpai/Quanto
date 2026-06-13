@@ -261,7 +261,12 @@ const COMPANY = {
   address: '',
   phone:   '',
   email:   '',
-  web:     ''
+  web:     '',
+  // Shared PDF settings (v5, Plan 6): the selected built-in template id
+  // and the brand color used by the color templates (Moderna/Corporativa).
+  // Shared data so every PC prints alike. brand_color seeds the app accent.
+  pdf_template: 'clasica',
+  brand_color:  '#3D7BD9'
 };
 
 const QUOTE_SETTINGS = {
