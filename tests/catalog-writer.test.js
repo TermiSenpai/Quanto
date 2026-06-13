@@ -41,7 +41,16 @@ function baselineVersions(cfg) {
 // { results, meta:{changes} }. The guarded UPDATE reports changes=1
 // unless the id is configured stale (then changes=0). SELECTs for the
 // current server row return whatever `serverRows` holds.
-function fakeClient({ staleIds = new Set(), serverRows = {} } = {}) {
+//   - liveCatalogVersion: what the live re-read of catalog_meta returns
+//     (the I1 globals guard); defaults to 7, matching the baseline.
+//   - existingIds: per-table set of ids that already exist server-side,
+//     so the create-collision existence check (I2) can fire.
+function fakeClient({
+  staleIds = new Set(),
+  serverRows = {},
+  liveCatalogVersion = 7,
+  existingIds = {}
+} = {}) {
   const queries = [];
   return {
     queries,
@@ -53,6 +62,18 @@ function fakeClient({ staleIds = new Set(), serverRows = {} } = {}) {
         const id = params[params.length - 2]; // ... WHERE id = ? AND version = ?
         const changes = staleIds.has(id) ? 0 : 1;
         return { results: [], meta: { changes } };
+      }
+      // Live re-read of catalog_meta for the globals guard (I1).
+      if (/^SELECT catalog_version FROM catalog_meta/.test(sql)) {
+        return { results: [{ catalog_version: liveCatalogVersion }], meta: {} };
+      }
+      // Create-collision existence check (I2): SELECT <idCol> FROM <t>.
+      const exists = sql.match(/^SELECT (\w+) FROM (\w+) WHERE \w+ = \?$/);
+      if (exists) {
+        const table = exists[2];
+        const id = params[0];
+        const present = (existingIds[table] || new Set()).has(id);
+        return { results: present ? [{ [exists[1]]: id }] : [], meta: {} };
       }
       // Read the current server row of a conflicted entity.
       if (/^SELECT \* FROM (\w+) WHERE id = \?/.test(sql)) {
@@ -309,7 +330,7 @@ describe('writeEntities', () => {
     expect(guard.params).toEqual([NOW(), 'BEAGLE', 1]);
   });
 
-  test('a stale version is a conflict: server row returned, children NOT written, others still written', async () => {
+  test('a partial conflict writes the clean entity but NO global bump or snapshot (honest snapshot)', async () => {
     const oldCfg = baseCfg();
     const newCfg = baseCfg();
     newCfg.packs.crew_full.name = 'Pack editado';      // will conflict
@@ -328,14 +349,36 @@ describe('writeEntities', () => {
     expect(res.conflicts[0]).toMatchObject({ entityType: 'pack', id: 'crew_full', serverRow });
     // The conflicted pack's children must NOT have been written.
     expect(client.queries.some((q) => /^DELETE FROM pack_options/.test(q.sql))).toBe(false);
-    // The non-conflicting product WAS written.
+    // The non-conflicting product WAS written (per-entity bump + audit row).
     expect(client.queries.some((q) => /^UPDATE products SET version = version \+ 1/.test(q.sql))).toBe(true);
     expect(client.queries.some((q) => /^INSERT INTO products/.test(q.sql))).toBe(true);
+    expect(client.queries.some((q) => /^INSERT INTO audit_log/.test(q.sql))).toBe(true);
     // Result statuses reflect both outcomes.
     expect(res.results).toContainEqual({ entityType: 'pack', id: 'crew_full', status: 'conflict' });
     expect(res.results).toContainEqual({ entityType: 'product', id: 'BEAGLE', status: 'written' });
-    // The version still bumped because at least one entity was written.
-    expect(res.catalogVersion).toBe(8);
+    // C1: no snapshot and no catalog_meta bump on a partial conflict — the
+    // snapshot must never capture the rejected pack's edits, and the
+    // reported version stays at the unchanged base.
+    expect(client.queries.some((q) => /^UPDATE catalog_meta/.test(q.sql))).toBe(false);
+    expect(client.queries.some((q) => /^INSERT INTO snapshots/.test(q.sql))).toBe(false);
+    expect(res.catalogVersion).toBe(7);
+  });
+
+  test('on clean success the snapshot JSON contains the edited entity', async () => {
+    const oldCfg = baseCfg();
+    const newCfg = baseCfg();
+    newCfg.products.BEAGLE.name = 'Camiseta editada';
+    const client = fakeClient();
+    const res = await writeEntities(client, {
+      oldCfg, newCfg, user: 'Alberto', now: NOW, expectedVersions: baselineVersions(oldCfg)
+    });
+    expect(res.ok).toBe(true);
+    const snap = client.queries.find((q) => /^INSERT INTO snapshots/.test(q.sql));
+    expect(snap).toBeTruthy();
+    const stored = JSON.parse(snap.params[1]);
+    // The snapshot is the committed state: the edit is present.
+    expect(stored.products.BEAGLE.name).toBe('Camiseta editada');
+    expect(stored.catalog_version).toBe(8);
   });
 
   test('an all-conflict result does not bump the version, snapshot, or audit', async () => {
@@ -392,22 +435,84 @@ describe('writeEntities', () => {
     expect(audit.params).toContain('parameters');
   });
 
-  test('a global with a stale catalog_version is reported as a conflict', async () => {
+  test('a brand-new id is inserted (existence checked first) and audited as a create', async () => {
+    const oldCfg = baseCfg();
+    const newCfg = baseCfg();
+    newCfg.suppliers.STANLEY = { name: 'Stanley/Stella', web: '', notes: '' };
+    const client = fakeClient();
+    const res = await writeEntities(client, {
+      oldCfg, newCfg, user: 'Alberto', now: NOW, expectedVersions: baselineVersions(oldCfg)
+    });
+    expect(res.ok).toBe(true);
+    expect(res.results).toContainEqual({ entityType: 'supplier', id: 'STANLEY', status: 'written' });
+    // The existence check runs before the unguarded INSERT (I2 guard).
+    expect(client.queries.some((q) => /^SELECT \w+ FROM suppliers WHERE id = \?$/.test(q.sql))).toBe(true);
+    expect(client.queries.some((q) => /^INSERT INTO suppliers/.test(q.sql))).toBe(true);
+    const audit = client.queries.find((q) => /^INSERT INTO audit_log/.test(q.sql));
+    expect(audit.params).toContain('create');
+  });
+
+  test('I2: a concurrent same-id create surfaces as a conflict, others still proceed', async () => {
+    const oldCfg = baseCfg();
+    const newCfg = baseCfg();
+    newCfg.suppliers.STANLEY = { name: 'Stanley/Stella', web: '', notes: '' }; // new id, will collide
+    newCfg.products.BEAGLE.name = 'Camiseta editada';                          // existing id, succeeds
+    // Another PC already created STANLEY → the row exists server-side.
+    const client = fakeClient({ existingIds: { suppliers: new Set(['STANLEY']) } });
+    const res = await writeEntities(client, {
+      oldCfg, newCfg, user: 'Alberto', now: NOW, expectedVersions: baselineVersions(oldCfg)
+    });
+    // The collision is a conflict (R18 contract), not a raw PK error.
+    expect(res.ok).toBe(false);
+    expect(res.conflicts.some((c) => c.entityType === 'supplier' && c.id === 'STANLEY')).toBe(true);
+    expect(res.results).toContainEqual({ entityType: 'supplier', id: 'STANLEY', status: 'conflict' });
+    // The colliding supplier was NOT inserted.
+    expect(client.queries.some((q) => /^INSERT INTO suppliers/.test(q.sql))).toBe(false);
+    // The unrelated product still proceeded.
+    expect(client.queries.some((q) => /^UPDATE products SET version = version \+ 1/.test(q.sql))).toBe(true);
+    expect(res.results).toContainEqual({ entityType: 'product', id: 'BEAGLE', status: 'written' });
+    // Partial conflict → no global bump or snapshot (C1).
+    expect(client.queries.some((q) => /^UPDATE catalog_meta/.test(q.sql))).toBe(false);
+    expect(res.catalogVersion).toBe(7);
+  });
+
+  test('a global with a stale baseline catalog_version is reported as a conflict', async () => {
     const oldCfg = baseCfg();
     const newCfg = baseCfg();
     newCfg.parameters.labor_eur_hour = 16;
-    const client = fakeClient();
+    // The live catalog_version (7) is ahead of the baseline (5) the editor
+    // loaded → the global guard re-reads it and reports a conflict.
+    const client = fakeClient({ liveCatalogVersion: 7 });
     const expected = baselineVersions(oldCfg);
-    expected.catalogVersion = 5; // server is at 7 → stale
+    expected.catalogVersion = 5; // baseline behind live → stale
     const res = await writeEntities(client, {
-      oldCfg, newCfg, user: 'Alberto', now: NOW,
-      expectedVersions: expected,
-      serverCatalogVersion: 7
+      oldCfg, newCfg, user: 'Alberto', now: NOW, expectedVersions: expected
     });
     expect(res.ok).toBe(false);
     expect(res.conflicts).toHaveLength(1);
     expect(res.conflicts[0]).toMatchObject({ entityType: 'parameters', id: null });
     // No parameters rows touched on a global conflict.
     expect(client.queries.some((q) => /^DELETE FROM parameters/.test(q.sql))).toBe(false);
+  });
+
+  test('I1: a concurrent global edit since baseline is a conflict, not a silent overwrite', async () => {
+    const oldCfg = baseCfg();
+    const newCfg = baseCfg();
+    newCfg.parameters.labor_eur_hour = 16;
+    // Baseline matches catalogVersion 7, but the live row has moved to 9
+    // (another PC committed a global edit). The writer must re-read the
+    // live version and refuse, never trusting the caller-supplied baseline.
+    const client = fakeClient({ liveCatalogVersion: 9 });
+    const res = await writeEntities(client, {
+      oldCfg, newCfg, user: 'Alberto', now: NOW, expectedVersions: baselineVersions(oldCfg)
+    });
+    expect(res.ok).toBe(false);
+    expect(res.conflicts).toHaveLength(1);
+    expect(res.conflicts[0]).toMatchObject({ entityType: 'parameters', id: null });
+    // The guard re-read catalog_meta live (the caller cannot defeat it).
+    expect(client.queries.some((q) => /^SELECT catalog_version FROM catalog_meta/.test(q.sql))).toBe(true);
+    // Nothing written.
+    expect(client.queries.some((q) => /^DELETE FROM parameters/.test(q.sql))).toBe(false);
+    expect(client.queries.some((q) => /^UPDATE catalog_meta/.test(q.sql))).toBe(false);
   });
 });
