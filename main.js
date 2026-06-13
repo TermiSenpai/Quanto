@@ -54,7 +54,8 @@ const {
   getQuote,
   updateQuote
 } = require('./lib/history');
-const { renderQuoteHtml } = require('./lib/pdf-template');
+const { renderQuote, BUILTIN_TEMPLATES, brandColors } = require('./lib/pdf-templates');
+const { sanitizeTemplate } = require('./lib/template-sanitizer');
 const { validateSettingsPayload } = require('./lib/settings-validator');
 const { redactSettings, mergeSettingsWrite } = require('./lib/settings-privacy');
 const { isPathAllowed } = require('./lib/path-guard');
@@ -1022,12 +1023,60 @@ ipcMain.handle('quotes:delete', (event, id) => {
 // `webContents.printToPDF` (built into Electron) to produce the
 // file. We do not depend on external PDF libraries.
 //
+// Template selection (Plan 6): the chosen template id comes from
+// `company.pdf_template` (shared catalog data) and the brand color from
+// `company.brand_color`. A built-in id renders straight from
+// lib/pdf-templates.js. Any other id is a CUSTOM template: in cloud mode
+// it is loaded from the shared `pdf_templates` store, SANITIZED, then
+// rendered; if it can't be loaded/sanitized we fall back to 'clasica'
+// so an export never fails because of a bad custom template. File mode
+// has the built-ins only (custom templates are a cloud feature).
+//
 // Inputs:
 //   { quote, company, quote_settings } -- quote is the persisted record
 //                                          OR a fresh draft (result-only).
 //   { defaultName }                    -- suggested file name.
 //
 // Returns { ok, ruta } on success or { ok:false, error } on failure.
+const BUILTIN_TEMPLATE_IDS = new Set(BUILTIN_TEMPLATES.map((t) => t.id));
+
+/**
+ * Resolves the template to render for a quote export. Returns the
+ * options object renderQuote expects: a built-in `templateId`, or a
+ * sanitized `custom: { html }` for a cloud custom template. Falls back
+ * to 'clasica' when a custom id can't be loaded/sanitized (logged).
+ */
+async function resolvePdfTemplate(company) {
+  const requested = (company && typeof company.pdf_template === 'string')
+    ? company.pdf_template.trim()
+    : '';
+  if (!requested || BUILTIN_TEMPLATE_IDS.has(requested)) {
+    return { templateId: requested || 'clasica' };
+  }
+  // A non-built-in id: a custom template. Only resolvable in cloud mode.
+  const settings = readSettings();
+  if (!settings || settings.data_source !== 'cloud') {
+    logger.warn('pdf:export custom template requested in file mode, using clasica', { id: requested });
+    return { templateId: 'clasica' };
+  }
+  try {
+    const tpl = await cloudBootstrap.getPdfTemplate(settings, requested);
+    if (!tpl) {
+      logger.warn('pdf:export custom template not found, using clasica', { id: requested });
+      return { templateId: 'clasica' };
+    }
+    // The stored html may carry its CSS separately; combine then sanitize.
+    const combined = tpl.css ? `<style>${tpl.css}</style>${tpl.html}` : tpl.html;
+    const safe = sanitizeTemplate(combined);
+    return { custom: { html: safe } };
+  } catch (err) {
+    // A custom template that fails to load or sanitize must not break the
+    // export: fall back to the built-in, surfacing the cause in the log.
+    logger.warn('pdf:export custom template rejected, using clasica', { id: requested, error: err.message });
+    return { templateId: 'clasica' };
+  }
+}
+
 ipcMain.handle('pdf:export', async (event, payload) => {
   const { quote, company, quote_settings, defaultName } = payload || {};
   if (!quote) return { ok: false, error: 'Falta el presupuesto a exportar.' };
@@ -1044,7 +1093,14 @@ ipcMain.handle('pdf:export', async (event, payload) => {
       return { ok: false, cancelado: true };
     }
 
-    const html = renderQuoteHtml(quote, { company, quoteSettings: quote_settings });
+    const templateChoice = await resolvePdfTemplate(company);
+    const brand = brandColors(company && company.brand_color);
+    const html = renderQuote(quote, {
+      ...templateChoice,
+      company,
+      quoteSettings: quote_settings,
+      brand
+    });
     // electron-builder strips temp dirs from app userData, so use the
     // OS temp folder. The file is deleted after PDF generation.
     tmpHtmlPath = path.join(app.getPath('temp'), `packprice-quote-${Date.now()}.html`);
