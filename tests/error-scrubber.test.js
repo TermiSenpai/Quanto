@@ -135,6 +135,16 @@ describe('scrubError · secret + business-data redaction', () => {
     expect(out.message).toContain('token.txt');
   });
 
+  test('redacts a forward-slash Windows drive path to its basename', () => {
+    // A Windows path written with forward slashes (e.g. by Node fs errors)
+    // must basename like the backslash form, not strand the drive letter.
+    const out = scrubError(new Error('cannot read C:/Users/Alberto/AppData/x.json'));
+    expect(out.message).not.toContain('Alberto');
+    expect(out.message).not.toContain('C:/Users');
+    expect(out.message).not.toContain('C:x.json');
+    expect(out.message).toContain('x.json');
+  });
+
   test('a catalog value (price) buried in a message survives only as text, never as a leaked field', () => {
     // The scrubber cannot know an arbitrary number is a price; what it
     // guarantees is the WHITELIST: no catalog object/field leaks through.

@@ -128,6 +128,37 @@ describe('buildDiagnostics · safety (no secrets, no business data)', () => {
     expect(d.storage).not.toHaveProperty('catalog');
     expect(d.storage).not.toHaveProperty('quotes');
   });
+
+  test('recent_log_lines scrub PII: no Windows username, no operator name, no token', () => {
+    const dir = tmpDir();
+    seed(dir, { withLog: false });
+    const logBody = [
+      '[2026-06-13T10:00:00.000Z] [info] app started',
+      '[2026-06-13T10:00:01.000Z] [info] read C:\\Users\\Alberto\\AppData\\Roaming\\packprice\\config.js',
+      '[2026-06-13T10:00:02.000Z] [info] audit {"action":"save","usuario":"Alberto"}',
+      '[2026-06-13T10:00:03.000Z] [info] write by modificadoPor: Alberto on entity pack-1',
+      '[2026-06-13T10:00:04.000Z] [info] config updated modified_by: Alberto',
+      '[2026-06-13T10:00:05.000Z] [error] auth failed token=vK9zT3xQ1aB7cD2eF4gH6jK8lM0nP1qR3sT5uV7w'
+    ].join('\n');
+    fs.writeFileSync(path.join(dir, 'logs', 'main.log'), logBody + '\n', 'utf-8');
+
+    const d = buildDiagnostics({ userDataDir: dir, ...META });
+    const joined = d.recent_log_lines.join('\n');
+
+    // Structure still complete: every non-empty line survives.
+    expect(Array.isArray(d.recent_log_lines)).toBe(true);
+    expect(d.recent_log_lines.length).toBe(6);
+
+    // Assert ABSENCE of the PII anywhere in the lines.
+    expect(joined).not.toContain('Alberto');
+    expect(joined).not.toContain('C:\\Users');
+    expect(joined).not.toContain('vK9zT3xQ1aB7cD2eF4gH6jK8lM0nP1qR3sT5uV7w');
+
+    // The basename of the path survives (still useful), and the lines are
+    // not blanked wholesale.
+    expect(joined).toContain('config.js');
+    expect(joined).toContain('app started');
+  });
 });
 
 describe('buildDiagnostics · tolerance', () => {
