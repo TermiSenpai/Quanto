@@ -1283,8 +1283,22 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 .conflict-entity { margin-bottom: 16px; }
 .conflict-entity__title { font-weight: 600; margin-bottom: 8px; }
 
+/* v5 conflict modal (UI-UX §2.3): server-vs-mine comparison columns. */
+.conflict-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.conflict-col__head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #4a5263);
+  margin-bottom: 4px;
+}
+
 @media (max-width: 600px) {
   .modal__author { padding: 10px 16px; }
+  .conflict-cols { grid-template-columns: 1fr; }
 }
 
 .modal__body {

@@ -770,6 +770,41 @@
     </div>
   </div>
 
+  <!-- ================== MODAL: CONFLICTO POR ENTIDAD (CLOUD) ================== -->
+  <!-- v5 (UI-UX §2.3): per-entity save conflict. Same modal style as the
+       admin diff; shows the server value vs yours and three exits. -->
+  <div id="conflict-overlay" class="overlay hidden">
+    <div class="modal modal--sm" role="dialog" aria-labelledby="conflict-title">
+      <header class="modal__head">
+        <div class="modal__head-title">
+          <span class="modal__head-icon"><svg class="icon icon--lg"><use href="#i-warn"/></svg></span>
+          <div class="modal__head-text">
+            <h2 id="conflict-title">Conflicto de edición</h2>
+            <p id="conflict-subtitle">Otro equipo modificó esta entidad mientras editabas.</p>
+          </div>
+        </div>
+        <button id="btn-cerrar-conflict" class="modal__close" type="button" aria-label="Cerrar">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div id="conflict-body"></div>
+      </div>
+      <footer class="modal__foot">
+        <span class="modal__foot-left" id="conflict-progress"></span>
+        <div class="modal__foot-right">
+          <button id="btn-conflict-cancelar" class="btn btn-ghost" type="button">Cancelar</button>
+          <button id="btn-conflict-load-server" class="btn btn-secondary" type="button">
+            <svg class="icon"><use href="#i-refresh"/></svg> Cargar versión del servidor
+          </button>
+          <button id="btn-conflict-overwrite" class="btn btn-primary" type="button">
+            <svg class="icon"><use href="#i-save"/></svg> Sobrescribir con la mía
+          </button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
   <!-- ================== MODAL: HISTORIAL DE PRESUPUESTOS ================== -->
   <div id="history-overlay" class="overlay hidden">
     <div class="modal" role="dialog" aria-labelledby="history-title">

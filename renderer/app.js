@@ -2465,8 +2465,8 @@ function entityLabel(entityType, id) {
  * Cloud catalog save (UI-UX §2.5): derive the grouped change summary
  * from CFG_BACKUP → CFG, confirm it (with the author), and only then
  * call saveCatalog with the edited cfg + the versions we loaded as the
- * optimistic-concurrency baseline. On a per-entity conflict we report it
- * and reload. The write CANNOT happen without confirming.
+ * optimistic-concurrency baseline. On a per-entity conflict, hand off
+ * to resolveCloudConflicts. The write CANNOT happen without confirming.
  */
 async function saveCatalogCloud() {
   const summary = buildSaveSummary(CFG_BACKUP || {}, CFG);
@@ -2492,13 +2492,7 @@ async function saveCatalogCloud() {
   }
 
   if (r && Array.isArray(r.conflicts) && r.conflicts.length > 0) {
-    // Per-entity conflict resolution lands in the next commit; for now
-    // report it plainly so a conflict is never a silent overwrite.
-    await window.packprice.showInfo({
-      titulo: 'Conflicto de edición',
-      mensaje: `${r.conflicts.length} entidad(es) cambiaron en el servidor mientras editabas. Recarga e inténtalo de nuevo.`
-    });
-    await reloadCloudCatalogQuietly();
+    await resolveCloudConflicts(r);
     return;
   }
 
@@ -2620,6 +2614,199 @@ function renderSummaryLine(line) {
   return `<li class="audit-change audit-change--${kind}">
     <code class="audit-change__path">${escAttr(line)}</code>
   </li>`;
+}
+
+/**
+ * Per-entity conflict resolution (UI-UX §2.3). The non-conflicting
+ * entities were already written by main; here we walk the conflicted
+ * ones sequentially. For each: show server-vs-mine, then
+ *   - «Cargar versión del servidor» → reload the whole catalog (the
+ *     editor then shows the server state) and stop.
+ *   - «Sobrescribir con la mía» → re-save just this entity using the
+ *     server's current version as the new baseline (so it now wins).
+ *   - «Cancelar» → stop, leaving the already-written entities saved.
+ * Finally report «N cambios guardados, M conflictos».
+ */
+async function resolveCloudConflicts(result) {
+  const conflicts = result.conflicts.slice();
+  const written = (result.results || []).filter(r => r.status === 'written' || r.status === 'deleted').length;
+
+  for (let i = 0; i < conflicts.length; i++) {
+    const conflict = conflicts[i];
+    const choice = await showConflictModal(conflict, { index: i, total: conflicts.length });
+
+    if (choice === 'load-server') {
+      await reloadCloudCatalogQuietly();
+      await window.packprice.showInfo({
+        titulo: 'Versión del servidor cargada',
+        mensaje: 'El editor muestra ahora la versión del servidor. Revisa y vuelve a guardar si quieres.'
+      });
+      return;
+    }
+
+    if (choice === 'overwrite') {
+      const ok = await overwriteEntity(conflict);
+      if (!ok) return; // overwriteEntity already reported the error
+      continue;
+    }
+
+    // cancel: stop the loop, keep what was already written.
+    break;
+  }
+
+  await window.packprice.showInfo({
+    titulo: 'Resultado del guardado',
+    mensaje: `${written} cambio${written === 1 ? '' : 's'} guardado${written === 1 ? '' : 's'}, ${conflicts.length} conflicto${conflicts.length === 1 ? '' : 's'}.`
+  });
+  await reloadCloudCatalogQuietly();
+  updateAdminFooter();
+}
+
+/**
+ * Re-saves a single conflicted entity using the server's current
+ * version as the expected baseline, so this write wins. Pragmatic and
+ * sequential: we send the full edited CFG but a versions map that only
+ * advances the conflicted entity to the server version (the others were
+ * already written, so they no longer differ from the now-current cfg).
+ */
+async function overwriteEntity(conflict) {
+  const baseline = buildOverwriteVersions(conflict);
+  const r = await window.packprice.saveCatalog({
+    newCfg: CFG,
+    expectedVersions: baseline
+  });
+  if (r && r.ok) return true;
+  if (r && Array.isArray(r.conflicts) && r.conflicts.length > 0) {
+    // Someone moved again between read and write — surface it plainly.
+    await window.packprice.showError({
+      titulo: 'Sigue habiendo conflicto',
+      mensaje: `«${entityLabel(conflict.entityType, conflict.id)}» volvió a cambiar en el servidor. Carga la versión del servidor y revisa.`
+    });
+    return false;
+  }
+  await window.packprice.showError({
+    titulo: 'Error al sobrescribir',
+    mensaje: (r && r.error) || 'No se pudo guardar la entidad.'
+  });
+  return false;
+}
+
+/**
+ * Builds an expectedVersions map that advances ONLY the conflicted
+ * entity to the server's current version (so the overwrite guard
+ * matches and our write wins). For a global singleton the baseline is
+ * the server catalog_version.
+ */
+function buildOverwriteVersions(conflict) {
+  const base = deepClone(DATA_STATE.versions || {});
+  const { entityType, id, serverRow, serverCatalogVersion } = conflict;
+
+  if (id && serverRow && typeof serverRow.version === 'number') {
+    if (!base[entityType]) base[entityType] = {};
+    base[entityType][id] = serverRow.version;
+  } else if (!id && typeof serverCatalogVersion === 'number') {
+    base.catalogVersion = serverCatalogVersion;
+  }
+  return base;
+}
+
+/**
+ * Shows the per-entity conflict modal (server vs mine) and resolves to
+ * one of 'load-server' | 'overwrite' | 'cancel'.
+ */
+function showConflictModal(conflict, progress) {
+  const { entityType, id } = conflict;
+  el('conflict-subtitle').textContent =
+    `Otro equipo modificó «${entityLabel(entityType, id)}» mientras editabas.`;
+  el('conflict-body').innerHTML = renderConflictBody(conflict);
+
+  const progressEl = el('conflict-progress');
+  if (progressEl && progress && progress.total > 1) {
+    progressEl.textContent = `Conflicto ${progress.index + 1} de ${progress.total}`;
+  } else if (progressEl) {
+    progressEl.textContent = '';
+  }
+
+  show('conflict-overlay');
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      hide('conflict-overlay');
+      btnLoad.removeEventListener('click', onLoad);
+      btnOver.removeEventListener('click', onOver);
+      btnCancel.removeEventListener('click', onCancel);
+      btnClose.removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onOverlayClick);
+      document.removeEventListener('keydown', onKey);
+    };
+    const onLoad = () => { cleanup(); resolve('load-server'); };
+    const onOver = () => { cleanup(); resolve('overwrite'); };
+    const onCancel = () => { cleanup(); resolve('cancel'); };
+    const onOverlayClick = (e) => { if (e.target.id === 'conflict-overlay') onCancel(); };
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+
+    const btnLoad = el('btn-conflict-load-server');
+    const btnOver = el('btn-conflict-overwrite');
+    const btnCancel = el('btn-conflict-cancelar');
+    const btnClose = el('btn-cerrar-conflict');
+    const overlay = el('conflict-overlay');
+
+    btnLoad.addEventListener('click', onLoad);
+    btnOver.addEventListener('click', onOver);
+    btnCancel.addEventListener('click', onCancel);
+    btnClose.addEventListener('click', onCancel);
+    overlay.addEventListener('click', onOverlayClick);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+/**
+ * Renders the conflict comparison: the server's row (raw main-entity
+ * fields, the authoritative bits main returned) vs your edited slice.
+ * Pragmatic — the server row carries the entity's top-level columns
+ * which is enough to show the user "what differs".
+ */
+function renderConflictBody(conflict) {
+  const { entityType, id, serverRow } = conflict;
+  const mine = mineEntitySlice(entityType, id);
+  return `
+    <div class="conflict-entity">
+      <div class="conflict-entity__title">${escAttr(entityLabel(entityType, id))}</div>
+      <div class="conflict-cols">
+        <div>
+          <div class="conflict-col__head">Versión del servidor</div>
+          <ul class="audit-changes">${renderValueRows(serverRow)}</ul>
+        </div>
+        <div>
+          <div class="conflict-col__head">La tuya</div>
+          <ul class="audit-changes">${renderValueRows(mine)}</ul>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/** The user's edited sub-object for an entity (per-id or global). */
+function mineEntitySlice(entityType, id) {
+  const sections = { pack: 'packs', product: 'products', supplier: 'suppliers', addon: 'addons' };
+  if (id && sections[entityType]) {
+    return (CFG[sections[entityType]] || {})[id];
+  }
+  return CFG[entityType];
+}
+
+/** Renders a flat object as code rows (key: value) for the conflict cols. */
+function renderValueRows(value) {
+  if (value === null || value === undefined) {
+    return '<li class="audit-change"><span class="muted">(sin datos)</span></li>';
+  }
+  if (typeof value !== 'object') {
+    return `<li class="audit-change"><code class="audit-change__path">${escAttr(String(value))}</code></li>`;
+  }
+  return Object.entries(value).map(([k, v]) => {
+    const text = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return `<li class="audit-change"><code class="audit-change__path">${escAttr(k)}: ${escAttr(text)}</code></li>`;
+  }).join('');
 }
 
 // ============================================================
