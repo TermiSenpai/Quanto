@@ -190,10 +190,14 @@ describe('updateQuote', () => {
     expect(getQuote(dir, a.id)).toMatchObject({ status: 'accepted', cloud_id: 'uuid-1' });
   });
 
-  test('never overwrites id or date', () => {
+  test('never overwrites id or date (rejects them as disallowed keys)', () => {
     const dir = makeUserData();
     const a = saveQuote(dir, { tag: 't' });
-    const updated = updateQuote(dir, a.id, { id: 'HACKED', date: 'nope', status: 'rejected' });
+    // id/date are pinned and not in the allowlist, so patching them throws.
+    expect(() => updateQuote(dir, a.id, { id: 'HACKED', status: 'rejected' })).toThrow(/no permitido/);
+    expect(() => updateQuote(dir, a.id, { date: 'nope', status: 'rejected' })).toThrow(/no permitido/);
+    // A clean status patch still pins id/date.
+    const updated = updateQuote(dir, a.id, { status: 'rejected' });
     expect(updated.id).toBe(a.id);
     expect(updated.date).toBe(a.date);
     expect(updated.status).toBe('rejected');
@@ -208,6 +212,60 @@ describe('updateQuote', () => {
     const dir = makeUserData();
     const a = saveQuote(dir, { tag: 't' });
     expect(() => updateQuote(dir, a.id, null)).toThrow();
+  });
+
+  test('rejects a disallowed key', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    expect(() => updateQuote(dir, a.id, { evil: 1 })).toThrow(/no permitido/);
+    expect(() => updateQuote(dir, a.id, { total: 999 })).toThrow(/no permitido/);
+    // The disallowed patch was not persisted.
+    expect(getQuote(dir, a.id).total).toBeUndefined();
+  });
+
+  test('rejects an invalid status value', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    expect(() => updateQuote(dir, a.id, { status: 'maybe' })).toThrow();
+    expect(getQuote(dir, a.id).status).toBeUndefined();
+  });
+
+  test('rejects non-string cloud_id and status_ts', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    expect(() => updateQuote(dir, a.id, { cloud_id: 123 })).toThrow();
+    expect(() => updateQuote(dir, a.id, { status_ts: 123 })).toThrow();
+  });
+
+  test('rejects an oversized patch and does not write it', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    const huge = { cloud_id: 'x'.repeat(MAX_QUOTE_BYTES + 1) };
+    expect(() => updateQuote(dir, a.id, huge)).toThrow(/demasiado grande/);
+    expect(getQuote(dir, a.id).cloud_id).toBeUndefined();
+  });
+
+  test('accepts a valid status/status_ts/cloud_id patch and keeps id/date', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' }, { now: new Date('2026-05-11T14:32:00Z') });
+    const updated = updateQuote(dir, a.id, {
+      status: 'accepted',
+      status_ts: '2026-06-13T10:00:00.000Z',
+      cloud_id: 'uuid-9'
+    });
+    expect(updated).toMatchObject({
+      id: a.id,
+      date: a.date,
+      status: 'accepted',
+      status_ts: '2026-06-13T10:00:00.000Z',
+      cloud_id: 'uuid-9',
+      tag: 't'
+    });
+    expect(getQuote(dir, a.id)).toMatchObject({
+      status: 'accepted',
+      status_ts: '2026-06-13T10:00:00.000Z',
+      cloud_id: 'uuid-9'
+    });
   });
 });
 
