@@ -55,6 +55,7 @@ const {
 } = require('./lib/history');
 const { renderQuoteHtml } = require('./lib/pdf-template');
 const { validateSettingsPayload } = require('./lib/settings-validator');
+const { redactSettings, mergeSettingsWrite } = require('./lib/settings-privacy');
 const { isPathAllowed } = require('./lib/path-guard');
 const { initialThrottleState, nextThrottleState } = require('./lib/admin-throttle');
 const { createD1Client } = require('./lib/d1-client');
@@ -90,7 +91,10 @@ const cloudBootstrap = createCloudBootstrap({
   cachePath: CATALOG_CACHE_PATH,
   backupDir: CLOUD_BACKUP_DIR,
   buildDefaultConfig,
-  appVersion: app.getVersion()
+  appVersion: app.getVersion(),
+  // Dropped cloud errors (cache fallback, lock-release throws) are
+  // logged here so they are never silently swallowed (hard rule §4).
+  log: (msg, meta) => logger.warn(msg, meta)
 });
 
 let mainWindow = null;
@@ -290,24 +294,13 @@ function mergeWithCurrentPassword(filePath, configFromRenderer) {
 // ============================================================
 
 // --- Settings ---
-
-/**
- * The renderer must never see the Cloudflare API token in clear
- * (CLAUDE.md hard rule via the v5 debate): `cloud.token` is replaced
- * by a `has_token` flag so the wizard can tell "configured" from
- * "missing" without holding the secret.
- */
-function redactSettingsForRenderer(settings) {
-  if (!settings || typeof settings !== 'object' || !settings.cloud) return settings;
-  const { token, ...cloudRest } = settings.cloud;
-  return {
-    ...settings,
-    cloud: { ...cloudRest, has_token: typeof token === 'string' && token.length > 0 }
-  };
-}
+//
+// Token privacy (redact on read, re-attach on write) lives in
+// lib/settings-privacy.js so it is pure and unit-tested; the handlers
+// here stay thin wiring.
 
 ipcMain.handle('settings:read', () => {
-  return redactSettingsForRenderer(readSettings());
+  return redactSettings(readSettings());
 });
 
 ipcMain.handle('settings:write', (event, settings) => {
@@ -320,19 +313,9 @@ ipcMain.handle('settings:write', (event, settings) => {
     }
     // The renderer never holds the cloud token (settings:read redacts
     // it), so a renderer round-trip must not wipe what only main
-    // knows: keep the stored data_source/cloud when the payload omits
-    // them, and the stored token when the payload's cloud lacks one.
-    const current = readSettings() || {};
-    const merged = { ...clean };
-    if (merged.data_source === undefined && current.data_source !== undefined) {
-      merged.data_source = current.data_source;
-    }
-    if (merged.cloud === undefined && current.cloud !== undefined) {
-      merged.cloud = current.cloud;
-    } else if (merged.cloud && !merged.cloud.token && current.cloud && current.cloud.token) {
-      merged.cloud = { ...merged.cloud, token: current.cloud.token };
-    }
-    writeSettings(merged);
+    // knows: mergeSettingsWrite re-attaches the stored token and keeps
+    // the stored data_source/cloud when the payload omits them.
+    writeSettings(mergeSettingsWrite(readSettings(), clean));
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -438,14 +421,18 @@ ipcMain.handle('cloud:provision', async (event, payload) => {
   if (result.ok) {
     // Persist the working cloud connection so the next boot starts
     // from D1. The token lives only in the per-PC settings.json.
+    // Re-read settings RIGHT before merging: provisioning is a long
+    // await, so a concurrent settings:write must not be clobbered by
+    // the snapshot we took before it ran.
+    const latest = readSettings() || {};
     writeSettings({
-      ...settings,
+      ...latest,
       data_source: 'cloud',
       cloud: {
         token,
         account_id: accountId,
         database_id: result.databaseId,
-        user_name: settings.user_name || ''
+        user_name: latest.user_name || ''
       }
     });
     logger.info('cloud:provision success', { databaseId: result.databaseId, seeded: result.seeded });

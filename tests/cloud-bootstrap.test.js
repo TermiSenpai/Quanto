@@ -143,12 +143,18 @@ describe('loadCatalog', () => {
   test('cloud down + cache present: starts from the cache, offline flagged', async () => {
     writeCache(cachePath, { fetchedAt: '2026-06-11T08:00:00.000Z', catalogVersion: 5, entities });
     const client = { async query() { throw new Error('No se pudo conectar con Cloudflare — comprueba la conexión a internet'); } };
-    const { bootstrap } = makeBootstrap(client);
+    const log = vi.fn();
+    const { bootstrap } = makeBootstrap(client, { log });
     const res = await bootstrap.loadCatalog(SETTINGS);
 
     expect(res.ok).toBe(true);
     expect(res.source).toBe('cache');
     expect(res.offline).toBe(true);
+    // A network failure is offline, not cloud-invalid.
+    expect(res.reason).toBeUndefined();
+    // The cause is carried, never silently dropped, and logged.
+    expect(res.cloudError).toMatch(/No se pudo conectar/);
+    expect(log).toHaveBeenCalled();
     expect(res.fetchedAt).toBe('2026-06-11T08:00:00.000Z');
     expect(res.catalogVersion).toBe(5);
     expect(res.config).toEqual(expectedConfig('2026-06-11T08:00:00.000Z'));
@@ -158,11 +164,18 @@ describe('loadCatalog', () => {
     writeCache(cachePath, { fetchedAt: '2026-06-11T08:00:00.000Z', catalogVersion: 5, entities });
     // Reachable D1 but an empty/garbage catalog: validation must reject
     // it and the app must keep working from the last good snapshot.
-    const { bootstrap } = makeBootstrap(fakeCatalogClient({}));
+    // The cloud WAS reachable, so this is NOT offline — it is a
+    // cloud-invalid fallback carrying the dropped cloud error.
+    const log = vi.fn();
+    const { bootstrap } = makeBootstrap(fakeCatalogClient({}), { log });
     const res = await bootstrap.loadCatalog(SETTINGS);
     expect(res.ok).toBe(true);
     expect(res.source).toBe('cache');
-    expect(res.offline).toBe(true);
+    expect(res.reason).toBe('cloud-invalid');
+    expect(res.cloudError).toBeTruthy();
+    expect(res.offline).toBeFalsy();
+    // The dropped cloud error is logged, never silently swallowed.
+    expect(log).toHaveBeenCalled();
   });
 
   test('cloud down + no cache: NO_CLOUD_NO_CACHE with the network error', async () => {
@@ -488,6 +501,36 @@ describe('provision', () => {
     expect(res.ok).toBe(false);
     expect(res.code).toBe('MIGRATION_FAILED');
     expect(state.releaseCalls).toBe(1);
+  });
+
+  test('a throw while releasing the lock does not mask the in-flight result', async () => {
+    // Verify fails (MIGRATION_FAILED + backupPath) AND the lock
+    // release throws in the finally: the original failure result must
+    // survive — a finally throw can never replace it.
+    const { client, state } = provisionWorld({
+      existingDb: { uuid: 'db-9', name: 'packprice' },
+      hadSchemaMigrations: true,
+      productCount: 9,
+      entities: {} // invalid catalog → verify rejects
+    });
+    const original = client.query.bind(client);
+    client.query = async (sql, params = []) => {
+      if (/SET migrating_since = NULL WHERE migrating_since = \?/.test(sql)) {
+        state.releaseCalls++;
+        throw new Error('Cloudflare rechazó la petición al liberar el cerrojo');
+      }
+      return original(sql, params);
+    };
+    const log = vi.fn();
+    const { bootstrap } = makeBootstrap(client, { log });
+    const res = await bootstrap.provision(PAYLOAD);
+
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe('MIGRATION_FAILED');
+    expect(res.backupPath).toBe(path.join(backupDir, 'pre-migration-2026-06-12T10-00-00-000Z.sql'));
+    // The release was attempted, its throw was caught and logged.
+    expect(state.releaseCalls).toBe(1);
+    expect(log).toHaveBeenCalled();
   });
 
   test('unexpected failure outside the lock: plain { ok: false, error }', async () => {
