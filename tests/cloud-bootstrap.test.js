@@ -124,10 +124,17 @@ describe('loadCatalog', () => {
     expect(res.catalogVersion).toBe(7);
     expect(res.fetchedAt).toBe(NOW());
     expect(res.config).toEqual(expectedConfig(NOW()));
+    // The per-entity version map travels with the load (plan 3B item 5).
+    // The fake rows carry no version column, so the maps are empty but the
+    // catalog-wide counter is present for the renderer to echo on save.
+    expect(res.versions).toEqual({ catalogVersion: 7, pack: {}, product: {}, supplier: {}, addon: {} });
     // The client is built from settings.cloud — and nothing else.
     expect(created).toEqual([{ token: 'tok-secret', accountId: 'acc-1', databaseId: 'db-1' }]);
-    // Cache persisted for the next offline boot.
-    expect(readCache(cachePath)).toEqual({ fetchedAt: NOW(), catalogVersion: 7, entities });
+    // Cache persisted for the next offline boot (versions included).
+    expect(readCache(cachePath)).toEqual({
+      fetchedAt: NOW(), catalogVersion: 7, entities,
+      versions: { catalogVersion: 7, pack: {}, product: {}, supplier: {}, addon: {} }
+    });
   });
 
   test('the config sent out has no admin section and never carries the token', async () => {
@@ -542,5 +549,167 @@ describe('provision', () => {
     expect(res.ok).toBe(false);
     expect(res.code).toBeUndefined();
     expect(res.error).toMatch(/Cloudflare rechazó/);
+  });
+});
+
+// ------------------------------------------------------------
+// saveCatalog — guarded per-entity write + cache refresh
+// ------------------------------------------------------------
+// A combined fake: serves loadEntities (the authoritative baseline +
+// version map) AND the writeEntities guarded-write traffic. Per-id main
+// rows carry a `version` column (db/migrations/0001_init.sql) so the
+// version derivation and the UPDATE guards have something real to bite.
+function fakeSaveClient({ staleIds = new Set(), serverRows = {}, metaRow = META_ROW } = {}) {
+  // The live catalog rows: disassemble output with a version stamped onto
+  // every per-id main row (children/globals have no version column).
+  const entities = disassemble(buildDefaultConfig());
+  for (const table of ['packs', 'products', 'suppliers', 'addons']) {
+    entities[table] = entities[table].map((r) => ({ ...r, version: 1 }));
+  }
+  const queries = [];
+  return {
+    queries,
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      // --- writeEntities guarded UPDATE of a per-id main row ---
+      if (/^UPDATE (\w+) SET version = version \+ 1/.test(sql)) {
+        const id = params[params.length - 2];
+        return { results: [], meta: { changes: staleIds.has(id) ? 0 : 1 } };
+      }
+      // Live re-read of catalog_meta for the globals guard.
+      if (/^SELECT catalog_version FROM catalog_meta/.test(sql)) {
+        return { results: [{ catalog_version: metaRow.catalog_version }], meta: {} };
+      }
+      // Create-collision existence check.
+      const exists = sql.match(/^SELECT (\w+) FROM (\w+) WHERE \w+ = \?$/);
+      if (exists) return { results: [], meta: {} };
+      // Read the current server row of a conflicted entity.
+      if (/^SELECT \* FROM (\w+) WHERE id = \?/.test(sql)) {
+        const table = sql.match(/FROM (\w+)/)[1];
+        const row = (serverRows[table] || {})[params[0]] || null;
+        return { results: row ? [row] : [], meta: {} };
+      }
+      // --- loadEntities reads ---
+      const table = (sql.match(/FROM (\w+)/) || [])[1];
+      if (table === 'catalog_meta') return { results: [metaRow], meta: {} };
+      if (table && entities[table] !== undefined) return { results: entities[table], meta: {} };
+      // Everything else: DELETE/INSERT children, audit, snapshot, bump.
+      return { results: [], meta: { changes: 1 } };
+    }
+  };
+}
+
+describe('saveCatalog', () => {
+  // The version map the renderer echoes back: every per-id entity at 1,
+  // the catalog counter matching the loaded baseline (META_ROW = 7).
+  function rendererVersions() {
+    const cfg = buildDefaultConfig();
+    const v = { catalogVersion: 7, pack: {}, product: {}, supplier: {}, addon: {} };
+    for (const id of Object.keys(cfg.packs)) v.pack[id] = 1;
+    for (const id of Object.keys(cfg.products)) v.product[id] = 1;
+    for (const id of Object.keys(cfg.suppliers)) v.supplier[id] = 1;
+    for (const id of Object.keys(cfg.addons)) v.addon[id] = 1;
+    return v;
+  }
+
+  function editedCfg(mutate) {
+    const cfg = buildDefaultConfig();
+    delete cfg.admin;
+    mutate(cfg);
+    return cfg;
+  }
+
+  test('happy path: writes the entity, bumps the version and refreshes the cache', async () => {
+    const client = fakeSaveClient();
+    const { bootstrap, created } = makeBootstrap(client);
+    const newCfg = editedCfg((c) => { c.products.BEAGLE.name = 'Camiseta editada'; });
+
+    const res = await bootstrap.saveCatalog(SETTINGS, {
+      newCfg, expectedVersions: rendererVersions(), user: 'Alberto'
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.catalogVersion).toBe(8); // 7 → 8
+    expect(res.conflicts).toEqual([]);
+    expect(res.results).toContainEqual({ entityType: 'product', id: 'BEAGLE', status: 'written' });
+    // Built from settings.cloud only — never anything else.
+    expect(created).toEqual([{ token: 'tok-secret', accountId: 'acc-1', databaseId: 'db-1' }]);
+
+    // Cache refreshed with the saved catalog at the new version, the edit
+    // present, and the bumped per-entity version (1 → 2) for BEAGLE.
+    const cached = readCache(cachePath);
+    expect(cached.catalogVersion).toBe(8);
+    expect(cached.versions.catalogVersion).toBe(8);
+    expect(cached.versions.product.BEAGLE).toBe(2);
+    expect(cached.entities.products.find((p) => p.id === 'BEAGLE').name).toBe('Camiseta editada');
+  });
+
+  test('conflict path: returns the conflict and does NOT refresh the cache', async () => {
+    // Seed a known-good cache so we can prove it is left untouched.
+    const priorCache = { fetchedAt: '2026-06-10T08:00:00.000Z', catalogVersion: 7, entities: { products: [] } };
+    writeCache(cachePath, priorCache);
+
+    const serverRow = { id: 'BEAGLE', name: 'Editado por otro PC', version: 5 };
+    const client = fakeSaveClient({ staleIds: new Set(['BEAGLE']), serverRows: { products: { BEAGLE: serverRow } } });
+    const { bootstrap } = makeBootstrap(client);
+    const newCfg = editedCfg((c) => { c.products.BEAGLE.name = 'Mi edición'; });
+
+    const res = await bootstrap.saveCatalog(SETTINGS, {
+      newCfg, expectedVersions: rendererVersions(), user: 'Alberto'
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.conflicts).toHaveLength(1);
+    expect(res.conflicts[0]).toMatchObject({ entityType: 'product', id: 'BEAGLE', serverRow });
+    expect(res.catalogVersion).toBe(7); // unchanged
+    // The cache is exactly the prior one — a conflicted save never touches it.
+    expect(readCache(cachePath)).toEqual(priorCache);
+  });
+
+  test('missing expectedVersions: derives them from the live load (no conflict possible)', async () => {
+    const client = fakeSaveClient();
+    const { bootstrap } = makeBootstrap(client);
+    const newCfg = editedCfg((c) => { c.products.BEAGLE.name = 'Camiseta editada'; });
+
+    const res = await bootstrap.saveCatalog(SETTINGS, { newCfg, user: 'Alberto' });
+
+    expect(res.ok).toBe(true);
+    // The guard UPDATE used the version derived from the live rows (1).
+    const guard = client.queries.find((q) => /^UPDATE products SET version = version \+ 1/.test(q.sql));
+    expect(guard.params).toEqual([NOW(), 'BEAGLE', 1]);
+    expect(res.results).toContainEqual({ entityType: 'product', id: 'BEAGLE', status: 'written' });
+  });
+
+  test('the baseline diff is the live cloud catalog, not a renderer-supplied oldCfg', async () => {
+    // saveCatalog takes only newCfg; it must re-load the baseline itself.
+    const client = fakeSaveClient();
+    const { bootstrap } = makeBootstrap(client);
+    const newCfg = editedCfg((c) => { c.products.BEAGLE.name = 'Camiseta editada'; });
+    await bootstrap.saveCatalog(SETTINGS, { newCfg, expectedVersions: rendererVersions(), user: 'Alberto' });
+    // It read catalog_meta + the entity tables (loadEntities) before writing.
+    expect(client.queries.some((q) => /SELECT \* FROM catalog_meta/.test(q.sql))).toBe(true);
+    expect(client.queries.some((q) => /SELECT \* FROM products/.test(q.sql))).toBe(true);
+  });
+
+  test('never leaks the token in the returned shape', async () => {
+    const client = fakeSaveClient();
+    const { bootstrap } = makeBootstrap(client);
+    const newCfg = editedCfg((c) => { c.products.BEAGLE.name = 'Camiseta editada'; });
+    const res = await bootstrap.saveCatalog(SETTINGS, { newCfg, expectedVersions: rendererVersions(), user: 'Alberto' });
+    const serialized = JSON.stringify(res);
+    expect(serialized).not.toContain('tok-secret');
+    expect(serialized).not.toContain('acc-1');
+  });
+
+  test('a removed entity drops out of the refreshed cache version map', async () => {
+    const client = fakeSaveClient();
+    const { bootstrap } = makeBootstrap(client);
+    const newCfg = editedCfg((c) => { delete c.products.URBAN; });
+    const res = await bootstrap.saveCatalog(SETTINGS, {
+      newCfg, expectedVersions: rendererVersions(), user: 'Alberto'
+    });
+    expect(res.ok).toBe(true);
+    expect(res.results).toContainEqual({ entityType: 'product', id: 'URBAN', status: 'deleted' });
+    expect(readCache(cachePath).versions.product.URBAN).toBeUndefined();
   });
 });

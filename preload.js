@@ -72,6 +72,13 @@ contextBridge.exposeInMainWorld('packprice', {
   provisionCloud:      (data) => ipcRenderer.invoke('cloud:provision', data),
   loadCatalog:         ()     => ipcRenderer.invoke('catalog:load'),
   checkCatalogVersion: ()     => ipcRenderer.invoke('catalog:check-version'),
-  refreshCatalog:      ()     => ipcRenderer.invoke('catalog:refresh')
+  refreshCatalog:      ()     => ipcRenderer.invoke('catalog:refresh'),
+
+  // Guarded per-entity save (cloud mode). The renderer sends the edited
+  // full cfg + the version map it loaded; main re-loads the baseline,
+  // writes entity-by-entity and answers { ok } or { ok:false, conflicts,
+  // results }. The author and the API token are added in main — never
+  // here. `data` shape: { newCfg, expectedVersions }.
+  saveCatalog:         (data) => ipcRenderer.invoke('catalog:save', data)
 
 });

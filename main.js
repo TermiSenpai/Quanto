@@ -448,6 +448,35 @@ ipcMain.handle('catalog:check-version', () => cloudBootstrap.checkVersion(readSe
 
 ipcMain.handle('catalog:refresh', () => cloudBootstrap.refreshCatalog(readSettings()));
 
+// The catalog edit author for the audit log + catalog_meta. Prefer the
+// cloud-specific name, fall back to the PC's general name, then a generic
+// (the audit must always carry someone — CLAUDE.md §2: v5 replaces the
+// admin password with author + audit + snapshot).
+function cloudAuthor(settings) {
+  const s = settings || {};
+  return (s.cloud && s.cloud.user_name) || s.user_name || 'Equipo';
+}
+
+// catalog:save → guarded per-entity write (cloud mode). Thin wiring: the
+// renderer passes the edited cfg + the version map it loaded; the
+// orchestration (re-load baseline, writeEntities, cache refresh) lives in
+// lib/cloud-bootstrap.js. The token never leaves main.
+ipcMain.handle('catalog:save', async (event, payload) => {
+  const settings = readSettings();
+  const { newCfg, expectedVersions } = payload || {};
+  const result = await cloudBootstrap.saveCatalog(settings, {
+    newCfg, expectedVersions, user: cloudAuthor(settings)
+  });
+  if (result.ok) {
+    logger.info('catalog:save success', {
+      catalogVersion: result.catalogVersion, entities: result.results.length
+    });
+  } else {
+    logger.warn('catalog:save conflicts', { conflicts: result.conflicts.length });
+  }
+  return result;
+});
+
 // --- Config read (with lazy v2 -> v3 migration) ---
 //
 // The first PC to open an old (v2) config migrates it to v3: backs
@@ -495,6 +524,27 @@ ipcMain.handle('config:read', (event, payload) => {
 //   - { ok: false, error } on generic error
 
 ipcMain.handle('config:write', (event, payload) => {
+  // Cloud mode routes the admin-save channel through the guarded
+  // per-entity writer and answers a shape the renderer understands
+  // ({ ok } or { ok:false, conflicts, results }). File mode below stays
+  // byte-identical. The renderer passes the edited full cfg + the
+  // version map it loaded (so concurrency is detected per entity).
+  const settings = readSettings();
+  if (settings && settings.data_source === 'cloud') {
+    const newCfg = payload.configNuevo ?? payload.newConfig;
+    const expectedVersions = payload.expectedVersions ?? payload.versions;
+    return cloudBootstrap.saveCatalog(settings, {
+      newCfg, expectedVersions, user: cloudAuthor(settings)
+    }).then((result) => {
+      if (result.ok) {
+        logger.info('config:write (cloud) success', { catalogVersion: result.catalogVersion });
+      } else {
+        logger.warn('config:write (cloud) conflicts', { conflicts: result.conflicts.length });
+      }
+      return result;
+    });
+  }
+
   const filePath = payload.ruta ?? payload.path;
   const configNuevo = payload.configNuevo ?? payload.newConfig;
   const infoEsperada = payload.infoEsperada ?? payload.expectedInfo;
