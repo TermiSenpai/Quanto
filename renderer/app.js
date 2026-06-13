@@ -43,6 +43,15 @@ import {
 } from './history.js';
 import { deriveDataStatus, formatFreshness, planRefreshTrigger } from './data-status.js';
 import { buildSaveSummary, totalChanges } from './save-summary.js';
+import { computeReminder } from './quote-reminder.js';
+import {
+  barChartH, barChartV, groupedBars, lineChart, histogram
+} from './charts.js';
+import {
+  isEmptyStats, kpiTiles, packUsageBars, conversionGroups, weeklySeries,
+  tierBars, marginGroups, deviationBuckets, topProductBars, topAddonBars,
+  specialSizeBars, rangeForPeriod
+} from './stats-view.js';
 
 // ============================================================
 // Module state
@@ -68,6 +77,17 @@ let provisionInFlight = false;
 // share one refresh flow. This single flag guards both against
 // double-clicks and re-entry (the busy button is whichever is visible).
 let refreshInFlight = false;
+
+// v5: the startup quote reminder runs once per boot, not on every cfg
+// live-reload (refresh), so a dismissed banner stays dismissed.
+let reminderChecked = false;
+// v5 statistics screen scratch state: the active period and the last
+// computed range, so "Aplicar"/re-render reuse the user's choice.
+let statsState = { period: 'season', range: null };
+const STATS_PERIOD_LABELS = {
+  season: 'la temporada', '30d': 'los últimos 30 días',
+  year: 'el último año', range: 'el rango elegido'
+};
 
 const state = {
   packId: null,
@@ -734,6 +754,14 @@ function initApp() {
     bindEvents();
     eventsBound = true;
   }
+
+  // v5: nudge about quotes waiting for an answer / about to expire. Run
+  // once per boot (not on every cfg live-reload) so a refresh doesn't
+  // re-pop a dismissed banner.
+  if (!reminderChecked) {
+    reminderChecked = true;
+    maybeShowReminder();
+  }
 }
 
 // ============================================================
@@ -939,10 +967,51 @@ function showToast(message) {
     toast.innerHTML = '<svg class="icon"><use href="#i-check"/></svg><span></span>';
     document.body.appendChild(toast);
   }
+  // A plain toast has no action button: ensure any prior action is gone.
   toast.querySelector('span').textContent = message;
+  const oldBtn = toast.querySelector('.toast__action');
+  if (oldBtn) oldBtn.remove();
   toast.classList.add('is-visible');
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2500);
+}
+
+/**
+ * Toast with an undo action (UI-UX §2.7: status change is undoable via
+ * toast). Reuses the #pp-toast element, appending a "Deshacer" button
+ * that runs `onUndo` and hides the toast. Auto-dismisses after a beat.
+ */
+function showStatusToast(message, onUndo) {
+  let toast = el('pp-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'pp-toast';
+    toast.className = 'toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    toast.innerHTML = '<svg class="icon"><use href="#i-check"/></svg><span></span>';
+    document.body.appendChild(toast);
+  }
+  toast.querySelector('span').textContent = message;
+  let action = toast.querySelector('.toast__action');
+  if (!action) {
+    action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'toast__action';
+    toast.appendChild(action);
+  }
+  action.textContent = 'Deshacer';
+  action.onclick = async () => {
+    toast.classList.remove('is-visible');
+    if (typeof onUndo === 'function') await onUndo();
+  };
+  toast.classList.add('is-visible');
+  if (toastTimer) clearTimeout(toastTimer);
+  // A little longer than a plain toast so there is time to undo.
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('is-visible');
+    if (action) action.remove();
+  }, 5000);
 }
 
 function shortConfigDate(date) {
@@ -1020,6 +1089,36 @@ function bindEvents() {
   if (btnSaveQuote) btnSaveQuote.addEventListener('click', saveCurrentQuote);
   const btnExportPdf = el('btn-exportar-pdf');
   if (btnExportPdf) btnExportPdf.addEventListener('click', exportQuotePdf);
+
+  // Client fields: clear the inline error as soon as the user types
+  // (validation is on save/export, but the error must not linger).
+  const clienteNombre = el('cliente-nombre');
+  if (clienteNombre) clienteNombre.addEventListener('input', () => clearFieldError('cliente-nombre'));
+  const clienteTel = el('cliente-telefono');
+  if (clienteTel) clienteTel.addEventListener('input', () => clearFieldError('cliente-telefono'));
+
+  // v5: Estadísticas screen + startup reminder banner.
+  const btnStats = el('btn-estadisticas');
+  if (btnStats) btnStats.addEventListener('click', openStats);
+  const btnStatsBack = el('btn-stats-volver');
+  if (btnStatsBack) btnStatsBack.addEventListener('click', closeStats);
+  const statsPeriod = el('stats-period');
+  if (statsPeriod) {
+    statsPeriod.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-period]');
+      if (btn) onStatsPeriod(btn.dataset.period);
+    });
+  }
+  const btnStatsApply = el('btn-stats-apply');
+  if (btnStatsApply) btnStatsApply.addEventListener('click', () => loadStats());
+
+  const btnReminderReview = el('btn-reminder-review');
+  if (btnReminderReview) btnReminderReview.addEventListener('click', () => {
+    dismissReminder();
+    openHistory();
+  });
+  const btnReminderDismiss = el('btn-reminder-dismiss');
+  if (btnReminderDismiss) btnReminderDismiss.addEventListener('click', dismissReminder);
 
   document.querySelectorAll('.admin-nav__item, .admin-tab').forEach(tab => {
     tab.addEventListener('click', () => showAdminTab(tab.dataset.tab));
@@ -1288,6 +1387,10 @@ function goToScreen(screen) {
       hide(id);
     }
   }
+  // The statistics screen is a sibling overlay of the calc steps; any
+  // calc navigation closes it so it never lingers behind a step.
+  const stats = el('seccion-estadisticas');
+  if (stats) stats.classList.add('hidden');
   // Reset scroll when switching screens.
   const scroller = document.querySelector('.app-body') || window;
   if (scroller && typeof scroller.scrollTo === 'function') {
@@ -1810,6 +1913,10 @@ function backToEdit() {
 }
 
 function renderResult(r) {
+  // Refresh the client card: prefill from a reopened saved quote, clear
+  // inline errors, and show the validity-date hint (date + validity_days).
+  syncClientCard(r);
+
   const c = el('resultado-content');
   const isBundle = r.pricing_mode === 'bundle';
   const quantity = r.total_quantity;
@@ -3125,6 +3232,16 @@ async function refreshHistory() {
     el('history-foot-info').textContent = `${(r.quotes || []).length} presupuesto${(r.quotes || []).length === 1 ? '' : 's'}`;
 
     body.querySelectorAll('[data-action]').forEach(btn => {
+      if (btn.dataset.action === 'status') {
+        // Status chips carry the target status; route to the chip handler
+        // (cloud set-status + local patch + undo toast). The current chip
+        // is a no-op so a stray click doesn't re-send the same status.
+        btn.addEventListener('click', () => {
+          if (btn.classList.contains('is-active')) return;
+          changeQuoteStatus(btn.dataset.id, btn.dataset.status);
+        });
+        return;
+      }
       btn.addEventListener('click', () => onHistoryAction(btn.dataset.action, btn.dataset.id));
     });
   } catch (err) {
@@ -3133,6 +3250,10 @@ async function refreshHistory() {
 }
 
 async function onHistoryAction(action, id) {
+  if (action === 'status') {
+    // Handled by the dedicated chip handler (needs the target status).
+    return;
+  }
   if (action === 'delete') {
     const ok = await window.packprice.confirm({
       titulo: 'Eliminar presupuesto',
@@ -3205,6 +3326,211 @@ async function onHistoryAction(action, id) {
   }
 }
 
+// ============================================================
+// Client fields (paso 3) — obligatory, inline validation (§2.7)
+// ============================================================
+
+/** Shows the inline error under a field and marks the input invalid. */
+function showFieldError(fieldId) {
+  const errEl = el(`${fieldId}-error`);
+  const input = el(fieldId);
+  if (errEl) errEl.classList.remove('hidden');
+  if (input) input.classList.add('input--error');
+}
+
+/** Clears a field's inline error. */
+function clearFieldError(fieldId) {
+  const errEl = el(`${fieldId}-error`);
+  const input = el(fieldId);
+  if (errEl) errEl.classList.add('hidden');
+  if (input) input.classList.remove('input--error');
+}
+
+/**
+ * Reads + validates the client fields. Both are obligatory (§2.7) with
+ * inline errors (never a final alert). Returns the trimmed values, or
+ * null when invalid (and focuses the first offending field).
+ */
+function collectClientOrInvalid() {
+  const nombre = (el('cliente-nombre').value || '').trim();
+  const telefono = (el('cliente-telefono').value || '').trim();
+  clearFieldError('cliente-nombre');
+  clearFieldError('cliente-telefono');
+
+  let firstBad = null;
+  if (!nombre) { showFieldError('cliente-nombre'); firstBad = firstBad || 'cliente-nombre'; }
+  if (!telefono) { showFieldError('cliente-telefono'); firstBad = firstBad || 'cliente-telefono'; }
+  if (firstBad) {
+    const input = el(firstBad);
+    if (input) input.focus();
+    return null;
+  }
+  return { name: nombre, phone: telefono };
+}
+
+/**
+ * Validity date for a quote = its date + quote_settings.validity_days
+ * (default 15). Read from CFG (no domain number in code). Returns an ISO
+ * string, or null when the base date is unusable.
+ */
+function computeValidUntil(dateIso) {
+  const base = dateIso ? new Date(dateIso) : new Date();
+  if (Number.isNaN(base.getTime())) return null;
+  const days = (CFG && CFG.quote_settings && Number.isFinite(CFG.quote_settings.validity_days))
+    ? CFG.quote_settings.validity_days
+    : 15;
+  const out = new Date(base.getTime());
+  out.setDate(out.getDate() + days);
+  return out.toISOString();
+}
+
+/** dd/mm/aaaa for the "válido hasta" hint (local). */
+function formatValidDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+/**
+ * Builds the normalized cloud quote row from the calc result + client
+ * data (Task 5C item 2). Mirrors db/migrations/0001_init.sql columns;
+ * lib/cloud-quotes.buildQuoteRows tolerates missing optional fields. The
+ * id is a fresh client UUID so re-uploads from the outbox are idempotent.
+ *
+ * pvp_deviation_pct = (applied − recommended)/recommended, computed only
+ * for a single-unit-price pack where a recommended PVP exists; else null.
+ */
+function buildCloudQuote(result, client, ts) {
+  const tierId = tierIdFromLabel(result.tier);
+  const items = collectQuoteItems(result);
+  const addons = Object.entries(result.extras_detail || {})
+    .filter(([, qty]) => qty > 0)
+    .map(([addon_id, qty]) => ({ addon_id, qty }));
+
+  return {
+    id: crypto.randomUUID(),
+    ts,
+    user: (SETTINGS && SETTINGS.user_name) || 'Equipo',
+    client_name: client.name,
+    client_phone: client.phone,
+    valid_until: computeValidUntil(ts),
+    pack_id: result.pack_id || state.packId || null,
+    tier: tierId,
+    total_units: result.total_quantity || 0,
+    qty_3xl: result.qty_3xl || 0,
+    qty_4xl: result.qty_4xl || 0,
+    qty_5xl: result.qty_5xl || 0,
+    total_vat_inc: result.total_vat_inc ?? null,
+    sale_base: result.sale_base ?? null,
+    margin_pct: result.margin_pct ?? null,
+    target_margin: targetMarginFor(result),
+    pvp_deviation_pct: computePvpDeviation(result),
+    catalog_version: (DATA_STATE && DATA_STATE.catalogVersion) || (CFG && CFG.version) || null,
+    items,
+    addons
+  };
+}
+
+/** Per-quote target margin: the pack's own, else the global default. */
+function targetMarginFor(result) {
+  const pack = CFG && CFG.packs && CFG.packs[result.pack_id || state.packId];
+  if (pack && Number.isFinite(pack.target_margin)) return pack.target_margin;
+  const def = CFG && CFG.parameters && CFG.parameters.default_target_margin;
+  return Number.isFinite(def) ? def : null;
+}
+
+/**
+ * Line items [{product_id, sides, qty}] from the result breakdown. For a
+ * bundle pack the breakdown row carries the component composition; for a
+ * components pack each row IS a product line. `sides` reads from the row.
+ */
+function collectQuoteItems(result) {
+  const items = [];
+  const breakdown = Array.isArray(result.breakdown) ? result.breakdown : [];
+  if (result.pricing_mode === 'bundle') {
+    const top = breakdown[0];
+    const sides = top ? top.sides : 1;
+    for (const c of (top && Array.isArray(top.components) ? top.components : [])) {
+      items.push({ product_id: c.model, sides, qty: c.quantity });
+    }
+  } else {
+    for (const d of breakdown) {
+      if (!d.quantity) continue;
+      items.push({ product_id: d.model, sides: d.sides, qty: d.quantity });
+    }
+  }
+  return items;
+}
+
+/**
+ * pvp_deviation_pct: how far the applied unit PVP sits from the engine's
+ * recommended PVP. Only computable for a pack with a single top-level
+ * unit_price (bundle, or a single-component pack); multi-line packs have
+ * no single comparable price → null.
+ */
+function computePvpDeviation(result) {
+  const applied = result.unit_price;
+  if (!Number.isFinite(applied) || applied <= 0) return null;
+  // Recommended PVP is computed on the ex-VAT cost basis; the engine's
+  // applied unit_price is VAT-included for bundle/components, so compare
+  // on the same (ex-VAT) basis using the order's average unit cost.
+  const total = result.total_quantity || 0;
+  if (total <= 0 || !Number.isFinite(result.total_cost)) return null;
+  const vat = (CFG && CFG.parameters && CFG.parameters.vat) || 0;
+  const appliedExVat = applied / (1 + vat);
+  const costPerUnit = result.total_cost / total;
+  const rec = recommendedPrice(CFG, costPerUnit, targetMarginFor(result));
+  if (!rec || !Number.isFinite(rec.price) || rec.price <= 0) return null;
+  return (appliedExVat - rec.price) / rec.price;
+}
+
+/**
+ * Persists the current quote: local history is the source of truth
+ * (always), and in cloud mode the normalized row is also uploaded to D1
+ * (enqueued offline). The cloud UUID is stored on the local entry so a
+ * later status change targets the same cloud row. Returns the saved
+ * local quote, or null on failure (errors already surfaced).
+ */
+async function persistCurrentQuote(client) {
+  const ts = new Date().toISOString();
+  const cloud = isCloudMode() ? buildCloudQuote(lastResult, client, ts) : null;
+
+  const draft = buildQuoteDraft(lastResult, {
+    user: SETTINGS.user_name,
+    configVersion: CFG && CFG.version,
+    packId: state.packId,
+    customer: { name: client.name, phone: client.phone }
+  });
+  draft.valid_until = computeValidUntil(ts);
+  draft.status = 'pending';
+  if (cloud) draft.cloud_id = cloud.id;
+
+  const r = await window.packprice.saveQuote(draft);
+  if (!r || !r.ok) {
+    await window.packprice.showError({
+      titulo: 'No se pudo guardar',
+      mensaje: (r && r.error) || 'Error desconocido'
+    });
+    return null;
+  }
+
+  // Cloud upload is best-effort: it no-ops in file mode and enqueues
+  // when offline. A hard failure is surfaced as a toast (the local save
+  // already succeeded — we never lose the quote).
+  if (cloud) {
+    try {
+      const up = await window.packprice.uploadQuote({ quote: cloud });
+      if (up && up.queued) showToast('Guardado · se subirá al reconectar');
+      else if (!up || (!up.ok && !up.skipped)) showToast('Guardado local · la nube falló');
+    } catch (_) {
+      showToast('Guardado local · la nube falló');
+    }
+  }
+  return r.quote;
+}
+
 async function saveCurrentQuote() {
   if (!lastResult) {
     await window.packprice.showError({
@@ -3213,22 +3539,15 @@ async function saveCurrentQuote() {
     });
     return;
   }
-  const draft = buildQuoteDraft(lastResult, {
-    user: SETTINGS.user_name,
-    configVersion: CFG && CFG.version,
-    packId: state.packId
-  });
-  const r = await window.packprice.saveQuote(draft);
-  if (!r || !r.ok) {
-    await window.packprice.showError({
-      titulo: 'No se pudo guardar',
-      mensaje: (r && r.error) || 'Error desconocido'
-    });
-    return;
-  }
+  const client = collectClientOrInvalid();
+  if (!client) return; // inline errors already shown
+
+  const saved = await persistCurrentQuote(client);
+  if (!saved) return;
+  lastResult = saved;
   await window.packprice.showInfo({
     titulo: 'Presupuesto guardado',
-    mensaje: `Asignado el ID ${r.quote.id}.`,
+    mensaje: `Asignado el ID ${saved.id}.`,
     detalle: 'Disponible en el botón “Historial” del menú superior.'
   });
 }
@@ -3243,26 +3562,17 @@ async function exportQuotePdf() {
   }
 
   // The PDF needs a quote object with id + date. If the user hasn't
-  // saved it yet, persist it now so the PDF and the history are
-  // consistent (same id printed on the document and stored locally).
+  // saved it yet, persist it now (validating the client fields first) so
+  // the PDF and the history are consistent (same id printed + stored).
   let quote;
   if (lastResult.id && lastResult.date) {
     quote = lastResult;
   } else {
-    const draft = buildQuoteDraft(lastResult, {
-      user: SETTINGS.user_name,
-      configVersion: CFG && CFG.version,
-      packId: state.packId
-    });
-    const r = await window.packprice.saveQuote(draft);
-    if (!r || !r.ok) {
-      await window.packprice.showError({
-        titulo: 'No se pudo preparar el PDF',
-        mensaje: (r && r.error) || 'Error al guardar el presupuesto previo a exportar.'
-      });
-      return;
-    }
-    quote = r.quote;
+    const client = collectClientOrInvalid();
+    if (!client) return; // inline errors already shown
+    const saved = await persistCurrentQuote(client);
+    if (!saved) return;
+    quote = saved;
     // Replace lastResult so subsequent clicks reuse the saved id.
     lastResult = quote;
   }
@@ -3285,6 +3595,426 @@ async function exportQuotePdf() {
     titulo: 'PDF exportado',
     mensaje: `Guardado en:\n${r.ruta}`
   });
+}
+
+// ============================================================
+// History status chips (UI-UX §2.7)
+// ============================================================
+
+/**
+ * Changes a quote's status from a history chip: updates the local entry
+ * (source of truth) and, in cloud mode, mirrors it to D1 via the entry's
+ * cloud UUID (enqueued offline). Offers undo via toast. File mode skips
+ * the cloud call but still stores the status locally.
+ */
+async function changeQuoteStatus(localId, status) {
+  const r = await window.packprice.getQuote(localId);
+  const quote = r && r.ok ? r.quote : null;
+  if (!quote) return;
+  const prev = quote.status || 'pending';
+  if (prev === status) return;
+
+  await applyQuoteStatus(quote, status);
+  await refreshHistory();
+
+  // Undo: a single toast action restores the previous status (local +
+  // cloud), so a misclick at the counter is one tap to fix.
+  showStatusToast(statusToastText(status), async () => {
+    const cur = await window.packprice.getQuote(localId);
+    if (cur && cur.ok && cur.quote) {
+      await applyQuoteStatus(cur.quote, prev);
+      await refreshHistory();
+    }
+  });
+}
+
+/** Writes a status to the local entry and (cloud mode) to D1. */
+async function applyQuoteStatus(quote, status) {
+  await window.packprice.updateQuote({
+    id: quote.id,
+    patch: { status, status_ts: new Date().toISOString() }
+  });
+  // Cloud mirror: target the stored cloud UUID. In file mode the IPC
+  // no-ops ({ ok:true, skipped:true }); offline it enqueues.
+  if (isCloudMode() && quote.cloud_id) {
+    try {
+      await window.packprice.setQuoteStatus({ id: quote.cloud_id, status });
+    } catch (_) { /* surfaced via the offline queue; local already saved */ }
+  }
+}
+
+function statusToastText(status) {
+  if (status === 'accepted') return 'Marcado como aceptado';
+  if (status === 'rejected') return 'Marcado como rechazado';
+  return 'Marcado como pendiente';
+}
+
+/**
+ * Syncs the client card to the result being shown: prefills name/phone
+ * from a reopened saved quote (else leaves the user's entry), clears any
+ * inline error, and shows the "válido hasta dd/mm/aaaa" hint computed
+ * from the quote's date (or now) + quote_settings.validity_days.
+ */
+function syncClientCard(r) {
+  const nombre = el('cliente-nombre');
+  const telefono = el('cliente-telefono');
+  if (!nombre || !telefono) return;
+  clearFieldError('cliente-nombre');
+  clearFieldError('cliente-telefono');
+
+  // Prefill only when reopening a stored quote (it carries customer{}).
+  const customer = r && r.customer;
+  if (customer && (customer.name || customer.phone)) {
+    nombre.value = customer.name || '';
+    telefono.value = customer.phone || '';
+  }
+
+  const hint = el('cliente-validez');
+  if (hint) {
+    const baseDate = (r && r.date) || new Date().toISOString();
+    const validUntil = (r && r.valid_until) || computeValidUntil(baseDate);
+    const formatted = formatValidDate(validUntil);
+    hint.textContent = formatted ? `Presupuesto válido hasta ${formatted}.` : '';
+  }
+}
+
+// ============================================================
+// Startup quote reminder (UI-UX §2.7)
+// ============================================================
+
+/** localStorage key for "reminder dismissed on this date" (per day). */
+const REMINDER_DISMISS_KEY = 'pp:reminder-dismissed';
+
+/** Today's date as YYYY-MM-DD (local) — the dismiss granularity. */
+function todayKey() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Hides the banner and remembers the dismissal for the rest of the day. */
+function dismissReminder() {
+  hide('quote-reminder');
+  try { localStorage.setItem(REMINDER_DISMISS_KEY, todayKey()); } catch (_) {}
+}
+
+/**
+ * On startup, count quotes that need attention and, if any, show the
+ * discreet banner — unless already dismissed today. Never blocks: it is
+ * a reminder, not a task (§2.7). Reads the local history (the per-PC
+ * source of truth for status + validity).
+ */
+async function maybeShowReminder() {
+  try {
+    if (localStorage.getItem(REMINDER_DISMISS_KEY) === todayKey()) return;
+  } catch (_) { /* localStorage unavailable: just proceed */ }
+
+  let quotes = [];
+  try {
+    const r = await window.packprice.listQuotes();
+    quotes = (r && r.ok && Array.isArray(r.quotes)) ? r.quotes : [];
+  } catch (_) {
+    return; // a reminder must never break boot
+  }
+
+  const { pendingOld, expiringSoon } = computeReminder(quotes, new Date().toISOString());
+  if (pendingOld <= 0 && expiringSoon <= 0) return;
+
+  const parts = [];
+  if (pendingOld > 0) {
+    parts.push(`${pendingOld} presupuesto${pendingOld === 1 ? '' : 's'} esperan respuesta`);
+  }
+  if (expiringSoon > 0) {
+    parts.push(`${expiringSoon} caduca${expiringSoon === 1 ? '' : 'n'} esta semana`);
+  }
+  const textEl = el('quote-reminder-text');
+  if (textEl) textEl.textContent = parts.join(' · ');
+  show('quote-reminder');
+}
+
+// ============================================================
+// Statistics screen (UI-UX §2.7)
+// ============================================================
+
+/** Toggles the stats screen on (hiding the calc steps) or off. */
+function showStatsScreen(on) {
+  const stats = el('seccion-estadisticas');
+  const body = document.querySelector('.app-body');
+  if (!stats) return;
+  // Hide the three calc steps while stats is up; restore paso1 on close.
+  ['seccion-paso1', 'seccion-paso2', 'seccion-resultado'].forEach(id => {
+    const node = el(id);
+    if (node) node.classList.toggle('hidden', on);
+  });
+  stats.classList.toggle('hidden', !on);
+  if (body && typeof body.scrollTo === 'function') body.scrollTo({ top: 0 });
+}
+
+async function openStats() {
+  showStatsScreen(true);
+  // Default period highlights "Temporada".
+  setActivePeriodButton(statsState.period);
+  await loadStats();
+}
+
+function closeStats() {
+  showStatsScreen(false);
+  // Return to a sensible calc screen: the current pack's step, else step 1.
+  if (state.packId && CFG.packs[state.packId]) {
+    goToScreen('paso2');
+  } else {
+    goToScreen('paso1');
+  }
+}
+
+function setActivePeriodButton(period) {
+  document.querySelectorAll('#stats-period [data-period]').forEach(btn => {
+    btn.classList.toggle('is-active', btn.dataset.period === period);
+  });
+}
+
+function onStatsPeriod(period) {
+  statsState.period = period;
+  setActivePeriodButton(period);
+  // The custom range needs explicit dates: reveal the picker and wait for
+  // "Aplicar"; the other periods load immediately.
+  const rangeBox = el('stats-range');
+  if (period === 'range') {
+    if (rangeBox) rangeBox.classList.remove('hidden');
+    return;
+  }
+  if (rangeBox) rangeBox.classList.add('hidden');
+  loadStats();
+}
+
+/**
+ * Loads + renders the statistics for the active period. File mode shows
+ * the cloud-required note; offline shows the standard offline note; an
+ * empty period shows the explanatory empty state (never zero charts).
+ */
+async function loadStats() {
+  const body = el('stats-body');
+  if (!body) return;
+
+  if (!isCloudMode()) {
+    body.innerHTML = statsCloudRequiredNote();
+    return;
+  }
+
+  // Resolve the ISO range from the active period (+ the date inputs for
+  // a custom range).
+  const custom = { from: el('stats-from') && el('stats-from').value, to: el('stats-to') && el('stats-to').value };
+  const range = rangeForPeriod(statsState.period, new Date(), custom);
+  statsState.range = range;
+
+  body.innerHTML = statsSkeleton();
+
+  let r;
+  try {
+    r = await window.packprice.getStats({ from: range.from, to: range.to });
+  } catch (_) {
+    r = { ok: false, offline: true };
+  }
+
+  if (!r || !r.ok) {
+    if (r && r.code === 'NOT_CLOUD') { body.innerHTML = statsCloudRequiredNote(); return; }
+    body.innerHTML = statsOfflineNote();
+    return;
+  }
+
+  const stats = r.stats || {};
+  if (isEmptyStats(stats)) {
+    body.innerHTML = statsEmptyNote();
+    return;
+  }
+  renderStats(stats);
+}
+
+function statsCloudRequiredNote() {
+  return `
+    <div class="stats-note">
+      <span class="stats-note__icon"><svg class="icon icon--lg"><use href="#i-layers"/></svg></span>
+      <h3>Las estadísticas requieren modo nube</h3>
+      <p class="text-secondary">
+        En modo local cada equipo guarda su propio historial. Las estadísticas
+        combinan los presupuestos de todos los equipos, que solo viven en la
+        nube. Cambia a modo nube desde el primer arranque para verlas.
+      </p>
+    </div>
+  `;
+}
+
+function statsOfflineNote() {
+  return `
+    <div class="stats-note">
+      <span class="stats-note__icon"><svg class="icon icon--lg"><use href="#i-warn"/></svg></span>
+      <h3>Sin conexión</h3>
+      <p class="text-secondary">
+        Las estadísticas se calculan en la nube y necesitan conexión.
+        Comprueba tu red y vuelve a intentarlo.
+      </p>
+      <button class="btn btn-secondary" type="button" onclick="document.getElementById('btn-stats-apply')?.click()">
+        <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
+      </button>
+    </div>
+  `;
+}
+
+function statsEmptyNote() {
+  const label = STATS_PERIOD_LABELS[statsState.period] || 'el periodo elegido';
+  return `
+    <div class="stats-note">
+      <span class="stats-note__icon"><svg class="icon icon--lg"><use href="#i-clipboard"/></svg></span>
+      <h3>Sin presupuestos en ${escapeHTML(label)}</h3>
+      <p class="text-secondary">
+        No hay presupuestos guardados en este periodo, así que no hay nada que
+        representar todavía. Prueba con un periodo más amplio.
+      </p>
+    </div>
+  `;
+}
+
+function statsSkeleton() {
+  const card = '<div class="stats-card stats-card--skeleton"><div class="skeleton-block"></div></div>';
+  return `
+    <div class="stats-kpis">
+      ${Array.from({ length: 6 }).map(() => '<div class="kpi-tile kpi-tile--skeleton"></div>').join('')}
+    </div>
+    <div class="stats-grid">${card.repeat(8)}</div>
+  `;
+}
+
+/** Reads the chart palette from the CSS pack-color tokens on :root. */
+function chartColors() {
+  const root = getComputedStyle(document.documentElement);
+  const tokens = ['--pack-color-1', '--pack-color-2', '--pack-color-3',
+                  '--pack-color-4', '--pack-color-5', '--pack-color-6'];
+  const colors = tokens
+    .map(t => root.getPropertyValue(t).trim())
+    .filter(Boolean);
+  // Fall back to the charts.js palette if tokens are unavailable.
+  return colors.length ? colors : undefined;
+}
+
+/**
+ * Renders the KPI tiles + the 8 charts (UI-UX §2.7). Each chart is a
+ * card with a title and a «Ver como tabla» toggle (accessible table
+ * alternative). Charts come from charts.js as SVG strings injected via
+ * innerHTML (no scripts — CSP intact).
+ */
+function renderStats(stats) {
+  const body = el('stats-body');
+  const colors = chartColors();
+  const W = 420, H = 240;
+
+  const tiles = kpiTiles(stats).map(t => `
+    <div class="kpi-tile ${t.good === true ? 'kpi-tile--good' : (t.good === false ? 'kpi-tile--warn' : '')}">
+      <span class="kpi-tile__label">${escapeHTML(t.label)}</span>
+      <strong class="kpi-tile__value text-mono">${escapeHTML(t.value)}</strong>
+      ${t.sub ? `<span class="kpi-tile__sub">${escapeHTML(t.sub)}</span>` : ''}
+    </div>
+  `).join('');
+
+  // Each chart card: { title, svg, table } — the table is the accessible
+  // alternative, hidden until «Ver como tabla».
+  const cards = [
+    statChartCard('Presupuestos por pack',
+      barChartH(packUsageBars(stats), { width: W, height: H, colors, desc: 'Total presupuestado por pack' }),
+      barTable(packUsageBars(stats), 'Pack', 'Total')),
+    statChartCard('Conversión por pack',
+      groupedBars(conversionGroups(stats), { width: W, height: H, colors, desc: 'Conversión por pack' }),
+      groupTable(conversionGroups(stats), 'Pack')),
+    statChartCard('Evolución semanal',
+      lineChart(weeklySeries(stats), { width: W, height: H, colors, desc: 'Presupuestado vs aceptado por semana' }),
+      seriesTable(weeklySeries(stats), stats.weekly, 'Semana')),
+    statChartCard('Distribución por tramo',
+      barChartV(tierBars(stats), { width: W, height: H, colors, desc: 'Presupuestos por tramo' }),
+      barTable(tierBars(stats), 'Tramo', 'Presupuestos')),
+    statChartCard('Margen real vs objetivo',
+      groupedBars(marginGroups(stats), { width: W, height: H, colors, desc: 'Margen real vs objetivo por pack' }),
+      groupTable(marginGroups(stats), 'Pack')),
+    statChartCard('Desviación sobre PVP recomendado',
+      histogram(deviationBuckets(stats), { width: W, height: H, desc: 'Desviación sobre el PVP recomendado' }),
+      bucketTable(deviationBuckets(stats))),
+    statChartCard('Top productos',
+      barChartH(topProductBars(stats), { width: W, height: H, colors, desc: 'Productos más pedidos' }),
+      barTable(topProductBars(stats), 'Producto', 'Unidades')),
+    statChartCard('Top complementos',
+      barChartH(topAddonBars(stats), { width: W, height: H, colors, desc: 'Complementos más pedidos' }),
+      barTable(topAddonBars(stats), 'Complemento', 'Unidades')),
+    statChartCard('Tallas especiales',
+      barChartV(specialSizeBars(stats), { width: W, height: H, colors, desc: 'Tallas especiales por pack' }),
+      barTable(specialSizeBars(stats), 'Talla', 'Unidades'))
+  ].join('');
+
+  body.innerHTML = `
+    <div class="stats-kpis">${tiles}</div>
+    <div class="stats-grid">${cards}</div>
+  `;
+
+  // Wire each «Ver como tabla» toggle (event delegation).
+  body.querySelectorAll('[data-action="toggle-table"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.stats-card');
+      if (!card) return;
+      const table = card.querySelector('.stats-card__table');
+      const chart = card.querySelector('.stats-card__chart');
+      const showing = table.classList.toggle('hidden');
+      chart.classList.toggle('hidden', !showing);
+      btn.textContent = showing ? 'Ver como tabla' : 'Ver como gráfico';
+    });
+  });
+}
+
+/** One chart card: title, the SVG, a hidden accessible table + toggle. */
+function statChartCard(title, svg, tableHtml) {
+  return `
+    <div class="stats-card">
+      <div class="stats-card__head">
+        <h3 class="h-card">${escapeHTML(title)}</h3>
+        <button type="button" class="btn btn-ghost btn-sm" data-action="toggle-table">Ver como tabla</button>
+      </div>
+      <div class="stats-card__chart">${svg}</div>
+      <div class="stats-card__table hidden">${tableHtml}</div>
+    </div>
+  `;
+}
+
+// --- accessible table builders (mirror the chart inputs) ---
+
+function barTable(items, labelCol, valueCol) {
+  if (!items || items.length === 0) return '<p class="hint">Sin datos.</p>';
+  const rows = items.map(it => `
+    <tr><td>${escapeHTML(it.label)}</td><td class="num text-mono">${escapeHTML(it.value)}</td></tr>
+  `).join('');
+  return `<table class="stats-table"><thead><tr><th>${escapeHTML(labelCol)}</th><th class="num">${escapeHTML(valueCol)}</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function groupTable(groups, labelCol) {
+  if (!groups || groups.length === 0) return '<p class="hint">Sin datos.</p>';
+  const names = (groups[0] && groups[0].bars ? groups[0].bars : []).map(b => b.name);
+  const head = `<th>${escapeHTML(labelCol)}</th>` + names.map(n => `<th class="num">${escapeHTML(n)}</th>`).join('');
+  const rows = groups.map(g => {
+    const cells = (g.bars || []).map(b => `<td class="num text-mono">${escapeHTML(b.value)}</td>`).join('');
+    return `<tr><td>${escapeHTML(g.label)}</td>${cells}</tr>`;
+  }).join('');
+  return `<table class="stats-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function seriesTable(series, weekly, labelCol) {
+  const rows = (weekly || []).map(w => `
+    <tr><td>${escapeHTML(w.weekIso)}</td><td class="num text-mono">${escapeHTML(w.quoted)}</td><td class="num text-mono">${escapeHTML(w.accepted)}</td></tr>
+  `).join('');
+  if (!rows) return '<p class="hint">Sin datos.</p>';
+  return `<table class="stats-table"><thead><tr><th>${escapeHTML(labelCol)}</th><th class="num">Presupuestado</th><th class="num">Aceptado</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function bucketTable(buckets) {
+  if (!buckets || buckets.length === 0) return '<p class="hint">Sin datos.</p>';
+  const rows = buckets.map(b => `
+    <tr><td>${escapeHTML(b.label)}</td><td class="num text-mono">${escapeHTML(b.count)}</td></tr>
+  `).join('');
+  return `<table class="stats-table"><thead><tr><th>Desviación</th><th class="num">Presupuestos</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // ============================================================

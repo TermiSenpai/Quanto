@@ -459,6 +459,11 @@
         <button id="btn-historial" class="btn btn-ghost" title="Ver presupuestos guardados">
           <svg class="icon"><use href="#i-clipboard"/></svg> Historial
         </button>
+        <!-- v5: estadísticas (UI-UX §2.7). Visible siempre; en modo archivo
+             la pantalla informa de que requiere modo nube. -->
+        <button id="btn-estadisticas" class="btn btn-ghost" title="Ver estadísticas del taller">
+          <svg class="icon"><use href="#i-trend"/></svg> Estadísticas
+        </button>
         <!-- v5: cloud refresh (UI-UX §2.1). Hidden in file mode; the
              legacy "Recargar" button below remains the file-mode reload. -->
         <button id="refresh-catalog" class="btn btn-ghost hidden" title="Comprobar si hay datos nuevos en la nube">
@@ -488,6 +493,18 @@
       </span>
       <button id="btn-offline-retry" class="btn btn-secondary btn-sm" type="button">
         <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
+      </button>
+    </div>
+
+    <!-- v5: recordatorio de presupuestos al arrancar (UI-UX §2.7). No
+         bloquea: es un aviso discreto que lleva al historial y se
+         descarta por el día. Texto rellenado por app.js. -->
+    <div id="quote-reminder" class="reminder-banner hidden" role="status">
+      <svg class="icon"><use href="#i-clock"/></svg>
+      <span class="reminder-banner__text" id="quote-reminder-text">—</span>
+      <button id="btn-reminder-review" class="btn btn-secondary btn-sm" type="button">Revisar</button>
+      <button id="btn-reminder-dismiss" class="reminder-banner__close" type="button" aria-label="Descartar">
+        <svg class="icon"><use href="#i-x"/></svg>
       </button>
     </div>
 
@@ -638,7 +655,76 @@
           </div>
         </div>
 
+        <!-- Datos del cliente (obligatorios, validación en línea · UI-UX §2.7).
+             Viajan al historial, a D1 y al PDF junto con la validez de 15 días. -->
+        <article class="section-card" id="cliente-card" style="margin-top: 16px;">
+          <div class="section-card__head">
+            <div>
+              <h2 class="h-card">Datos del cliente</h2>
+              <p class="text-secondary" style="margin-top: 4px; font-size: 13px;">
+                Obligatorios para guardar o exportar el presupuesto. <span id="cliente-validez" class="text-muted"></span>
+              </p>
+            </div>
+            <span class="badge badge--neutral"><svg class="icon"><use href="#i-user"/></svg> Cliente</span>
+          </div>
+          <div class="form-grid-2">
+            <div class="field">
+              <label class="field__label" for="cliente-nombre">Nombre del cliente</label>
+              <input type="text" id="cliente-nombre" class="input" placeholder="Ej: Peña El Barril" autocomplete="off"
+                     aria-describedby="cliente-nombre-error">
+              <span id="cliente-nombre-error" class="field__error hidden" role="alert">Indica el nombre del cliente.</span>
+            </div>
+            <div class="field">
+              <label class="field__label" for="cliente-telefono">Teléfono del cliente</label>
+              <input type="tel" id="cliente-telefono" class="input" placeholder="Ej: 600 123 456" autocomplete="off"
+                     aria-describedby="cliente-telefono-error">
+              <span id="cliente-telefono-error" class="field__error hidden" role="alert">Indica el teléfono del cliente.</span>
+            </div>
+          </div>
+        </article>
+
         <div id="resultado-content" style="margin-top: 16px;"></div>
+      </section>
+
+      <!-- Paso (pantalla): Estadísticas (UI-UX §2.7). Solo modo nube; en
+           modo archivo muestra el aviso de que requiere la nube. -->
+      <section id="seccion-estadisticas" class="hidden">
+        <div class="back-row">
+          <button id="btn-stats-volver" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#i-chevron-left"/></svg> Volver a la calculadora
+          </button>
+          <span class="label-eyebrow">ESTADÍSTICAS</span>
+        </div>
+
+        <div class="stats-head" style="margin-top: 16px;">
+          <div>
+            <h1>Estadísticas del taller</h1>
+            <p class="text-secondary">Datos de todos los equipos. ¿Qué se usa y qué se vende?</p>
+          </div>
+          <div class="stats-period" id="stats-period" role="group" aria-label="Periodo">
+            <button class="stats-period__btn is-active" type="button" data-period="season">Temporada</button>
+            <button class="stats-period__btn" type="button" data-period="30d">30 días</button>
+            <button class="stats-period__btn" type="button" data-period="year">Año</button>
+            <button class="stats-period__btn" type="button" data-period="range">Rango…</button>
+          </div>
+        </div>
+
+        <!-- Selector de rango (visible solo con "Rango…") -->
+        <div id="stats-range" class="stats-range hidden">
+          <div class="field">
+            <label class="field__label" for="stats-from">Desde</label>
+            <input type="date" id="stats-from" class="input">
+          </div>
+          <div class="field">
+            <label class="field__label" for="stats-to">Hasta</label>
+            <input type="date" id="stats-to" class="input">
+          </div>
+          <button id="btn-stats-apply" class="btn btn-primary" type="button">
+            <svg class="icon"><use href="#i-trend"/></svg> Aplicar
+          </button>
+        </div>
+
+        <div id="stats-body" style="margin-top: 16px;"></div>
       </section>
 
     </main>
