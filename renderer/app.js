@@ -2671,6 +2671,11 @@ async function resolveCloudConflicts(result) {
  */
 async function overwriteEntity(conflict) {
   const baseline = buildOverwriteVersions(conflict);
+  // Safety invariant: once an entity is written it equals CFG, so it no
+  // longer re-diffs as changed and is skipped on the next saveCatalog —
+  // which is why re-sending the ORIGINAL expectedVersions for the
+  // non-conflicted entities here is safe (only the conflicted entity is
+  // re-attempted, with its version advanced by buildOverwriteVersions).
   const r = await window.packprice.saveCatalog({
     newCfg: CFG,
     expectedVersions: baseline
