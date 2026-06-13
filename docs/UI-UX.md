@@ -206,8 +206,9 @@ El modal de ajustes locales gana cuatro secciones:
 ### 2.7 Pantalla «Estadísticas»
 
 Pantalla nueva, accesible desde la topbar, que responde a «¿qué se usa y qué
-se vende?» con datos de **todos** los PCs (fase 7 del plan v5). Los agregados
-los calcula el Worker (`GET /stats`); la app solo pinta.
+se vende?» con datos de **todos** los PCs. El main process trae las filas de
+presupuestos de D1 (sin servidor: REST directo) y un agregador puro
+(`lib/stats.js`) calcula los indicadores; la app solo pinta.
 
 **Layout:** selector de periodo arriba (Temporada · 30 días · Año · Rango) →
 fila de tarjetas KPI → rejilla de gráficos 2×N.
@@ -235,7 +236,7 @@ líneas, histograma; ejes, tooltips nativos via `<title>`). **Sin librerías**
 dependencia. Colores y tipografía desde los tokens (`--font-data` para cifras).
 
 **Estados:** cargando (skeleton en cards); sin conexión → la pantalla muestra
-el aviso estándar offline (los agregados requieren el Worker); periodo sin
+el aviso estándar offline (los agregados requieren conexión a D1); periodo sin
 datos → mensaje vacío con explicación, nunca gráficos a cero engañosos.
 
 **Historial (cambio asociado):** cada presupuesto gana chips de estado
