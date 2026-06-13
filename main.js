@@ -90,6 +90,9 @@ const cloudBootstrap = createCloudBootstrap({
   loadMigrations: () => loadMigrations(MIGRATIONS_DIR),
   cachePath: CATALOG_CACHE_PATH,
   backupDir: CLOUD_BACKUP_DIR,
+  // The offline quote outbox lives under <userData>/cache/ (next to the
+  // catalog cache); the bootstrap drains it on every successful sync.
+  userDataDir: SETTINGS_DIR,
   buildDefaultConfig,
   appVersion: app.getVersion(),
   // Dropped cloud errors (cache fallback, lock-release throws) are
@@ -728,6 +731,64 @@ ipcMain.handle('snapshots:restore', async (event, payload) => {
     return result;
   } catch (err) {
     logger.error('snapshots:restore failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+// --- Cloud quotes + statistics (v5) ---
+//
+// Thin wiring. The local history (quotes:save) stays the per-PC source of
+// truth; these mirror quotes to the shared D1 (idempotently) and compute
+// statistics over all PCs' data. File mode: upload/status are no-ops
+// ({ ok:true, skipped:true } — the chip state is still stored locally by
+// the renderer) and stats answers { ok:false, code:'NOT_CLOUD' } so the
+// screen shows the local-only note (UI-UX §2.7). The token never leaves
+// main; the orchestration (upload, offline enqueue, aggregation) lives in
+// lib/cloud-bootstrap.js.
+ipcMain.handle('quotes:upload', async (event, payload) => {
+  const settings = readSettings();
+  if (!settings || settings.data_source !== 'cloud') {
+    return { ok: true, skipped: true };
+  }
+  try {
+    const { quote } = payload || {};
+    const result = await cloudBootstrap.saveQuote(settings, { quote });
+    if (result.queued) logger.info('quotes:upload queued (offline)', { id: result.id });
+    else if (!result.ok) logger.warn('quotes:upload failed', { error: result.error });
+    return result;
+  } catch (err) {
+    logger.error('quotes:upload error', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('quotes:set-status', async (event, payload) => {
+  const settings = readSettings();
+  if (!settings || settings.data_source !== 'cloud') {
+    return { ok: true, skipped: true };
+  }
+  try {
+    const { id, status } = payload || {};
+    const result = await cloudBootstrap.setQuoteStatus(settings, { id, status });
+    if (result.queued) logger.info('quotes:set-status queued (offline)', { id, status });
+    else if (!result.ok) logger.warn('quotes:set-status failed', { error: result.error });
+    return result;
+  } catch (err) {
+    logger.error('quotes:set-status error', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('stats:get', async (event, payload) => {
+  const settings = readSettings();
+  if (!settings || settings.data_source !== 'cloud') {
+    return { ok: false, code: 'NOT_CLOUD' };
+  }
+  try {
+    const { from, to } = payload || {};
+    return await cloudBootstrap.getStats(settings, { from, to });
+  } catch (err) {
+    logger.error('stats:get error', { error: err.message });
     return { ok: false, error: err.message };
   }
 });

@@ -72,6 +72,18 @@ contextBridge.exposeInMainWorld('packprice', {
   getQuote:           (id)    => ipcRenderer.invoke('quotes:get', id),
   deleteQuote:        (id)    => ipcRenderer.invoke('quotes:delete', id),
 
+  // --- Cloud quotes + statistics (v5) ---
+  // Cloud-only. `uploadQuote({ quote })` mirrors a quote to D1
+  // idempotently (enqueues offline); `setQuoteStatus({ id, status })`
+  // marks it accepted/rejected/pending (enqueues offline); `getStats(
+  // { from, to })` returns the COMPUTED stats object (main aggregates —
+  // the renderer only paints). File mode: upload/status no-op
+  // { ok:true, skipped:true }; stats { ok:false, code:'NOT_CLOUD' }. The
+  // API token is added in main and never crosses the bridge.
+  uploadQuote:        (data) => ipcRenderer.invoke('quotes:upload', data),
+  setQuoteStatus:     (data) => ipcRenderer.invoke('quotes:set-status', data),
+  getStats:           (data) => ipcRenderer.invoke('stats:get', data),
+
   // --- PDF export ---
   exportPdf:          (payload) => ipcRenderer.invoke('pdf:export', payload),
 

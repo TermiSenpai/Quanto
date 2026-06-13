@@ -72,6 +72,7 @@ function makeBootstrap(client, overrides = {}) {
     loadMigrations: () => MIGRATIONS,
     cachePath,
     backupDir,
+    userDataDir: tmpDir,
     buildDefaultConfig,
     appVersion: '5.0.0-test',
     now: NOW,
@@ -852,5 +853,199 @@ describe('restore', () => {
     };
     const { bootstrap } = makeBootstrap(client);
     await expect(bootstrap.restore(SETTINGS, { version: 999 })).rejects.toThrow(/versión/i);
+  });
+});
+
+// ------------------------------------------------------------
+// saveQuote / setQuoteStatus — upload with offline enqueue
+// ------------------------------------------------------------
+import { readOutbox } from '../lib/quote-outbox.js';
+
+const SAMPLE_QUOTE = {
+  id: 'uuid-1', ts: NOW(), user: 'Alberto',
+  customer: { name: 'Peña', phone: '600' }, valid_until: 'v',
+  pack_id: 'crew_full', tier: 'T1', total_units: 24,
+  total_vat_inc: 600, sale_base: 500, margin_pct: 0.4, target_margin: 0.35,
+  catalog_version: 7,
+  items: [{ product_id: 'BEAGLE', sides: 'two_sides', qty: 24 }],
+  addons: [{ addon_id: 'name', qty: 24 }]
+};
+
+describe('saveQuote', () => {
+  test('uploads the quote (idempotent INSERT OR IGNORE) and never queues on success', async () => {
+    const calls = [];
+    const client = { async query(sql, params) { calls.push({ sql, params }); return { results: [], meta: { changes: 1 } }; } };
+    const { bootstrap, created } = makeBootstrap(client);
+    const res = await bootstrap.saveQuote(SETTINGS, { quote: SAMPLE_QUOTE });
+
+    expect(res).toEqual({ ok: true, id: 'uuid-1' });
+    expect(created).toEqual([{ token: 'tok-secret', accountId: 'acc-1', databaseId: 'db-1' }]);
+    expect(calls.some((c) => /INSERT OR IGNORE INTO quotes/.test(c.sql))).toBe(true);
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+  });
+
+  test('on a network failure the quote is enqueued and { ok:true, queued:true } returned', async () => {
+    const client = { async query() { throw new Error('No se pudo conectar con Cloudflare'); } };
+    const log = vi.fn();
+    const { bootstrap } = makeBootstrap(client, { log });
+    const res = await bootstrap.saveQuote(SETTINGS, { quote: SAMPLE_QUOTE });
+
+    expect(res).toEqual({ ok: true, queued: true, id: 'uuid-1' });
+    expect(readOutbox(tmpDir).quotes.map((q) => q.id)).toEqual(['uuid-1']);
+    expect(log).toHaveBeenCalled();
+  });
+
+  test('never leaks the token in the returned shape', async () => {
+    const client = { async query() { throw new Error('No se pudo conectar'); } };
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.saveQuote(SETTINGS, { quote: SAMPLE_QUOTE });
+    expect(JSON.stringify(res)).not.toContain('tok-secret');
+  });
+});
+
+describe('setQuoteStatus', () => {
+  test('uploads the status (UPDATE) on success', async () => {
+    const calls = [];
+    const client = { async query(sql, params) { calls.push({ sql, params }); return { results: [], meta: { changes: 1 } }; } };
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.setQuoteStatus(SETTINGS, { id: 'uuid-1', status: 'accepted' });
+
+    expect(res).toEqual({ ok: true, id: 'uuid-1', status: 'accepted' });
+    const upd = calls.find((c) => /UPDATE quotes SET status/.test(c.sql));
+    expect(upd).toBeTruthy();
+    expect(upd.params).toEqual(['accepted', NOW(), 'uuid-1']);
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+  });
+
+  test('rejects an invalid status without touching the network (Spanish error)', async () => {
+    const client = { async query() { throw new Error('should not be called'); } };
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.setQuoteStatus(SETTINGS, { id: 'uuid-1', status: 'maybe' });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/estado/i);
+    // An invalid status is a client bug, not an outage → not queued.
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+  });
+
+  test('on a network failure the status is enqueued and { ok:true, queued:true } returned', async () => {
+    const client = { async query() { throw new Error('No se pudo conectar con Cloudflare'); } };
+    const { bootstrap } = makeBootstrap(client, { log: vi.fn() });
+    const res = await bootstrap.setQuoteStatus(SETTINGS, { id: 'uuid-1', status: 'rejected' });
+
+    expect(res).toEqual({ ok: true, queued: true, id: 'uuid-1', status: 'rejected' });
+    expect(readOutbox(tmpDir).statuses).toEqual([{ id: 'uuid-1', status: 'rejected', ts: NOW() }]);
+  });
+});
+
+// ------------------------------------------------------------
+// getStats — fetch raw rows then compute (main returns COMPUTED stats)
+// ------------------------------------------------------------
+describe('getStats', () => {
+  const entities = disassemble(buildDefaultConfig());
+
+  function statsClient() {
+    return {
+      async query(sql) {
+        if (/FROM quotes/.test(sql)) {
+          return { results: [{
+            id: 'q1', ts: '2026-06-08T10:00:00.000Z', pack_id: 'crew_full', tier: 'T1',
+            total_units: 24, qty_3xl: 0, qty_4xl: 0, qty_5xl: 0,
+            total_vat_inc: 600, sale_base: 500, margin_pct: 0.4, target_margin: 0.35,
+            pvp_deviation_pct: null, status: 'accepted'
+          }], meta: {} };
+        }
+        if (/FROM quote_items/.test(sql)) return { results: [{ quote_id: 'q1', product_id: 'BEAGLE', sides: 'two_sides', qty: 24 }], meta: {} };
+        if (/FROM quote_addons/.test(sql)) return { results: [], meta: {} };
+        // loadEntities for the cfg used to resolve names
+        const table = (sql.match(/FROM (\w+)/) || [])[1];
+        if (table === 'catalog_meta') return { results: [META_ROW], meta: {} };
+        return { results: entities[table] || [], meta: {} };
+      }
+    };
+  }
+
+  test('returns a COMPUTED stats object (not raw rows), names resolved from the loaded cfg', async () => {
+    const { bootstrap, created } = makeBootstrap(statsClient());
+    const res = await bootstrap.getStats(SETTINGS, { from: '2026-06-01', to: '2026-06-30' });
+
+    expect(res.ok).toBe(true);
+    expect(res.stats.totalQuoted).toBe(600);
+    expect(res.stats.totalAccepted).toBe(600);
+    expect(res.stats.conversionPct).toBe(1);
+    // Name resolved from the loaded catalog, not the id.
+    expect(res.stats.byPack[0].name).toBe(buildDefaultConfig().packs.crew_full.name);
+    expect(res.stats.topProducts[0].name).toBe(buildDefaultConfig().products.BEAGLE.name);
+    expect(created).toEqual([{ token: 'tok-secret', accountId: 'acc-1', databaseId: 'db-1' }]);
+  });
+
+  test('offline: { ok:false, offline:true } with the cause', async () => {
+    const client = { async query() { throw new Error('No se pudo conectar con Cloudflare'); } };
+    const { bootstrap } = makeBootstrap(client, { log: vi.fn() });
+    const res = await bootstrap.getStats(SETTINGS, { from: 'a', to: 'b' });
+    expect(res.ok).toBe(false);
+    expect(res.offline).toBe(true);
+    expect(res.error).toMatch(/No se pudo conectar/);
+  });
+
+  test('never leaks the token', async () => {
+    const { bootstrap } = makeBootstrap(statsClient());
+    const res = await bootstrap.getStats(SETTINGS, { from: '2026-06-01', to: '2026-06-30' });
+    expect(JSON.stringify(res)).not.toContain('tok-secret');
+  });
+});
+
+// ------------------------------------------------------------
+// loadCatalog / refreshCatalog flush the outbox (best-effort)
+// ------------------------------------------------------------
+describe('outbox flush on sync', () => {
+  const entities = disassemble(buildDefaultConfig());
+
+  test('loadCatalog drains a queued quote on a successful cloud load', async () => {
+    // Queue a quote while "offline".
+    fs.mkdirSync(path.join(tmpDir, 'cache'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, 'cache', 'outbox.json'),
+      JSON.stringify({ quotes: [SAMPLE_QUOTE], statuses: [] }), 'utf-8'
+    );
+    const uploads = [];
+    const client = {
+      async query(sql, params) {
+        if (/INSERT OR IGNORE INTO quotes/.test(sql)) uploads.push(params);
+        const table = (sql.match(/FROM (\w+)/) || [])[1];
+        if (table === 'catalog_meta') return { results: [META_ROW], meta: {} };
+        if (table) return { results: entities[table] || [], meta: {} };
+        return { results: [], meta: { changes: 1 } };
+      }
+    };
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.loadCatalog(SETTINGS);
+    expect(res.ok).toBe(true);
+    expect(res.source).toBe('cloud');
+    // The queued quote was uploaded and the outbox drained.
+    expect(uploads.length).toBe(1);
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+  });
+
+  test('a flush failure never breaks the catalog load (best-effort, logged)', async () => {
+    fs.mkdirSync(path.join(tmpDir, 'cache'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, 'cache', 'outbox.json'),
+      JSON.stringify({ quotes: [SAMPLE_QUOTE], statuses: [] }), 'utf-8'
+    );
+    // Cloud load succeeds, but the quote INSERT throws → flush keeps it.
+    const client = {
+      async query(sql) {
+        if (/INSERT OR IGNORE INTO quotes/.test(sql)) throw new Error('insert blew up');
+        const table = (sql.match(/FROM (\w+)/) || [])[1];
+        if (table === 'catalog_meta') return { results: [META_ROW], meta: {} };
+        if (table) return { results: entities[table] || [], meta: {} };
+        return { results: [], meta: { changes: 1 } };
+      }
+    };
+    const { bootstrap } = makeBootstrap(client, { log: vi.fn() });
+    const res = await bootstrap.loadCatalog(SETTINGS);
+    expect(res.ok).toBe(true); // load still succeeds
+    // The failed quote stays queued for the next flush.
+    expect(readOutbox(tmpDir).quotes.map((q) => q.id)).toEqual(['uuid-1']);
   });
 });
