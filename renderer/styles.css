@@ -1872,6 +1872,54 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 .btn .spinner { width: 14px; height: 14px; }
 @keyframes pp-spin { to { transform: rotate(360deg); } }
 
+/* --- Data-status indicator dot tones (§2.1, §2.8) --- */
+/* The .badge--dot::before dot inherits currentColor; these classes set
+   the text colour so the dot + label read the right tone. Distinguished
+   by icon + text too, never colour alone. */
+.data-status--connected { background: var(--success-soft); color: var(--success); }
+.data-status--offline    { background: var(--warning-soft); color: var(--warning); }
+.data-status--local      { background: var(--surface-tertiary); color: var(--fg-secondary); border: 1px solid var(--border-subtle); }
+#refresh-catalog .spinner { margin-right: 2px; }
+
+/* --- Read-only offline banner (§2.2) --- */
+.offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 28px;
+  background: var(--warning-soft);
+  border-bottom: 1px solid var(--warning);
+  color: var(--warning);
+  font-size: 13px;
+}
+.offline-banner .icon { flex-shrink: 0; }
+.offline-banner__text { flex: 1; line-height: 1.4; }
+.offline-banner strong { font-weight: 700; }
+
+/* --- Discreet toast ("Ya estás al día") --- */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-inverse);
+  color: var(--fg-inverse);
+  font-size: 13px;
+  box-shadow: var(--shadow-modal);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+.toast.is-visible { opacity: 1; }
+.toast .icon { color: var(--success); }
+
 @media (max-width: 880px) {
   .wizard-cards { grid-template-columns: 1fr; }
+  .offline-banner { padding: 10px 16px; }
 }

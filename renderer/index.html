@@ -430,6 +430,13 @@
       </div>
 
       <div class="topbar__info">
+        <!-- v5: data-status indicator (UI-UX §2.1). Hidden in file
+             mode by default; app.js shows + fills it per data_source.
+             Distinguished by text + icon, not colour alone (§2.8). -->
+        <span id="data-status" class="badge badge--neutral badge--dot hidden" role="status" aria-live="polite">
+          <svg class="icon"><use href="#i-folder"/></svg>
+          <span id="data-status-label">Modo local</span>
+        </span>
         <span class="topbar__chip"><svg class="icon"><use href="#i-user"/></svg><span id="info-usuario">-</span></span>
         <span class="topbar__chip"><svg class="icon"><use href="#i-clock"/></svg>Config <span id="info-fecha-cfg">-</span></span>
         <span class="topbar__chip text-mono">v<span id="cfg-version">-</span></span>
@@ -438,6 +445,11 @@
       <div class="topbar__actions">
         <button id="btn-historial" class="btn btn-ghost" title="Ver presupuestos guardados">
           <svg class="icon"><use href="#i-clipboard"/></svg> Historial
+        </button>
+        <!-- v5: cloud refresh (UI-UX §2.1). Hidden in file mode; the
+             legacy "Recargar" button below remains the file-mode reload. -->
+        <button id="refresh-catalog" class="btn btn-ghost hidden" title="Comprobar si hay datos nuevos en la nube">
+          <svg class="icon"><use href="#i-refresh"/></svg> <span id="refresh-catalog-label">Actualizar</span>
         </button>
         <button id="btn-recargar" class="btn btn-ghost" title="Vuelve a leer config.js del NAS">
           <svg class="icon"><use href="#i-refresh"/></svg> Recargar
@@ -450,6 +462,21 @@
         </button>
       </div>
     </header>
+
+    <!-- v5: read-only offline banner (UI-UX §2.2). Persistent under the
+         topbar when the catalog came from the local cache. role="status"
+         so screen readers announce it; copy filled in by app.js. -->
+    <div id="offline-banner" class="offline-banner hidden" role="status">
+      <svg class="icon"><use href="#i-warn"/></svg>
+      <span class="offline-banner__text">
+        <strong>Sin conexión.</strong>
+        Estás viendo precios del <strong id="offline-banner-date">—</strong>.
+        Puedes presupuestar, pero no editar el catálogo.
+      </span>
+      <button id="btn-offline-retry" class="btn btn-secondary btn-sm" type="button">
+        <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
+      </button>
+    </div>
 
     <main class="app-body">
 

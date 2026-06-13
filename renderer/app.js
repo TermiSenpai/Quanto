@@ -39,6 +39,7 @@ import {
   renderHistoryList,
   buildQuoteDraft
 } from './history.js';
+import { deriveDataStatus, formatFreshness } from './data-status.js';
 
 // ============================================================
 // Module state
@@ -723,12 +724,173 @@ function initApp() {
     }
   });
 
+  // v5: topbar indicator + offline banner reflect where the data came
+  // from (file / live cloud / cache).
+  refreshDataStatusUi();
+
   renderPackList();
 
   if (!eventsBound) {
     bindEvents();
     eventsBound = true;
   }
+}
+
+// ============================================================
+// v5 cloud: data-status indicator, refresh, offline banner
+// ============================================================
+
+const DATA_STATUS_TONE_CLASS = {
+  connected: 'data-status--connected',
+  offline: 'data-status--offline',
+  local: 'data-status--local'
+};
+
+/**
+ * Paints the topbar indicator and the offline banner from DATA_STATE.
+ * Pure decision lives in data-status.js; this is the DOM glue.
+ */
+function refreshDataStatusUi() {
+  const status = deriveDataStatus(DATA_STATE);
+  const isCloud = SETTINGS && SETTINGS.data_source === 'cloud';
+
+  const badge = el('data-status');
+  const label = el('data-status-label');
+  const refreshBtn = el('refresh-catalog');
+  const legacyReload = el('btn-recargar');
+
+  if (badge && label) {
+    label.textContent = status.label;
+    // Swap the badge tone class (reset known modifiers first).
+    badge.classList.remove(...Object.values(DATA_STATUS_TONE_CLASS), 'badge--neutral');
+    badge.classList.add(DATA_STATUS_TONE_CLASS[status.kind] || 'badge--neutral');
+    // Swap the icon (text + icon, not colour alone — §2.8).
+    const use = badge.querySelector('use');
+    if (use) use.setAttribute('href', `#${status.icon}`);
+    // The indicator is meaningful in cloud mode; in file mode the
+    // legacy chips already say everything, so keep it hidden.
+    badge.classList.toggle('hidden', !isCloud);
+  }
+
+  // Cloud reload uses the dedicated "Actualizar" button; file mode
+  // keeps the legacy "Recargar". Only one is visible at a time.
+  if (refreshBtn) refreshBtn.classList.toggle('hidden', !isCloud);
+  if (legacyReload) legacyReload.classList.toggle('hidden', isCloud);
+
+  refreshOfflineBanner();
+}
+
+/** Is the app currently serving cached (offline) data? */
+function isOffline() {
+  return DATA_STATE.source === 'cache';
+}
+
+/**
+ * Shows/hides the read-only offline banner (§2.2) and disables the
+ * catalog editor (admin) while offline, with a plain-language tooltip.
+ */
+function refreshOfflineBanner() {
+  const banner = el('offline-banner');
+  const offline = isOffline();
+  if (banner) {
+    banner.classList.toggle('hidden', !offline);
+    if (offline) {
+      const dateEl = el('offline-banner-date');
+      if (dateEl) dateEl.textContent = formatFreshness(DATA_STATE.fetchedAt);
+    }
+  }
+
+  // Editing the catalog needs a live connection: disable the admin
+  // entry while offline (UI-UX §2.2) with a tooltip explaining why.
+  const adminBtn = el('btn-admin-toggle');
+  if (adminBtn) {
+    adminBtn.disabled = offline;
+    adminBtn.title = offline ? 'No disponible sin conexión' : '';
+  }
+}
+
+/**
+ * Handler for "Actualizar" / banner "Reintentar": check the remote
+ * version, and only pull when it actually changed. A discreet toast
+ * confirms "Ya estás al día"; a successful pull live-reloads cfg.
+ */
+async function refreshCatalog() {
+  const btn = el('refresh-catalog');
+  const label = el('refresh-catalog-label');
+  const original = label ? label.textContent : '';
+  setRefreshBusy(true);
+  try {
+    // Cheap probe first: GET version. If unchanged, no full download.
+    const ver = await window.packprice.checkCatalogVersion();
+    if (ver && ver.ok && ver.upToDate) {
+      showToast('Ya estás al día');
+      return;
+    }
+
+    const r = await window.packprice.refreshCatalog();
+    if (!r || !r.ok) {
+      // Refresh fails loudly (no silent cache fallback). Stay on the
+      // current (possibly cached) data and tell the user plainly.
+      await window.packprice.showError({
+        titulo: 'No se pudo actualizar',
+        mensaje: r && r.reason === 'cloud-invalid'
+          ? 'La nube respondió pero el catálogo no es válido. Se mantienen los datos actuales.'
+          : 'No hay conexión con la nube. Se mantienen los datos actuales.'
+      });
+      return;
+    }
+
+    // Live reload: swap cfg in place and re-render without losing the
+    // current screen state more than necessary.
+    CFG = r.config;
+    ensureDefaultPacks(CFG);
+    DATA_STATE = {
+      source: r.source,
+      catalogVersion: r.catalogVersion,
+      fetchedAt: r.fetchedAt,
+      offline: r.offline,
+      reason: r.reason
+    };
+    initApp();
+    if (state.packId && CFG.packs[state.packId]) {
+      // Keep the user on their pack but refresh the inputs/preview.
+      selectPack(state.packId);
+    }
+    showToast('Datos actualizados');
+  } finally {
+    setRefreshBusy(false, original);
+  }
+}
+
+function setRefreshBusy(busy, restoreLabel) {
+  const btn = el('refresh-catalog');
+  const label = el('refresh-catalog-label');
+  if (!btn) return;
+  btn.disabled = busy;
+  if (busy) {
+    if (label) label.textContent = 'Actualizando…';
+  } else if (label && restoreLabel) {
+    label.textContent = restoreLabel;
+  }
+}
+
+/** Discreet, auto-dismissing toast (UI-UX §2.1: never blocks). */
+let toastTimer = null;
+function showToast(message) {
+  let toast = el('pp-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'pp-toast';
+    toast.className = 'toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    toast.innerHTML = '<svg class="icon"><use href="#i-check"/></svg><span></span>';
+    document.body.appendChild(toast);
+  }
+  toast.querySelector('span').textContent = message;
+  toast.classList.add('is-visible');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2500);
 }
 
 function shortConfigDate(date) {
@@ -751,6 +913,12 @@ function bindEvents() {
 
   el('btn-recargar').addEventListener('click', reloadConfig);
   el('btn-ajustes').addEventListener('click', openSettings);
+
+  // v5 cloud: refresh button + offline banner retry share the same flow.
+  const btnRefresh = el('refresh-catalog');
+  if (btnRefresh) btnRefresh.addEventListener('click', refreshCatalog);
+  const btnOfflineRetry = el('btn-offline-retry');
+  if (btnOfflineRetry) btnOfflineRetry.addEventListener('click', refreshCatalog);
 
   el('btn-admin-toggle').addEventListener('click', openAdmin);
   el('btn-cerrar-admin').addEventListener('click', closeAdmin);
