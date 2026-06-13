@@ -39,7 +39,7 @@ import {
   renderHistoryList,
   buildQuoteDraft
 } from './history.js';
-import { deriveDataStatus, formatFreshness } from './data-status.js';
+import { deriveDataStatus, formatFreshness, planRefreshTrigger } from './data-status.js';
 
 // ============================================================
 // Module state
@@ -57,7 +57,14 @@ let DATA_STATE = { source: 'file' };
 // Cloud wizard scratch state (token + accounts between steps). The
 // token only lives here transiently and travels into main via
 // provisionCloud; it is never written to CFG or surfaced after.
-let wizardCloud = { token: '', accounts: [], userName: '' };
+// `lastAccountId` lets the in-place Reintentar re-run provision with
+// the same account, and `provisionInFlight` guards against re-entry.
+let wizardCloud = { token: '', accounts: [], userName: '', lastAccountId: undefined };
+let provisionInFlight = false;
+// v5 cloud: the topbar "Actualizar" and the offline banner "Reintentar"
+// share one refresh flow. This single flag guards both against
+// double-clicks and re-entry (the busy button is whichever is visible).
+let refreshInFlight = false;
 
 const state = {
   packId: null,
@@ -95,128 +102,64 @@ const ADMIN_TAB_META = {
 // ============================================================
 
 async function bootstrap() {
-  SETTINGS = await window.packprice.readSettings();
-
-  // v5: cloud mode is configured → drive the screens off the cloud
-  // read path (cloud → cache → error). The file-mode path below is
-  // unchanged.
-  if (SETTINGS && SETTINGS.data_source === 'cloud') {
-    await loadCloudAndShowApp();
-    return;
-  }
-
-  // No data source configured at all (no legacy file path AND not
-  // cloud) → first-run wizard. A pre-v5 install with a config_path +
-  // user_name still boots straight into file mode (no wizard), so
-  // upgrades are seamless.
-  const hasFileSetup = SETTINGS && SETTINGS.config_path && SETTINGS.user_name;
-  if (!hasFileSetup) {
-    showSetupWizard();
-    return;
-  }
-
-  await loadConfigAndShowApp();
-}
-
-function showWelcome() {
-  hide('pantalla-app');
-  hide('pantalla-error');
-  show('pantalla-bienvenida');
-
-  el('btn-bv-explorar').addEventListener('click', async () => {
-    const r = await window.packprice.selectConfigFile();
-    if (!r.cancelado) {
-      el('bv-ruta').value = r.ruta;
-      validateWelcomeForm();
-    }
-  });
-
-  el('bv-nombre').addEventListener('input', validateWelcomeForm);
-  el('bv-ruta').addEventListener('input', validateWelcomeForm);
-  el('btn-bv-empezar').addEventListener('click', startFirstTime);
-
-  validateWelcomeForm();
-  setTimeout(() => el('bv-nombre').focus(), 50);
-
-  window.packprice.getDefaultConfigPath()
-    .then((suggestion) => {
-      const input = el('bv-ruta');
-      if (!input.value && suggestion && suggestion.sugerida) {
-        input.value = suggestion.sugerida;
-        validateWelcomeForm();
-      }
-    })
-    .catch(() => { /* do not block the UI for a suggestion */ });
-}
-
-function validateWelcomeForm() {
-  const name = el('bv-nombre').value.trim();
-  const filePath = el('bv-ruta').value.trim();
-  el('btn-bv-empezar').disabled = !(name && filePath);
-}
-
-async function startFirstTime() {
-  const name = el('bv-nombre').value.trim();
-  const filePath = el('bv-ruta').value.trim();
-  hide('bv-error');
-
-  const btn = el('btn-bv-empezar');
-  const originalText = btn.innerHTML;
-  btn.disabled = true;
-  btn.textContent = 'Comprobando ruta…';
+  // Any boot IPC (readSettings, loadCatalog, readConfig) can reject —
+  // network blip, a corrupt settings.json, an unhandled main error. We
+  // never want a blank window (hard rule #4: show it, don't swallow):
+  // route the failure to the error screen with a Reintentar that
+  // re-runs the whole boot.
   try {
-    await startFirstTimeImpl(name, filePath);
-  } finally {
-    btn.innerHTML = originalText;
-    validateWelcomeForm();
+    SETTINGS = await window.packprice.readSettings();
+
+    // v5: cloud mode is configured → drive the screens off the cloud
+    // read path (cloud → cache → error). The file-mode path below is
+    // unchanged.
+    if (SETTINGS && SETTINGS.data_source === 'cloud') {
+      await loadCloudAndShowApp();
+      return;
+    }
+
+    // No data source configured at all (no legacy file path AND not
+    // cloud) → first-run wizard. A pre-v5 install with a config_path +
+    // user_name still boots straight into file mode (no wizard), so
+    // upgrades are seamless.
+    const hasFileSetup = SETTINGS && SETTINGS.config_path && SETTINGS.user_name;
+    if (!hasFileSetup) {
+      showSetupWizard();
+      return;
+    }
+
+    await loadConfigAndShowApp();
+  } catch (err) {
+    showBootErrorScreen(err);
   }
 }
 
-async function startFirstTimeImpl(name, filePath) {
-  const exist = await window.packprice.configExists(filePath);
-  if (!exist.existe) {
-    if (!exist.escribible) {
-      showWelcomeError(
-        'No se puede crear el archivo en esa ruta. Comprueba que el NAS está accesible y tienes permisos de escritura.'
-      );
-      return;
-    }
-    const option = await window.packprice.confirm({
-      titulo: 'Archivo no encontrado',
-      mensaje: '¿Crear config.js con los valores por defecto?',
-      detalle: `No se encontró un archivo de configuración en:\n${filePath}\n\nSe creará uno nuevo con los valores por defecto del plan.`,
-      botones: ['Crear con valores por defecto', 'Cancelar'],
-      defaultId: 0
-    });
-    if (option !== 0) return;
-
-    const created = await window.packprice.createDefaultConfig({ ruta: filePath, modificadoPor: name });
-    if (!created.ok) {
-      showWelcomeError(`No se pudo crear el archivo: ${created.error}`);
-      return;
-    }
-  } else {
-    const r = await window.packprice.readConfig(filePath);
-    if (!r.ok) {
-      showWelcomeError(`No se pudo leer el archivo: ${r.error}`);
-      return;
-    }
-  }
-
-  SETTINGS = { config_path: filePath, user_name: name };
-  const saved = await window.packprice.writeSettings(SETTINGS);
-  if (!saved.ok) {
-    showWelcomeError(`No se pudo guardar la configuración local: ${saved.error}`);
-    return;
-  }
-
+/**
+ * Last-resort boot error screen: a thrown/rejected IPC during startup
+ * (before any specific screen could render) lands here instead of a
+ * blank window. Reuses #pantalla-error with a plain Spanish message and
+ * a single Reintentar that re-runs bootstrap from scratch.
+ */
+function showBootErrorScreen(err) {
+  hide('pantalla-app');
   hide('pantalla-bienvenida');
-  await loadConfigAndShowApp();
-}
+  hide('setup-wizard');
+  show('pantalla-error');
 
-function showWelcomeError(message) {
-  el('bv-error').textContent = message;
-  show('bv-error');
+  el('error-titulo').textContent = 'No se pudo iniciar PackPrice';
+  el('error-detalle').textContent =
+    (err && (err.message || String(err))) || 'Error desconocido al arrancar.';
+  el('error-hint').textContent =
+    'Hubo un problema al arrancar. Comprueba tu conexión y la configuración, y vuelve a intentarlo.';
+  el('error-hint').classList.remove('hidden');
+
+  // Only Reintentar applies here — the file/cloud-specific actions need
+  // a known data source, which we may not have yet.
+  el('btn-error-crear-default').classList.add('hidden');
+  el('btn-error-cambiar-ruta').classList.add('hidden');
+  el('btn-error-modo-local').classList.add('hidden');
+
+  el('btn-error-reintentar').onclick = () => { bootstrap(); };
 }
 
 // ============================================================
@@ -284,6 +227,15 @@ function bindWizardEvents() {
   el('btn-cloud-step2-next').addEventListener('click', cloudStep2TestToken);
   el('btn-cloud-step3-back').addEventListener('click', () => showCloudStep(2));
   el('btn-cloud-provision').addEventListener('click', cloudProvision);
+  // In-place recovery after a provision failure (single OR multi
+  // account): Reintentar re-runs provision; Atrás returns to the token
+  // step with the token preserved (UI-UX §2.0 — never a dead-end).
+  el('btn-cloud-step3-retry').addEventListener('click', () => cloudProvision());
+  el('btn-cloud-step3-back-fail').addEventListener('click', () => {
+    hide('cloud-step3-fail-actions');
+    hide('cloud-step3-error');
+    showCloudStep(2);
+  });
 }
 
 // --- Local branch -------------------------------------------------
@@ -382,7 +334,7 @@ async function ensureConfigFileReady(name, filePath, onError) {
 // --- Cloud branch -------------------------------------------------
 
 function openWizardCloud() {
-  wizardCloud = { token: '', accounts: [], userName: '' };
+  wizardCloud = { token: '', accounts: [], userName: '', lastAccountId: undefined };
   showWizardView('wizard-cloud');
   showCloudStep(1);
   // Prefill the author name from settings if we already have one.
@@ -443,6 +395,7 @@ async function cloudStep2TestToken() {
  */
 function prepareCloudStep3() {
   hide('cloud-step3-error');
+  hide('cloud-step3-fail-actions');
   const accounts = wizardCloud.accounts;
   const pick = el('cloud-account-pick');
   const progress = el('cloud-progress');
@@ -465,19 +418,43 @@ function prepareCloudStep3() {
   cloudProvision(accountId);
 }
 
+/**
+ * Resolves the account to provision: an explicit string arg (single
+ * account auto-provision) wins; otherwise the picker selection; then
+ * the last account we tried (Reintentar); finally the first account.
+ */
+function resolveProvisionAccountId(accountIdArg) {
+  if (typeof accountIdArg === 'string') return accountIdArg;
+  const picker = el('cloud-account');
+  const fromPicker = picker && !el('cloud-account-pick').classList.contains('hidden')
+    ? picker.value
+    : '';
+  return fromPicker
+    || wizardCloud.lastAccountId
+    || (wizardCloud.accounts[0] && wizardCloud.accounts[0].id);
+}
+
 async function cloudProvision(accountIdArg) {
+  // Guard re-entry: a second click (provision button, retry button, or
+  // a programmatic call) while one is running is ignored (minor fix).
+  if (provisionInFlight) return;
+
   hide('cloud-step3-error');
+  hide('cloud-step3-fail-actions');
   el('cloud-account-pick').classList.add('hidden');
   const progress = el('cloud-progress');
   const msg = el('cloud-progress-msg');
   progress.classList.remove('hidden');
   msg.textContent = 'Buscando tu base de datos…';
 
-  // The accountId comes from the picker (if shown) or the single
-  // account resolved earlier. Guard against the click-event arg.
-  const accountId = (typeof accountIdArg === 'string')
-    ? accountIdArg
-    : el('cloud-account').value || (wizardCloud.accounts[0] && wizardCloud.accounts[0].id);
+  const accountId = resolveProvisionAccountId(accountIdArg);
+  wizardCloud.lastAccountId = accountId;
+
+  // Disable the provision button while in flight (mirrors the step-2
+  // test-token button), so a double-click can't fire twice.
+  provisionInFlight = true;
+  const provisionBtn = el('btn-cloud-provision');
+  if (provisionBtn) provisionBtn.disabled = true;
 
   // Persist the author name first so provision (which reads settings
   // for the audit author) has it.
@@ -496,16 +473,24 @@ async function cloudProvision(accountIdArg) {
   let r;
   try {
     r = await window.packprice.provisionCloud({ token: wizardCloud.token, accountId });
+  } catch (err) {
+    // A rejected IPC is just another failure: surface it, don't strand.
+    r = { ok: false };
   } finally {
     clearTimeout(creatingTimer);
+    provisionInFlight = false;
+    if (provisionBtn) provisionBtn.disabled = false;
   }
 
   if (!r || !r.ok) {
     progress.classList.add('hidden');
     el('cloud-step3-error').textContent = cloudProvisionError(r);
     show('cloud-step3-error');
-    // Let the user retry: show the account picker again if there was a
-    // choice, else a back-to-token path via the step-2 back button.
+    // Never a dead-end: always offer Reintentar + Atrás in place,
+    // whether the token reached 1 or many accounts. For a multi-account
+    // token also re-show the picker so the user can switch account
+    // before retrying.
+    show('cloud-step3-fail-actions');
     if (wizardCloud.accounts.length > 1) {
       el('cloud-account-pick').classList.remove('hidden');
     }
@@ -810,15 +795,22 @@ function refreshOfflineBanner() {
 }
 
 /**
- * Handler for "Actualizar" / banner "Reintentar": check the remote
- * version, and only pull when it actually changed. A discreet toast
- * confirms "Ya estás al día"; a successful pull live-reloads cfg.
+ * Handler for the topbar "Actualizar" AND the offline banner
+ * "Reintentar": check the remote version, and only pull when it
+ * actually changed. A discreet toast confirms "Ya estás al día"; a
+ * successful pull live-reloads cfg.
+ *
+ * Both triggers share one in-flight flag (planRefreshTrigger): a second
+ * click while a refresh runs is ignored, and the busy feedback lands on
+ * whichever button is actually visible (banner when offline, else the
+ * topbar button). The flag clears in `finally` on success or failure.
  */
 async function refreshCatalog() {
-  const btn = el('refresh-catalog');
-  const label = el('refresh-catalog-label');
-  const original = label ? label.textContent : '';
-  setRefreshBusy(true);
+  const plan = planRefreshTrigger({ inFlight: refreshInFlight, offline: isOffline() });
+  if (!plan.proceed) return;
+
+  refreshInFlight = true;
+  const busy = setRefreshBusy(true, plan.target);
   try {
     // Cheap probe first: GET version. If unchanged, no full download.
     const ver = await window.packprice.checkCatalogVersion();
@@ -858,20 +850,49 @@ async function refreshCatalog() {
     }
     showToast('Datos actualizados');
   } finally {
-    setRefreshBusy(false, original);
+    refreshInFlight = false;
+    // initApp() (on success) may have re-rendered the topbar/banner, so
+    // restore busy state on the same element we marked. The banner could
+    // have been hidden by a successful refresh — that's fine, restoring
+    // a hidden button is harmless.
+    setRefreshBusy(false, plan.target, busy);
   }
 }
 
-function setRefreshBusy(busy, restoreLabel) {
+/**
+ * Toggles busy feedback on the visible refresh trigger.
+ *   - 'topbar' → #refresh-catalog (+ its label span).
+ *   - 'banner' → #btn-offline-retry.
+ * Returns a small snapshot ({ target, label }) used to restore the
+ * original label when clearing busy. Pure DOM glue (no logic decision —
+ * that lives in planRefreshTrigger).
+ */
+function setRefreshBusy(busy, target, restore) {
+  if (target === 'banner') {
+    const btn = el('btn-offline-retry');
+    if (!btn) return null;
+    const snapshot = { target, label: restore ? restore.label : btn.innerHTML };
+    btn.disabled = busy;
+    if (busy) {
+      btn.innerHTML = '<span class="spinner"></span> Actualizando…';
+    } else if (restore) {
+      btn.innerHTML = restore.label;
+    }
+    return snapshot;
+  }
+
+  // topbar (default)
   const btn = el('refresh-catalog');
   const label = el('refresh-catalog-label');
-  if (!btn) return;
+  if (!btn) return null;
+  const snapshot = { target, label: restore ? restore.label : (label ? label.textContent : '') };
   btn.disabled = busy;
   if (busy) {
     if (label) label.textContent = 'Actualizando…';
-  } else if (label && restoreLabel) {
-    label.textContent = restoreLabel;
+  } else if (label && restore) {
+    label.textContent = restore.label;
   }
+  return snapshot;
 }
 
 /** Discreet, auto-dismissing toast (UI-UX §2.1: never blocks). */

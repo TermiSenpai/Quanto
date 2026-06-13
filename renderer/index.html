@@ -385,6 +385,19 @@
           </div>
 
           <div id="cloud-step3-error" class="alert alert-error hidden"></div>
+
+          <!-- Acciones tras un fallo de aprovisionamiento (cualquier
+               causa): reintentar en el sitio o volver al paso del token.
+               Visibles para 1 o varias cuentas, nunca un callejón sin
+               salida (UI-UX §2.0). -->
+          <div id="cloud-step3-fail-actions" class="split__right-actions hidden">
+            <button id="btn-cloud-step3-back-fail" class="btn btn-ghost" type="button">
+              <svg class="icon"><use href="#i-chevron-left"/></svg> Atrás
+            </button>
+            <button id="btn-cloud-step3-retry" class="btn btn-primary" type="button">
+              <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
+            </button>
+          </div>
         </div>
       </div>
 

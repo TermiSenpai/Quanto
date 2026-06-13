@@ -9,7 +9,7 @@
 // Pure: no DOM, no IPC — just data in, display data out.
 // ============================================================
 import { describe, test, expect } from 'vitest';
-import { deriveDataStatus, formatFreshness } from '../renderer/data-status.js';
+import { deriveDataStatus, formatFreshness, planRefreshTrigger } from '../renderer/data-status.js';
 
 describe('deriveDataStatus', () => {
   test('cloud + online → success "Datos al día · v{N}"', () => {
@@ -86,5 +86,36 @@ describe('formatFreshness', () => {
     expect(formatFreshness(null)).toBe('sin fecha');
     expect(formatFreshness(undefined)).toBe('sin fecha');
     expect(formatFreshness('not-a-date')).toBe('sin fecha');
+  });
+});
+
+describe('planRefreshTrigger', () => {
+  test('idle + online → proceed, busy lands on the topbar button', () => {
+    const p = planRefreshTrigger({ inFlight: false, offline: false });
+    expect(p.proceed).toBe(true);
+    expect(p.target).toBe('topbar');
+  });
+
+  test('idle + offline → proceed, busy lands on the banner button', () => {
+    const p = planRefreshTrigger({ inFlight: false, offline: true });
+    expect(p.proceed).toBe(true);
+    expect(p.target).toBe('banner');
+  });
+
+  test('in flight → ignore the re-entry (no second download)', () => {
+    expect(planRefreshTrigger({ inFlight: true, offline: false }).proceed).toBe(false);
+    expect(planRefreshTrigger({ inFlight: true, offline: true }).proceed).toBe(false);
+  });
+
+  test('the busy target follows the visible button even while in flight', () => {
+    // So a clear-busy after an ignored click still targets the right one.
+    expect(planRefreshTrigger({ inFlight: true, offline: true }).target).toBe('banner');
+    expect(planRefreshTrigger({ inFlight: true, offline: false }).target).toBe('topbar');
+  });
+
+  test('defaults to a proceeding topbar refresh with no args', () => {
+    const p = planRefreshTrigger();
+    expect(p.proceed).toBe(true);
+    expect(p.target).toBe('topbar');
   });
 });

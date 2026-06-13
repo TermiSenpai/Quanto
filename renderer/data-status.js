@@ -85,3 +85,25 @@ export function deriveDataStatus(result = {}) {
     label: 'Modo local'
   };
 }
+
+/**
+ * Refresh/retry reentrancy reducer (UI-UX §2.1/§2.2). The catalog
+ * refresh can be triggered from two buttons — the topbar "Actualizar"
+ * (#refresh-catalog) and the offline banner "Reintentar"
+ * (#btn-offline-retry) — but they share one in-flight flow. This pure
+ * decision says whether a new trigger should proceed and which button
+ * owns the busy feedback, so a second click while a refresh runs is
+ * ignored (no double download, no flapping UI).
+ *
+ * @param {{ inFlight?: boolean, offline?: boolean }} [s]
+ *   - inFlight: a refresh is already running.
+ *   - offline: the app is serving cached data (banner is visible), so
+ *     the banner button is the one the user actually sees/clicks.
+ * @returns {{ proceed: boolean, target: 'banner'|'topbar' }}
+ *   - proceed: false when already in flight (ignore the re-entry).
+ *   - target: which trigger gets the spinner/disabled state.
+ */
+export function planRefreshTrigger(s = {}) {
+  if (s.inFlight) return { proceed: false, target: s.offline ? 'banner' : 'topbar' };
+  return { proceed: true, target: s.offline ? 'banner' : 'topbar' };
+}
