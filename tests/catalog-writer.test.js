@@ -43,13 +43,19 @@ function baselineVersions(cfg) {
 // current server row return whatever `serverRows` holds.
 //   - liveCatalogVersion: what the live re-read of catalog_meta returns
 //     (the I1 globals guard); defaults to 7, matching the baseline.
-//   - existingIds: per-table set of ids that already exist server-side,
-//     so the create-collision existence check (I2) can fire.
+//   - existingIds: per-table set of ids that exist server-side AND ARE
+//     LIVE (archived_at IS NULL), so the create-collision existence
+//     check (I2 live duplicate) fires as a conflict.
+//   - archivedIds: per-table set of ids that exist server-side but are
+//     SOFT-DELETED (archived_at NOT NULL). The create probe must IGNORE
+//     these (resurrect them), so they only match the unfiltered variant
+//     of the existence query, never the `archived_at IS NULL` one.
 function fakeClient({
   staleIds = new Set(),
   serverRows = {},
   liveCatalogVersion = 7,
-  existingIds = {}
+  existingIds = {},
+  archivedIds = {}
 } = {}) {
   const queries = [];
   return {
@@ -67,12 +73,21 @@ function fakeClient({
       if (/^SELECT catalog_version FROM catalog_meta/.test(sql)) {
         return { results: [{ catalog_version: liveCatalogVersion }], meta: {} };
       }
-      // Create-collision existence check (I2): SELECT <idCol> FROM <t>.
-      const exists = sql.match(/^SELECT (\w+) FROM (\w+) WHERE \w+ = \?$/);
+      // Create-branch existence probe. The writer asks for LIVE rows
+      // only (`... WHERE id = ? AND archived_at IS NULL`): a soft-deleted
+      // row must NOT count as a collision (it is resurrected). The fake
+      // faithfully distinguishes the two variants by inspecting the SQL
+      // for the `archived_at IS NULL` predicate.
+      const exists = sql.match(/^SELECT (\w+) FROM (\w+) WHERE \w+ = \?(?: AND archived_at IS NULL)?$/);
       if (exists) {
         const table = exists[2];
         const id = params[0];
-        const present = (existingIds[table] || new Set()).has(id);
+        const liveOnly = /archived_at IS NULL/.test(sql);
+        const isLive = (existingIds[table] || new Set()).has(id);
+        const isArchived = (archivedIds[table] || new Set()).has(id);
+        // Live-only query: only live rows match. Unfiltered query: live
+        // OR archived rows match.
+        const present = liveOnly ? isLive : (isLive || isArchived);
         return { results: present ? [{ [exists[1]]: id }] : [], meta: {} };
       }
       // Read the current server row of a conflicted entity.
@@ -445,8 +460,10 @@ describe('writeEntities', () => {
     });
     expect(res.ok).toBe(true);
     expect(res.results).toContainEqual({ entityType: 'supplier', id: 'STANLEY', status: 'written' });
-    // The existence check runs before the unguarded INSERT (I2 guard).
-    expect(client.queries.some((q) => /^SELECT \w+ FROM suppliers WHERE id = \?$/.test(q.sql))).toBe(true);
+    // The LIVE-only existence check runs before the unguarded INSERT (I2
+    // guard) — it carries `archived_at IS NULL` so a soft-deleted row is
+    // not mistaken for a collision (C1).
+    expect(client.queries.some((q) => /^SELECT \w+ FROM suppliers WHERE id = \? AND archived_at IS NULL$/.test(q.sql))).toBe(true);
     expect(client.queries.some((q) => /^INSERT INTO suppliers/.test(q.sql))).toBe(true);
     const audit = client.queries.find((q) => /^INSERT INTO audit_log/.test(q.sql));
     expect(audit.params).toContain('create');
@@ -473,6 +490,80 @@ describe('writeEntities', () => {
     expect(res.results).toContainEqual({ entityType: 'product', id: 'BEAGLE', status: 'written' });
     // Partial conflict → no global bump or snapshot (C1).
     expect(client.queries.some((q) => /^UPDATE catalog_meta/.test(q.sql))).toBe(false);
+    expect(res.catalogVersion).toBe(7);
+  });
+
+  test('C1: a brand-new id whose row is ARCHIVED is resurrected (full replace, NOT a conflict)', async () => {
+    const oldCfg = baseCfg();
+    const newCfg = baseCfg();
+    // STANLEY is "new" from the live catalog's perspective (loadEntities
+    // filtered the archived row out, so it is absent from oldCfg) but a
+    // soft-deleted row with that id still sits in the suppliers table.
+    newCfg.suppliers.STANLEY = { name: 'Stanley/Stella', web: '', notes: '' };
+    const client = fakeClient({ archivedIds: { suppliers: new Set(['STANLEY']) } });
+    const res = await writeEntities(client, {
+      oldCfg, newCfg, user: 'Alberto', now: NOW, expectedVersions: baselineVersions(oldCfg)
+    });
+
+    // The archived row must NOT be reported as a collision — it is
+    // brought back, so the save is clean.
+    expect(res.ok).toBe(true);
+    expect(res.conflicts).toEqual([]);
+    expect(res.results).toContainEqual({ entityType: 'supplier', id: 'STANLEY', status: 'written' });
+
+    // The live-only existence probe was issued (carries archived_at IS NULL).
+    expect(client.queries.some((q) => /^SELECT \w+ FROM suppliers WHERE id = \? AND archived_at IS NULL$/.test(q.sql))).toBe(true);
+
+    // Full replace: the stale (archived) row is DELETEd first, then a
+    // fresh row is INSERTed. The fresh INSERT has no archived_at column
+    // (disassemble omits it → SQL NULL → live again).
+    expect(client.queries.some((q) => /^DELETE FROM suppliers WHERE id = \?$/.test(q.sql) && q.params[0] === 'STANLEY')).toBe(true);
+    const insert = client.queries.find((q) => /^INSERT INTO suppliers/.test(q.sql));
+    expect(insert).toBeTruthy();
+    const parsed = parseInsert(insert.sql, insert.params);
+    expect(parsed.cols).not.toContain('archived_at');
+
+    // From the catalog's perspective the entity is re-created → 'create'.
+    const audit = client.queries.find((q) => /^INSERT INTO audit_log/.test(q.sql));
+    expect(audit.params).toContain('create');
+    expect(audit.params).toContain('STANLEY');
+
+    // Clean save → version bump + snapshot land.
+    expect(res.catalogVersion).toBe(8);
+    expect(client.queries.some((q) => /^UPDATE catalog_meta/.test(q.sql))).toBe(true);
+    expect(client.queries.some((q) => /^INSERT INTO snapshots/.test(q.sql))).toBe(true);
+  });
+
+  test('C1: a brand-new id with NO row at all (live or archived) keeps the plain create', async () => {
+    const oldCfg = baseCfg();
+    const newCfg = baseCfg();
+    newCfg.suppliers.STANLEY = { name: 'Stanley/Stella', web: '', notes: '' };
+    // Neither live nor archived server-side.
+    const client = fakeClient();
+    const res = await writeEntities(client, {
+      oldCfg, newCfg, user: 'Alberto', now: NOW, expectedVersions: baselineVersions(oldCfg)
+    });
+    expect(res.ok).toBe(true);
+    expect(res.results).toContainEqual({ entityType: 'supplier', id: 'STANLEY', status: 'written' });
+    expect(client.queries.some((q) => /^INSERT INTO suppliers/.test(q.sql))).toBe(true);
+    const audit = client.queries.find((q) => /^INSERT INTO audit_log/.test(q.sql));
+    expect(audit.params).toContain('create');
+  });
+
+  test('C1: a brand-new id with a LIVE row still conflicts (I2 live duplicate preserved)', async () => {
+    const oldCfg = baseCfg();
+    const newCfg = baseCfg();
+    newCfg.suppliers.STANLEY = { name: 'Stanley/Stella', web: '', notes: '' };
+    // Another PC already created STANLEY and it is LIVE.
+    const client = fakeClient({ existingIds: { suppliers: new Set(['STANLEY']) } });
+    const res = await writeEntities(client, {
+      oldCfg, newCfg, user: 'Alberto', now: NOW, expectedVersions: baselineVersions(oldCfg)
+    });
+    expect(res.ok).toBe(false);
+    expect(res.conflicts.some((c) => c.entityType === 'supplier' && c.id === 'STANLEY')).toBe(true);
+    expect(res.results).toContainEqual({ entityType: 'supplier', id: 'STANLEY', status: 'conflict' });
+    // A live duplicate is NOT inserted.
+    expect(client.queries.some((q) => /^INSERT INTO suppliers/.test(q.sql))).toBe(false);
     expect(res.catalogVersion).toBe(7);
   });
 

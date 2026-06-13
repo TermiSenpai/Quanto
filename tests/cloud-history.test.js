@@ -163,7 +163,14 @@ describe('getSnapshot', () => {
 // and the writeEntities guarded-write traffic. Per-id main rows carry a
 // `version` column so restore's expectedVersions (the live versions) make
 // the guards always hold — a restore must never conflict against itself.
-function fakeRestoreWorld({ snapshotCfg, liveCfg, metaRow = META_ROW } = {}) {
+// `archivedIds` models entities that exist in the table as SOFT-DELETED
+// rows (archived_at NOT NULL). loadEntities filters them out, so the
+// live load (and thus the restore baseline) lacks them — but the create
+// branch's existence probe must still see them for the unfiltered
+// variant and IGNORE them for the `archived_at IS NULL` variant, so the
+// restore RESURRECTS them. The earlier fake always returned [] here,
+// which hid the resurrect path (C1).
+function fakeRestoreWorld({ snapshotCfg, liveCfg, metaRow = META_ROW, archivedIds = {} } = {}) {
   const live = disassemble(liveCfg);
   for (const table of ['packs', 'products', 'suppliers', 'addons']) {
     live[table] = live[table].map((r) => ({ ...r, version: 3 }));
@@ -187,9 +194,19 @@ function fakeRestoreWorld({ snapshotCfg, liveCfg, metaRow = META_ROW } = {}) {
       if (/^SELECT catalog_version FROM catalog_meta/.test(sql)) {
         return { results: [{ catalog_version: metaRow.catalog_version }], meta: {} };
       }
-      // Create-collision existence check (a brand-new id from the snapshot).
-      const exists = sql.match(/^SELECT (\w+) FROM (\w+) WHERE \w+ = \?$/);
-      if (exists) return { results: [], meta: {} };
+      // Create-branch existence probe (a brand-new id from the snapshot).
+      // Faithful to both variants: the live-only query (`archived_at IS
+      // NULL`) never matches an archived row (→ resurrect, not conflict);
+      // the unfiltered variant would still find it.
+      const exists = sql.match(/^SELECT (\w+) FROM (\w+) WHERE \w+ = \?(?: AND archived_at IS NULL)?$/);
+      if (exists) {
+        const table = exists[2];
+        const id = params[0];
+        const liveOnly = /archived_at IS NULL/.test(sql);
+        const isArchived = (archivedIds[table] || new Set()).has(id);
+        const present = liveOnly ? false : isArchived;
+        return { results: present ? [{ [exists[1]]: id }] : [], meta: {} };
+      }
       // loadEntities reads.
       const table = (sql.match(/FROM (\w+)/) || [])[1];
       if (table === 'catalog_meta') return { results: [metaRow], meta: {} };
@@ -252,6 +269,41 @@ describe('restoreSnapshot', () => {
     // not the snapshot's — so it can never report a false conflict.
     const guard = client.queries.find((q) => /^UPDATE products SET version = version \+ 1/.test(q.sql) && q.params.includes('BEAGLE'));
     expect(guard.params).toEqual([NOW(), 'BEAGLE', 3]);
+  });
+
+  test('C1: resurrects an entity that was archived AFTER the snapshot (the key rollback case)', async () => {
+    // The snapshot (v3) still has BEAGLE; since then someone deleted it,
+    // so it is soft-deleted server-side. loadEntities filters it out, so
+    // the live baseline lacks it → diffEntities routes it to the create
+    // branch. The create probe must ignore the archived row and resurrect
+    // BEAGLE instead of falsely reporting a conflict.
+    const snapshotCfg = baseCfg();          // snapshot HAS BEAGLE
+    const liveCfg = baseCfg();
+    delete liveCfg.products.BEAGLE;          // BEAGLE absent from the live load (archived)
+    const client = fakeRestoreWorld({
+      snapshotCfg, liveCfg,
+      archivedIds: { products: new Set(['BEAGLE']) }
+    });
+
+    const res = await restoreSnapshot(client, { version: 3, user: 'Ana', now: NOW });
+
+    // The restore must succeed and bring BEAGLE back — NOT conflict.
+    expect(res.ok).toBe(true);
+    expect(res.catalogVersion).toBe(8); // live 7 → 8 (forward-only)
+
+    // BEAGLE went through the create branch's LIVE-only probe and was
+    // re-inserted (full replace), so its archived_at is cleared.
+    expect(client.queries.some((q) => /^SELECT \w+ FROM products WHERE id = \? AND archived_at IS NULL$/.test(q.sql) && q.params[0] === 'BEAGLE')).toBe(true);
+    const beagleInsert = client.queries.find(
+      (q) => /^INSERT INTO products/.test(q.sql) && q.params.includes('BEAGLE')
+    );
+    expect(beagleInsert).toBeTruthy();
+
+    // A clean restore produces a new version + new snapshot + audit rows.
+    expect(client.queries.some((q) => /^INSERT INTO snapshots/.test(q.sql))).toBe(true);
+    expect(client.queries.some((q) => /^UPDATE catalog_meta SET catalog_version/.test(q.sql))).toBe(true);
+    const audit = client.queries.find((q) => /^INSERT INTO audit_log/.test(q.sql) && q.params.includes('BEAGLE'));
+    expect(audit).toBeTruthy();
   });
 
   test('a missing target version surfaces the Spanish error from getSnapshot', async () => {
