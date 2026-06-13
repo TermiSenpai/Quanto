@@ -51,7 +51,8 @@ const {
   listQuotes,
   searchQuotes,
   deleteQuote,
-  getQuote
+  getQuote,
+  updateQuote
 } = require('./lib/history');
 const { renderQuoteHtml } = require('./lib/pdf-template');
 const { validateSettingsPayload } = require('./lib/settings-validator');
@@ -986,6 +987,21 @@ ipcMain.handle('quotes:get', (event, id) => {
   try {
     return { ok: true, quote: getQuote(SETTINGS_DIR, id) };
   } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// Patches an existing local quote (status chip change, or recording the
+// cloud UUID after an upload). The local history stays the per-PC source
+// of truth; the cloud mirror is updated separately via quotes:set-status.
+ipcMain.handle('quotes:update', (event, payload) => {
+  try {
+    const { id, patch } = payload || {};
+    const updated = updateQuote(SETTINGS_DIR, id, patch || {});
+    if (updated) logger.info('quote updated', { id, fields: Object.keys(patch || {}) });
+    return { ok: true, quote: updated };
+  } catch (err) {
+    logger.error('quote update failed', { error: err.message });
     return { ok: false, error: err.message };
   }
 });

@@ -11,6 +11,7 @@ import {
   searchQuotes,
   deleteQuote,
   getQuote,
+  updateQuote,
   nextIdForYear,
   historyPathFor,
   HISTORY_FILE_NAME,
@@ -176,6 +177,37 @@ describe('getQuote', () => {
     const dir = makeUserData();
     const a = saveQuote(dir, { tag: 'unique' });
     expect(getQuote(dir, a.id)).toMatchObject({ id: a.id, tag: 'unique' });
+  });
+});
+
+describe('updateQuote', () => {
+  test('merges a patch into the stored entry and persists it', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't', customer: { name: 'X' } });
+    const updated = updateQuote(dir, a.id, { status: 'accepted', cloud_id: 'uuid-1' });
+    expect(updated).toMatchObject({ id: a.id, status: 'accepted', cloud_id: 'uuid-1', tag: 't' });
+    // Persisted across reads.
+    expect(getQuote(dir, a.id)).toMatchObject({ status: 'accepted', cloud_id: 'uuid-1' });
+  });
+
+  test('never overwrites id or date', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    const updated = updateQuote(dir, a.id, { id: 'HACKED', date: 'nope', status: 'rejected' });
+    expect(updated.id).toBe(a.id);
+    expect(updated.date).toBe(a.date);
+    expect(updated.status).toBe('rejected');
+  });
+
+  test('returns null for an unknown id', () => {
+    const dir = makeUserData();
+    expect(updateQuote(dir, 'nope', { status: 'accepted' })).toBeNull();
+  });
+
+  test('rejects a non-object patch', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    expect(() => updateQuote(dir, a.id, null)).toThrow();
   });
 });
 

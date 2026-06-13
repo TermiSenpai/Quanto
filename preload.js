@@ -71,6 +71,9 @@ contextBridge.exposeInMainWorld('packprice', {
   searchQuotes:       (q)     => ipcRenderer.invoke('quotes:search', q),
   getQuote:           (id)    => ipcRenderer.invoke('quotes:get', id),
   deleteQuote:        (id)    => ipcRenderer.invoke('quotes:delete', id),
+  // Patch a local entry ({ id, patch }) — used by the status chips and to
+  // record the cloud UUID on the entry after an upload.
+  updateQuote:        (data)  => ipcRenderer.invoke('quotes:update', data),
 
   // --- Cloud quotes + statistics (v5) ---
   // Cloud-only. `uploadQuote({ quote })` mirrors a quote to D1
