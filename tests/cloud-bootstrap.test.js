@@ -1114,14 +1114,21 @@ describe('outbox flush on sync', () => {
 // ------------------------------------------------------------
 describe('savePdfTemplate', () => {
   // A client whose query() returns the seeded list on SELECT and records
-  // the INSERT call for assertions.
-  function tplClient(existing = []) {
+  // the INSERT call for assertions. `existing` is the visible (non-archived)
+  // gallery list (id+name); `allIds` is EVERY row id including archived ones
+  // — the dedup keys off the latter so a reused slug can't hit the PK.
+  function tplClient(existing = [], allIds = null) {
     const calls = [];
+    const ids = allIds || existing.map((t) => t.id);
     const client = {
       query: vi.fn(async (sql, params) => {
         calls.push({ sql, params });
         if (/SELECT id, name FROM pdf_templates/.test(sql)) {
           return { results: existing };
+        }
+        // listAllPdfTemplateIds: every id, archived included.
+        if (/SELECT id FROM pdf_templates/.test(sql)) {
+          return { results: ids.map((id) => ({ id })) };
         }
         return { results: [] };
       })
@@ -1177,5 +1184,60 @@ describe('savePdfTemplate', () => {
     expect((await bootstrap.savePdfTemplate(SETTINGS, { name: '  ', html: '<p>x</p>' })).ok).toBe(false);
     expect((await bootstrap.savePdfTemplate(SETTINGS, { name: 'X', html: '   ' })).ok).toBe(false);
     expect(calls.length).toBe(0);
+  });
+
+  // --- Hardening: bound the input so a multi-MB paste can't balloon the
+  //     D1 row (re-fetched + sanitized on every export/preview, every PC).
+  test('rejects an overlong name (> 80 chars) before sanitize/insert', async () => {
+    const { client, calls } = tplClient([]);
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.savePdfTemplate(SETTINGS, {
+      name: 'x'.repeat(81),
+      html: '<html><body><p>{{quote.id}}</p></body></html>'
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/nombre.*demasiado largo/i);
+    // No network touched: rejected before any SELECT/INSERT.
+    expect(calls.length).toBe(0);
+  });
+
+  test('rejects oversize html (> 256 KB) before sanitize/insert', async () => {
+    const { client, calls } = tplClient([]);
+    const { bootstrap } = makeBootstrap(client);
+    // 256 KB + a wrapper → comfortably over the cap.
+    const huge = '<html><body><p>' + 'a'.repeat(256 * 1024) + '</p></body></html>';
+    const res = await bootstrap.savePdfTemplate(SETTINGS, { name: 'Grande', html: huge });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/demasiado grande/i);
+    expect(calls.length).toBe(0);
+  });
+
+  test('accepts a name and html right at the limits', async () => {
+    const { client } = tplClient([]);
+    const { bootstrap } = makeBootstrap(client);
+    // Name exactly 80 chars; html just under 256 KB after the wrapper.
+    const name = 'x'.repeat(80);
+    const body = 'a'.repeat(256 * 1024 - 64); // wrapper + body < 256 KB
+    const html = '<html><body><p>' + body + '</p></body></html>';
+    expect(Buffer.byteLength(html, 'utf-8')).toBeLessThanOrEqual(256 * 1024);
+    const res = await bootstrap.savePdfTemplate(SETTINGS, { name, html });
+    expect(res.ok).toBe(true);
+  });
+
+  // --- Hardening: dedup against ALL ids (archived included), so re-creating
+  //     a template whose slug matches a soft-deleted row gets a suffix, not a
+  //     PRIMARY KEY collision masked by a misleading generic error.
+  test('a slug colliding with an ARCHIVED id gets a -2 suffix (no PK failure)', async () => {
+    // The gallery (non-archived) is empty, but an archived row owns the slug.
+    const { client, calls } = tplClient([], ['mi-plantilla']);
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.savePdfTemplate(SETTINGS, {
+      name: 'Mi plantilla',
+      html: '<html><body><p>{{quote.id}}</p></body></html>'
+    });
+    expect(res.ok).toBe(true);
+    expect(res.id).toBe('mi-plantilla-2');
+    const insert = calls.find((c) => /INSERT INTO pdf_templates/.test(c.sql));
+    expect(insert.params[0]).toBe('mi-plantilla-2');
   });
 });

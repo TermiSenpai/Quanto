@@ -4171,6 +4171,12 @@ async function onBrandColorChange() {
   await persistCompanyField();
 }
 
+// Monotonic token for the preview: rapid card clicks issue overlapping
+// pdf:preview IPC, and a slower EARLIER response could otherwise overwrite a
+// newer srcdoc. Each call captures its seq before the await and only writes
+// the frame if it is still the latest in flight (latest-wins).
+let pdfPreviewSeq = 0;
+
 /**
  * Renders the demo-quote preview for the current selection + brand color
  * into the sandboxed iframe (srcdoc, no scripts). The HTML is built in
@@ -4179,6 +4185,7 @@ async function onBrandColorChange() {
 async function refreshPdfPreview() {
   const frame = el('aj-tpl-preview');
   if (!frame) return;
+  const seq = ++pdfPreviewSeq; // this request's ticket
   const brandColor = normalizeBrandColor((CFG && CFG.company && CFG.company.brand_color) || el('aj-brand-color').value);
   let r;
   try {
@@ -4189,6 +4196,9 @@ async function refreshPdfPreview() {
   } catch (_) {
     r = null;
   }
+  // Drop a stale response: a newer request started after us, so its (or a
+  // later) result owns the frame — never let an earlier one clobber it.
+  if (seq !== pdfPreviewSeq) return;
   // srcdoc + sandbox (no allow-scripts): the template HTML renders
   // isolated and inert, same-origin about:srcdoc under default-src 'self'.
   frame.srcdoc = (r && r.ok && r.html)
@@ -4196,15 +4206,36 @@ async function refreshPdfPreview() {
     : '<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;color:#888;padding:16px;">No se pudo generar la vista previa.</body>';
 }
 
+// Serializes persistCompanyField calls onto one in-flight chain. A
+// template-then-color sequence fired before the first saveCatalog + reload
+// completes would otherwise both read the SAME stale DATA_STATE.versions and
+// the second would trip a false "otro equipo cambió" conflict on the user's
+// OWN edit. By queueing, each persist awaits the previous (which reloads and
+// updates DATA_STATE.versions) and only then reads the version baseline.
+let companyPersistChain = Promise.resolve();
+
 /**
- * Persists CFG.company (which carries pdf_template + brand_color) to
- * shared data. Cloud mode goes through the guarded saveCatalog with the
- * loaded version baseline; file mode writes the whole config. Both keep
+ * Persists CFG.company (which carries pdf_template + brand_color) to shared
+ * data, serialized so back-to-back edits never self-conflict. Returns when
+ * THIS call has run (after any earlier queued persist). See companyPersistWorker.
+ */
+function persistCompanyField() {
+  // Chain off the previous persist; swallow a prior rejection so one failure
+  // doesn't break the chain for the next edit (errors are surfaced in-worker).
+  const next = companyPersistChain.catch(() => {}).then(() => companyPersistWorker());
+  companyPersistChain = next;
+  return next;
+}
+
+/**
+ * The actual persist. Cloud mode goes through the guarded saveCatalog with
+ * the loaded version baseline read FRESH here (after any prior queued reload
+ * updated DATA_STATE.versions); file mode writes the whole config. Both keep
  * CFG_BACKUP and DATA_STATE.versions coherent for any later catalog edit.
  * A discreet toast confirms; errors are shown plainly but don't revert
  * the in-memory choice (the preview already reflects it).
  */
-async function persistCompanyField() {
+async function companyPersistWorker() {
   if (isCloudMode()) {
     if (isOffline()) {
       // Editing shared data needs a live connection (UI-UX §2.2).
@@ -4213,6 +4244,8 @@ async function persistCompanyField() {
     }
     const r = await window.packprice.saveCatalog({
       newCfg: CFG,
+      // Read FRESH at execution time: a prior queued persist's reload has
+      // already updated DATA_STATE.versions by the time we run.
       expectedVersions: DATA_STATE.versions
     });
     if (r && r.ok) {

@@ -8,7 +8,7 @@
 // ============================================================
 
 import { describe, test, expect, vi } from 'vitest';
-import { loadPdfTemplate, listPdfTemplates, insertPdfTemplate } from '../lib/cloud-pdf-templates.js';
+import { loadPdfTemplate, listPdfTemplates, insertPdfTemplate, listAllPdfTemplateIds } from '../lib/cloud-pdf-templates.js';
 
 function fakeClient(rowsBySql) {
   return {
@@ -75,6 +75,24 @@ describe('listPdfTemplates', () => {
   test('returns an empty array when there are none', async () => {
     const client = fakeClient([['FROM pdf_templates', []]]);
     expect(await listPdfTemplates(client)).toEqual([]);
+  });
+});
+
+describe('listAllPdfTemplateIds', () => {
+  test('returns every id INCLUDING archived (no archived_at filter)', async () => {
+    const client = fakeClient([
+      ['FROM pdf_templates', [{ id: 'a' }, { id: 'b' }, { id: 'gone' }]]
+    ]);
+    const ids = await listAllPdfTemplateIds(client);
+    expect(ids).toEqual(['a', 'b', 'gone']);
+    // The dedup needs archived rows too, so this query must NOT filter them.
+    const [sql] = client.query.mock.calls[0];
+    expect(sql).not.toMatch(/archived_at/);
+  });
+
+  test('returns an empty array when there are none', async () => {
+    const client = fakeClient([['FROM pdf_templates', []]]);
+    expect(await listAllPdfTemplateIds(client)).toEqual([]);
   });
 });
 
