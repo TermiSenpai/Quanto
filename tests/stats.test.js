@@ -77,7 +77,12 @@ describe('computeStats — KPIs', () => {
     expect(stats.conversionPct).toBeCloseTo(1 / 3, 6); // 1 accepted / 3 total
     expect(stats.totalUnits).toBe(66);             // 24 + 30 + 12
     expect(stats.avgTicket).toBe(400);             // 1200 / 3
-    expect(stats.avgMarginPct).toBeCloseTo((0.40 + 0.30 + 0.38) / 3, 6);
+    // Value-weighted margin: Σ(margin·sale_base) / Σ(sale_base). A small
+    // quote can't swing the KPI as much as a big job.
+    //   (0.40·500 + 0.30·340 + 0.38·170) / (500 + 340 + 170)
+    expect(stats.avgMarginPct).toBeCloseTo(
+      (0.40 * 500 + 0.30 * 340 + 0.38 * 170) / (500 + 340 + 170), 6
+    );
     expect(stats.targetMarginPct).toBe(cfg.parameters.default_target_margin);
   });
 });
@@ -125,9 +130,12 @@ describe('computeStats — byTier', () => {
 });
 
 describe('computeStats — marginByPack', () => {
-  test('average real margin vs target per pack', () => {
+  test('value-weighted real margin vs target per pack', () => {
     const crew = stats.marginByPack.find((p) => p.packId === 'crew_full');
-    expect(crew.realMarginPct).toBeCloseTo((0.40 + 0.30) / 2, 6);
+    // Weighted by sale_base: (0.40·500 + 0.30·340) / (500 + 340).
+    expect(crew.realMarginPct).toBeCloseTo(
+      (0.40 * 500 + 0.30 * 340) / (500 + 340), 6
+    );
     expect(crew.targetPct).toBeCloseTo(0.35, 6);
   });
 });

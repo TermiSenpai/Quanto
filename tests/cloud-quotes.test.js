@@ -14,6 +14,7 @@ import {
   uploadQuote,
   updateQuoteStatus,
   fetchStatsData,
+  validateQuoteRow,
   QUOTE_STATUSES
 } from '../lib/cloud-quotes.js';
 
@@ -124,7 +125,60 @@ describe('buildQuoteRows', () => {
   });
 });
 
+describe('validateQuoteRow', () => {
+  // Required NOT NULL fields with the primitive type the D1 column expects.
+  const REQUIRED_STRINGS = ['id', 'ts', 'user', 'client_name', 'client_phone', 'valid_until', 'pack_id', 'tier'];
+  const REQUIRED_NUMBERS = ['total_units', 'total_vat_inc', 'sale_base', 'margin_pct', 'catalog_version'];
+
+  test('accepts a well-formed row built from a sample quote', () => {
+    const { quote } = buildQuoteRows(sampleQuote());
+    expect(() => validateQuoteRow(quote)).not.toThrow();
+  });
+
+  for (const field of REQUIRED_STRINGS) {
+    test(`throws a Spanish error when the string field "${field}" is missing`, () => {
+      const { quote } = buildQuoteRows(sampleQuote());
+      delete quote[field];
+      expect(() => validateQuoteRow(quote)).toThrow(/presupuesto/i);
+    });
+  }
+
+  for (const field of REQUIRED_NUMBERS) {
+    test(`throws a Spanish error when the number field "${field}" is missing`, () => {
+      const { quote } = buildQuoteRows(sampleQuote());
+      delete quote[field];
+      expect(() => validateQuoteRow(quote)).toThrow(/presupuesto/i);
+    });
+
+    test(`throws a Spanish error when the number field "${field}" is the wrong type`, () => {
+      const { quote } = buildQuoteRows(sampleQuote());
+      quote[field] = 'not-a-number';
+      expect(() => validateQuoteRow(quote)).toThrow(/presupuesto/i);
+    });
+  }
+
+  test('the validation error is NOT a network error (so it is never queued)', () => {
+    const { quote } = buildQuoteRows(sampleQuote());
+    delete quote.pack_id;
+    try {
+      validateQuoteRow(quote);
+      throw new Error('expected throw');
+    } catch (err) {
+      // No structural network flag → cloud-bootstrap will surface, not queue.
+      expect(err.network).toBeFalsy();
+    }
+  });
+});
+
 describe('uploadQuote', () => {
+  test('rejects a malformed quote BEFORE any network call (defense-in-depth)', async () => {
+    const client = fakeClient();
+    await expect(uploadQuote(client, sampleQuote({ pack_id: undefined })))
+      .rejects.toThrow(/presupuesto/i);
+    // Validation runs first → no SQL hit the client.
+    expect(client.calls).toHaveLength(0);
+  });
+
   test('INSERT OR IGNORE the quote, items and addons (idempotent by UUID PK)', async () => {
     const client = fakeClient();
     const res = await uploadQuote(client, sampleQuote());

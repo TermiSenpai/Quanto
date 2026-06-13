@@ -17,8 +17,16 @@ import { createCloudBootstrap } from '../lib/cloud-bootstrap.js';
 import { readCache, writeCache } from '../lib/catalog-cache.js';
 import { disassemble } from '../lib/catalog-assembler.js';
 import { buildDefaultConfig } from '../config.default.js';
+import { D1ClientError } from '../lib/d1-client.js';
 
 const NOW = () => '2026-06-12T10:00:00.000Z';
+
+// A real transport-failure error, as lib/d1-client.js produces when fetch
+// itself rejects (offline/DNS/TLS): carries the structural network:true
+// flag the outbox enqueue keys off — NOT a text match.
+function networkError(message = 'No se pudo conectar con Cloudflare — comprueba la conexión a internet') {
+  return new D1ClientError(message, { network: true });
+}
 
 const META_ROW = {
   id: 1, catalog_version: 7, schema_version: 1, min_app_version: '5.0.0',
@@ -885,7 +893,7 @@ describe('saveQuote', () => {
   });
 
   test('on a network failure the quote is enqueued and { ok:true, queued:true } returned', async () => {
-    const client = { async query() { throw new Error('No se pudo conectar con Cloudflare'); } };
+    const client = { async query() { throw networkError(); } };
     const log = vi.fn();
     const { bootstrap } = makeBootstrap(client, { log });
     const res = await bootstrap.saveQuote(SETTINGS, { quote: SAMPLE_QUOTE });
@@ -895,8 +903,45 @@ describe('saveQuote', () => {
     expect(log).toHaveBeenCalled();
   });
 
+  test('a server-rejected (network:false) quote is surfaced as a failure and NEVER queued', async () => {
+    // A malformed/constraint-violating quote: the server answered and
+    // rejected it (D1ClientError with network:false). Enqueuing it would
+    // poison the outbox — it would be retried forever on every sync. It
+    // must instead surface as { ok:false } and leave the outbox empty.
+    const client = {
+      async query() {
+        throw new D1ClientError('Cloudflare rechazó la petición: NOT NULL constraint failed', { status: 400, network: false });
+      }
+    };
+    const log = vi.fn();
+    const { bootstrap } = makeBootstrap(client, { log });
+    const res = await bootstrap.saveQuote(SETTINGS, { quote: SAMPLE_QUOTE });
+
+    expect(res.ok).toBe(false);
+    expect(res.id).toBe('uuid-1');
+    expect(res.error).toMatch(/Cloudflare rechazó/);
+    expect(res.queued).toBeUndefined();
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+    expect(log).toHaveBeenCalled();
+  });
+
+  test('a locally-validated malformed quote is surfaced as a failure and NEVER queued', async () => {
+    // Defense-in-depth: uploadQuote rejects a row missing required NOT NULL
+    // fields BEFORE any network call (non-network error). It must not queue.
+    const client = { async query() { throw networkError('should not be reached'); } };
+    const log = vi.fn();
+    const { bootstrap } = makeBootstrap(client, { log });
+    const badQuote = { ...SAMPLE_QUOTE, pack_id: undefined };
+    const res = await bootstrap.saveQuote(SETTINGS, { quote: badQuote });
+
+    expect(res.ok).toBe(false);
+    expect(res.queued).toBeUndefined();
+    expect(res.error).toMatch(/presupuesto/i);
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+  });
+
   test('never leaks the token in the returned shape', async () => {
-    const client = { async query() { throw new Error('No se pudo conectar'); } };
+    const client = { async query() { throw networkError(); } };
     const { bootstrap } = makeBootstrap(client);
     const res = await bootstrap.saveQuote(SETTINGS, { quote: SAMPLE_QUOTE });
     expect(JSON.stringify(res)).not.toContain('tok-secret');
@@ -928,12 +973,26 @@ describe('setQuoteStatus', () => {
   });
 
   test('on a network failure the status is enqueued and { ok:true, queued:true } returned', async () => {
-    const client = { async query() { throw new Error('No se pudo conectar con Cloudflare'); } };
+    const client = { async query() { throw networkError(); } };
     const { bootstrap } = makeBootstrap(client, { log: vi.fn() });
     const res = await bootstrap.setQuoteStatus(SETTINGS, { id: 'uuid-1', status: 'rejected' });
 
     expect(res).toEqual({ ok: true, queued: true, id: 'uuid-1', status: 'rejected' });
     expect(readOutbox(tmpDir).statuses).toEqual([{ id: 'uuid-1', status: 'rejected', ts: NOW() }]);
+  });
+
+  test('a server-rejected (network:false) status is surfaced as a failure and NEVER queued', async () => {
+    const client = {
+      async query() {
+        throw new D1ClientError('Cloudflare rechazó la petición: no such quote', { status: 400, network: false });
+      }
+    };
+    const { bootstrap } = makeBootstrap(client, { log: vi.fn() });
+    const res = await bootstrap.setQuoteStatus(SETTINGS, { id: 'uuid-1', status: 'rejected' });
+
+    expect(res.ok).toBe(false);
+    expect(res.queued).toBeUndefined();
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
   });
 });
 

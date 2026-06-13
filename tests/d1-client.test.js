@@ -65,6 +65,34 @@ describe('createD1Client', () => {
     await expect(client.listAccounts()).rejects.toMatchObject({ name: 'D1ClientError', cause: netErr });
   });
 
+  test('flags a transport-level fetch failure with network:true', async () => {
+    // The ONLY true offline signal: fetch itself rejected (offline, DNS,
+    // TLS) — never reached Cloudflare. Outbox enqueue keys off this flag.
+    const fetchImpl = vi.fn(async () => { throw new TypeError('fetch failed'); });
+    const client = createD1Client({ token: 'tok', fetchImpl });
+    await expect(client.listAccounts()).rejects.toMatchObject({ network: true });
+  });
+
+  test('a Cloudflare success:false rejection is NOT a network error (network:false)', async () => {
+    // The server answered and rejected the request (auth error, constraint
+    // violation, …). That is a real failure, not an outage — it must never
+    // be queued, so its network flag stays false.
+    const fetchImpl = fakeFetch(
+      { success: false, errors: [{ code: 10000, message: 'Authentication error' }] },
+      { ok: false, status: 403 }
+    );
+    const client = createD1Client({ token: 'bad', fetchImpl });
+    await expect(client.listAccounts()).rejects.toMatchObject({ network: false });
+  });
+
+  test('a non-JSON server response is NOT a network error (network:false)', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false, status: 502, json: async () => { throw new Error('bad json'); }
+    }));
+    const client = createD1Client({ token: 'tok', fetchImpl });
+    await expect(client.listAccounts()).rejects.toMatchObject({ network: false });
+  });
+
   test('rejects with a missing-account error before any network call', async () => {
     const fetchImpl = fakeFetch({ success: true, result: [] });
     const client = createD1Client({ token: 'tok', fetchImpl });
