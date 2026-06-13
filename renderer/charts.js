@@ -37,6 +37,48 @@ const DEFAULT_COLORS = [
 const AXIS_COLOR = '#C8CDD6';
 const TEXT_COLOR = '#5A6270';
 const EMPTY_TEXT = 'Sin datos';
+// Danger tone (mirrors styles.css --danger) for a negative bar that carries
+// no explicit colour — a loss reads as a loss, not just another category.
+const DANGER_COLOR = '#D24D4D';
+
+/**
+ * Computes a zero-baseline signed value axis for bar charts. Negative data
+ * (e.g. a loss-making pack's realMarginPct) MUST render — a `<rect>` with a
+ * negative height/width is silently dropped by Chromium, so we instead draw
+ * every bar with POSITIVE dimensions from a zero line that we place inside
+ * the plot according to the data range.
+ *
+ * The domain spans [min(0,…), max(0,…)] so zero is always on the axis:
+ *   - all-positive data ⇒ min=0, baseline at the bottom (geometry unchanged
+ *     vs. the old code: a full-positive chart looks identical);
+ *   - any negative value ⇒ the baseline lifts off the edge and negatives draw
+ *     toward the far side (down for vertical, left for horizontal).
+ *
+ * @param {number[]} values
+ * @param {number} extent  plot height (vertical) or width (horizontal)
+ * @returns {{ min:number, max:number, span:number, zeroOffset:number,
+ *            lengthFor:(v:number)=>number }}
+ *   zeroOffset is the distance of the zero line from the plot's start edge;
+ *   lengthFor(v) returns the always-positive bar length for value v.
+ */
+function signedScale(values, extent) {
+  let dataMin = 0;
+  let dataMax = 0;
+  for (const v of values) {
+    const f = finite(v);
+    if (f < dataMin) dataMin = f;
+    if (f > dataMax) dataMax = f;
+  }
+  // span is 0 only when every value is 0 → all bars collapse to length 0.
+  const span = dataMax - dataMin;
+  // Distance from the data-min edge up to the zero line.
+  const zeroOffset = span > 0 ? (0 - dataMin) / span * extent : 0;
+  const lengthFor = (v) => {
+    if (span <= 0) return 0;
+    return Math.abs(finite(v)) / span * extent;
+  };
+  return { min: dataMin, max: dataMax, span, zeroOffset, lengthFor };
+}
 
 /**
  * Escapes a value for safe inclusion in SVG text/attributes. Labels come
@@ -128,31 +170,47 @@ export function barChartH(items, opts = {}) {
   const desc = opts.desc || 'Gráfico de barras horizontales';
   if (list.length === 0) return emptyState(width, height, desc);
 
-  const max = Math.max(0, ...list.map((it) => finite(it && it.value)));
   const plotW = Math.max(1, width - PAD.left - PAD.right);
   const plotH = Math.max(1, height - PAD.top - PAD.bottom);
   const band = plotH / list.length;
   const barH = Math.max(2, band * 0.6);
 
+  // Zero-baseline signed x axis: positives grow right of zero, negatives left,
+  // both with positive width. For all-positive data zero sits at PAD.left so
+  // the geometry is identical to the previous max-based layout.
+  const scale = signedScale(list.map((it) => it && it.value), plotW);
+  const zeroX = PAD.left + scale.zeroOffset;
+
   let body = openSvg(width, height, desc);
+  // Draw the zero line only when there is a negative region to separate.
+  if (scale.min < 0) {
+    body +=
+      `<line x1="${r(zeroX)}" y1="${r(PAD.top)}" x2="${r(zeroX)}" ` +
+      `y2="${r(PAD.top + plotH)}" stroke="${AXIS_COLOR}" stroke-width="1"/>`;
+  }
   list.forEach((it, i) => {
     const value = finite(it && it.value);
-    // Guard division: when max is 0 every bar collapses to width 0.
-    const w = max > 0 ? (value / max) * plotW : 0;
+    const len = scale.lengthFor(value); // always >= 0
+    // Negative bars start len to the left of zero; positives start at zero.
+    const x = value < 0 ? zeroX - len : zeroX;
     const y = PAD.top + i * band + (band - barH) / 2;
-    const color = pickColor(it && it.color, opts.colors, i);
+    const explicit = (it && it.color) || (value < 0 ? DANGER_COLOR : null);
+    const color = pickColor(explicit, opts.colors, i);
     const label = escapeXml(it && it.label);
     body +=
-      `<rect x="${r(PAD.left)}" y="${r(y)}" width="${r(w)}" height="${r(barH)}" ` +
+      `<rect x="${r(x)}" y="${r(y)}" width="${r(len)}" height="${r(barH)}" ` +
       `fill="${color}" rx="2">` +
       `<title>${label}: ${escapeXml(value)}</title></rect>`;
     // Category label to the left of the axis.
     body +=
       `<text x="${r(PAD.left - 6)}" y="${r(y + barH / 2)}" text-anchor="end" ` +
       `dominant-baseline="middle" font-size="11" fill="${TEXT_COLOR}">${label}</text>`;
-    // Value at the bar end.
+    // Value at the bar end (right end for positives, left end for negatives),
+    // clamped to the plot so the text x never goes off-canvas.
+    const valX = value < 0 ? Math.max(PAD.left, x - 4) : x + len + 4;
+    const anchor = value < 0 ? 'end' : 'start';
     body +=
-      `<text x="${r(PAD.left + w + 4)}" y="${r(y + barH / 2)}" ` +
+      `<text x="${r(valX)}" y="${r(y + barH / 2)}" text-anchor="${anchor}" ` +
       `dominant-baseline="middle" font-size="11" fill="${TEXT_COLOR}">${escapeXml(value)}</text>`;
   });
   body += '</svg>';
@@ -173,36 +231,47 @@ export function barChartV(items, opts = {}) {
   const desc = opts.desc || 'Gráfico de barras verticales';
   if (list.length === 0) return emptyState(width, height, desc);
 
-  const max = Math.max(0, ...list.map((it) => finite(it && it.value)));
   const plotW = Math.max(1, width - PAD.left - PAD.right);
   const plotH = Math.max(1, height - PAD.top - PAD.bottom);
   const baseY = PAD.top + plotH;
   const band = plotW / list.length;
   const barW = Math.max(2, band * 0.6);
 
+  // Zero-baseline signed y axis: positives grow up from zero, negatives down,
+  // both with positive height. All-positive data keeps zero at the bottom
+  // (baseY), so its geometry is identical to the previous layout.
+  const scale = signedScale(list.map((it) => it && it.value), plotH);
+  const zeroY = baseY - scale.zeroOffset;
+
   let body = openSvg(width, height, desc);
-  // Baseline axis.
+  // Baseline axis sits at the zero line (bottom when all-positive).
   body +=
-    `<line x1="${r(PAD.left)}" y1="${r(baseY)}" x2="${r(PAD.left + plotW)}" ` +
-    `y2="${r(baseY)}" stroke="${AXIS_COLOR}" stroke-width="1"/>`;
+    `<line x1="${r(PAD.left)}" y1="${r(zeroY)}" x2="${r(PAD.left + plotW)}" ` +
+    `y2="${r(zeroY)}" stroke="${AXIS_COLOR}" stroke-width="1"/>`;
   list.forEach((it, i) => {
     const value = finite(it && it.value);
-    const h = max > 0 ? (value / max) * plotH : 0;
+    const h = scale.lengthFor(value); // always >= 0
     const x = PAD.left + i * band + (band - barW) / 2;
-    const y = baseY - h;
-    const color = pickColor(it && it.color, opts.colors, i);
+    // Positive bars start h above zero; negative bars start at zero (grow down).
+    const y = value < 0 ? zeroY : zeroY - h;
+    const explicit = (it && it.color) || (value < 0 ? DANGER_COLOR : null);
+    const color = pickColor(explicit, opts.colors, i);
     const label = escapeXml(it && it.label);
     body +=
       `<rect x="${r(x)}" y="${r(y)}" width="${r(barW)}" height="${r(h)}" ` +
       `fill="${color}" rx="2">` +
       `<title>${label}: ${escapeXml(value)}</title></rect>`;
-    // Category label below the baseline.
+    // Category label below the plot (not the zero line — labels stay aligned).
     body +=
       `<text x="${r(x + barW / 2)}" y="${r(baseY + 14)}" text-anchor="middle" ` +
       `font-size="11" fill="${TEXT_COLOR}">${label}</text>`;
-    // Value above the bar.
+    // Value at the bar's outer end: above positives, below negatives, clamped
+    // to the plot so the text y never leaves the canvas.
+    const valY = value < 0
+      ? Math.min(baseY, y + h + 12)
+      : Math.max(PAD.top, y - 4);
     body +=
-      `<text x="${r(x + barW / 2)}" y="${r(y - 4)}" text-anchor="middle" ` +
+      `<text x="${r(x + barW / 2)}" y="${r(valY)}" text-anchor="middle" ` +
       `font-size="11" fill="${TEXT_COLOR}">${escapeXml(value)}</text>`;
   });
   body += '</svg>';
@@ -225,22 +294,28 @@ export function groupedBars(groups, opts = {}) {
   const hasBars = list.some((g) => g && Array.isArray(g.bars) && g.bars.length > 0);
   if (list.length === 0 || !hasBars) return emptyState(width, height, desc);
 
-  // Global max across every bar of every group → shared y scale.
-  let max = 0;
-  for (const g of list) {
-    const bars = (g && Array.isArray(g.bars)) ? g.bars : [];
-    for (const b of bars) max = Math.max(max, finite(b && b.value));
-  }
-
   const plotW = Math.max(1, width - PAD.left - PAD.right);
   const plotH = Math.max(1, height - PAD.top - PAD.bottom);
   const baseY = PAD.top + plotH;
   const groupBand = plotW / list.length;
 
+  // Global zero-baseline signed y scale across EVERY bar of EVERY group, so a
+  // loss-making pack (negative realMarginPct) shares the axis with the rest.
+  // A negative bar previously produced a negative-height rect that Chromium
+  // drops — i.e. the loss vanished exactly when it mattered. Now every bar has
+  // a positive height drawn from the zero line; negatives grow downward.
+  const allValues = [];
+  for (const g of list) {
+    const bars = (g && Array.isArray(g.bars)) ? g.bars : [];
+    for (const b of bars) allValues.push(b && b.value);
+  }
+  const scale = signedScale(allValues, plotH);
+  const zeroY = baseY - scale.zeroOffset;
+
   let body = openSvg(width, height, desc);
   body +=
-    `<line x1="${r(PAD.left)}" y1="${r(baseY)}" x2="${r(PAD.left + plotW)}" ` +
-    `y2="${r(baseY)}" stroke="${AXIS_COLOR}" stroke-width="1"/>`;
+    `<line x1="${r(PAD.left)}" y1="${r(zeroY)}" x2="${r(PAD.left + plotW)}" ` +
+    `y2="${r(zeroY)}" stroke="${AXIS_COLOR}" stroke-width="1"/>`;
   list.forEach((g, gi) => {
     const bars = (g && Array.isArray(g.bars)) ? g.bars : [];
     const groupX = PAD.left + gi * groupBand;
@@ -251,17 +326,19 @@ export function groupedBars(groups, opts = {}) {
     const barW = Math.max(2, slot * 0.8);
     bars.forEach((b, bi) => {
       const value = finite(b && b.value);
-      const h = max > 0 ? (value / max) * plotH : 0;
+      const h = scale.lengthFor(value); // always >= 0
       const x = innerX + bi * slot + (slot - barW) / 2;
-      const y = baseY - h;
-      const color = pickColor(b && b.color, opts.colors, bi);
+      // Positive bars start h above zero; negatives start at zero, grow down.
+      const y = value < 0 ? zeroY : zeroY - h;
+      const explicit = (b && b.color) || (value < 0 ? DANGER_COLOR : null);
+      const color = pickColor(explicit, opts.colors, bi);
       const name = escapeXml(b && b.name);
       body +=
         `<rect x="${r(x)}" y="${r(y)}" width="${r(barW)}" height="${r(h)}" ` +
         `fill="${color}" rx="2">` +
         `<title>${name}: ${escapeXml(value)}</title></rect>`;
     });
-    // Category label under the group.
+    // Category label under the group (anchored at the plot bottom).
     body +=
       `<text x="${r(groupX + groupBand / 2)}" y="${r(baseY + 14)}" ` +
       `text-anchor="middle" font-size="11" fill="${TEXT_COLOR}">${escapeXml(g && g.label)}</text>`;
@@ -367,7 +444,7 @@ export function histogram(buckets, opts = {}) {
   const desc = opts.desc || 'Histograma';
   if (list.length === 0) return emptyState(width, height, desc);
 
-  const max = Math.max(0, ...list.map((b) => finite(b && b.count)));
+  const max = Math.max(0, ...list.map((b) => Math.max(0, finite(b && b.count))));
   const plotW = Math.max(1, width - PAD.left - PAD.right);
   const plotH = Math.max(1, height - PAD.top - PAD.bottom);
   const baseY = PAD.top + plotH;
@@ -381,7 +458,9 @@ export function histogram(buckets, opts = {}) {
     `<line x1="${r(PAD.left)}" y1="${r(baseY)}" x2="${r(PAD.left + plotW)}" ` +
     `y2="${r(baseY)}" stroke="${AXIS_COLOR}" stroke-width="1"/>`;
   list.forEach((b, i) => {
-    const cnt = finite(b && b.count);
+    // Counts are non-negative by domain; clamp a stray negative to 0 so a bad
+    // bucket can never emit a negative-height (non-rendering) rect.
+    const cnt = Math.max(0, finite(b && b.count));
     const h = max > 0 ? (cnt / max) * plotH : 0;
     const x = PAD.left + i * band + (band - barW) / 2;
     const y = baseY - h;

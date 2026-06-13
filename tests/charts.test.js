@@ -37,6 +37,47 @@ function assertSafe(svg) {
   expect(svg).toMatch(/<desc>/);
 }
 
+// A loss-making pack yields a negative margin; Chromium silently drops a
+// <rect> with a negative width/height (and off-canvas coords place it out of
+// view). These assertions guarantee signed data renders visibly and on-canvas.
+//
+// No width="-…" / height="-…" anywhere — negative dims never render.
+function assertNoNegativeDims(svg) {
+  expect(svg).not.toMatch(/width="-/);
+  expect(svg).not.toMatch(/height="-/);
+}
+
+// Every numeric x/y/cx/cy/width/height/x1/x2/y1/y2 stays inside the canvas
+// box [0,width] × [0,height] for any finite input.
+function assertOnCanvas(svg, width, height) {
+  const attrs = ['x', 'y', 'cx', 'cy', 'x1', 'x2', 'y1', 'y2'];
+  for (const a of attrs) {
+    const re = new RegExp(`\\b${a}="(-?\\d+(?:\\.\\d+)?)"`, 'g');
+    let m;
+    while ((m = re.exec(svg)) !== null) {
+      const v = Number(m[1]);
+      const max = (a === 'y' || a === 'cy' || a === 'y1' || a === 'y2') ? height : width;
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(max);
+    }
+  }
+  // width/height must be non-negative and within the canvas extent too.
+  let wm;
+  const wre = /\bwidth="(-?\d+(?:\.\d+)?)"/g;
+  while ((wm = wre.exec(svg)) !== null) {
+    const v = Number(wm[1]);
+    expect(v).toBeGreaterThanOrEqual(0);
+    expect(v).toBeLessThanOrEqual(width);
+  }
+  let hm;
+  const hre = /\bheight="(-?\d+(?:\.\d+)?)"/g;
+  while ((hm = hre.exec(svg)) !== null) {
+    const v = Number(hm[1]);
+    expect(v).toBeGreaterThanOrEqual(0);
+    expect(v).toBeLessThanOrEqual(height);
+  }
+}
+
 describe('barChartH', () => {
   test('renders one rect per item with escaped labels and title tooltips', () => {
     const svg = barChartH([
@@ -79,6 +120,20 @@ describe('barChartH', () => {
     const svg = barChartH([{ label: 'a', value: 0 }, { label: 'b', value: 0 }]);
     assertSafe(svg);
   });
+
+  test('mixed-sign values: negative bar is visible, never negative dims, on-canvas', () => {
+    const svg = barChartH(
+      [{ label: 'win', value: 35 }, { label: 'loss', value: -5 }],
+      { width: 360, height: 220 }
+    );
+    assertSafe(svg);
+    assertNoNegativeDims(svg);
+    assertOnCanvas(svg, 360, 220);
+    // Both bars present (the loss must not vanish).
+    expect(count(svg, 'rect')).toBeGreaterThanOrEqual(2);
+    // The negative value still appears in a tooltip.
+    expect(svg).toContain('-5');
+  });
 });
 
 describe('barChartV', () => {
@@ -107,6 +162,18 @@ describe('barChartV', () => {
     assertSafe(svg);
     expect(svg).toContain('Sin datos');
     expect(count(svg, 'rect')).toBe(0);
+  });
+
+  test('mixed-sign values: negative bar grows downward, visible, on-canvas', () => {
+    const svg = barChartV(
+      [{ label: 'real', value: 35 }, { label: 'loss', value: -5 }],
+      { width: 360, height: 220 }
+    );
+    assertSafe(svg);
+    assertNoNegativeDims(svg);
+    assertOnCanvas(svg, 360, 220);
+    expect(count(svg, 'rect')).toBeGreaterThanOrEqual(2);
+    expect(svg).toContain('-5');
   });
 });
 
@@ -142,6 +209,36 @@ describe('groupedBars', () => {
   test('group with empty bars array does not crash or NaN', () => {
     const svg = groupedBars([{ label: 'X', bars: [] }]);
     assertSafe(svg);
+  });
+
+  test('margin real 35 vs target -5: loss-making pack renders visibly', () => {
+    // The core bug: a loss-making pack (negative realMarginPct from
+    // lib/stats.js marginByPack) must NOT vanish from the chart.
+    const svg = groupedBars(
+      [
+        { label: 'Peña', bars: [{ value: 35, name: 'Real' }, { value: 35, name: 'Objetivo' }] },
+        { label: 'Mixto', bars: [{ value: -5, name: 'Real' }, { value: 35, name: 'Objetivo' }] }
+      ],
+      { width: 360, height: 220 }
+    );
+    assertSafe(svg);
+    assertNoNegativeDims(svg);
+    assertOnCanvas(svg, 360, 220);
+    // 2 groups × 2 bars = 4 rects — the negative bar is NOT dropped.
+    expect(count(svg, 'rect')).toBeGreaterThanOrEqual(4);
+    // The negative value is shown in its tooltip.
+    expect(svg).toContain('-5');
+  });
+
+  test('all-negative group still renders bars on-canvas with positive dims', () => {
+    const svg = groupedBars(
+      [{ label: 'L', bars: [{ value: -10, name: 'Real' }, { value: -3, name: 'Real2' }] }],
+      { width: 360, height: 220 }
+    );
+    assertSafe(svg);
+    assertNoNegativeDims(svg);
+    assertOnCanvas(svg, 360, 220);
+    expect(count(svg, 'rect')).toBeGreaterThanOrEqual(2);
   });
 });
 
