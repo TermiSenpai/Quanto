@@ -25,6 +25,35 @@ function formatEur(value) {
   return value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 }
 
+// v5 status chips (UI-UX §2.7): three clickable states per quote. A
+// missing/empty status reads as 'pending' so legacy entries fit in. The
+// tone classes mirror the design tokens (neutral / success-soft /
+// danger-soft) — distinguished by text + tone, not colour alone (§2.8).
+const STATUS_CHIPS = [
+  { status: 'pending',  label: 'Pendiente', cls: 'quote-chip--pending' },
+  { status: 'accepted', label: 'Aceptado',  cls: 'quote-chip--accepted' },
+  { status: 'rejected', label: 'Rechazado', cls: 'quote-chip--rejected' }
+];
+
+/** Normalizes any stored status to one of the three known states. */
+function normStatus(status) {
+  return (status === 'accepted' || status === 'rejected') ? status : 'pending';
+}
+
+/** Renders the three status chips for one quote, the active one marked. */
+function renderStatusChips(quote) {
+  const current = normStatus(quote.status);
+  const chips = STATUS_CHIPS.map(c => `
+    <button type="button"
+            class="quote-chip ${c.cls} ${c.status === current ? 'is-active' : ''}"
+            data-action="status" data-id="${esc(quote.id)}" data-status="${c.status}"
+            aria-pressed="${c.status === current}">
+      ${c.label}
+    </button>
+  `).join('');
+  return `<div class="quote-chips">${chips}</div>`;
+}
+
 /**
  * Renders a list of quotes as a table with action buttons. The
  * caller wires the dataset-driven actions via event delegation.
@@ -51,6 +80,7 @@ export function renderHistoryList(quotes) {
         <td>${esc(customer)}</td>
         <td>${esc(pack)}</td>
         <td class="num">${esc(formatEur(total))}</td>
+        <td>${renderStatusChips(q)}</td>
         <td class="actions">
           <button type="button" class="btn btn-ghost btn-sm" data-action="open" data-id="${esc(q.id)}" title="Reabrir">
             <svg class="icon"><use href="#i-edit"/></svg>
@@ -76,6 +106,7 @@ export function renderHistoryList(quotes) {
           <th>Cliente</th>
           <th>Pack</th>
           <th class="num">Total</th>
+          <th>Estado</th>
           <th></th>
         </tr>
       </thead>
