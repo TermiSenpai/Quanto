@@ -82,6 +82,9 @@ let refreshInFlight = false;
 // v5: the startup quote reminder runs once per boot, not on every cfg
 // live-reload (refresh), so a dismissed banner stays dismissed.
 let reminderChecked = false;
+// Plan 7B: the app-version update check also runs once per boot (not on
+// every refresh), and only when the per-PC toggle is on.
+let updateChecked = false;
 // v5 statistics screen scratch state: the active period and the last
 // computed range, so "Aplicar"/re-render reuse the user's choice.
 let statsState = { period: 'season', range: null };
@@ -773,6 +776,14 @@ function initApp() {
     reminderChecked = true;
     maybeShowReminder();
   }
+
+  // Plan 7B: app-version update check on boot (PRD R15). Once per boot,
+  // only when the toggle is on, non-blocking, errors swallowed silently
+  // (only the manual «Buscar ahora» surfaces errors).
+  if (!updateChecked) {
+    updateChecked = true;
+    maybeCheckForUpdate();
+  }
 }
 
 // ============================================================
@@ -1131,6 +1142,11 @@ function bindEvents() {
   const btnReminderDismiss = el('btn-reminder-dismiss');
   if (btnReminderDismiss) btnReminderDismiss.addEventListener('click', dismissReminder);
 
+  // Plan 7B: dismiss the «versión nueva» notice (download is wired
+  // per-show in maybeCheckForUpdate so it carries the release URL).
+  const btnUpdateDismiss = el('btn-update-dismiss');
+  if (btnUpdateDismiss) btnUpdateDismiss.addEventListener('click', () => hide('update-banner'));
+
   document.querySelectorAll('.admin-nav__item, .admin-tab').forEach(tab => {
     tab.addEventListener('click', () => showAdminTab(tab.dataset.tab));
   });
@@ -1152,6 +1168,18 @@ function bindEvents() {
   el('ajustes-overlay').addEventListener('click', (e) => {
     if (e.target.id === 'ajustes-overlay') closeSettings();
   });
+
+  // Settings · Updates + Privacy (Plan 7B). Both toggles persist
+  // immediately on change (per-PC prefs, like the PDF template choice),
+  // so «Cancelar» never loses them; the buttons run their IPC actions.
+  const checkUpdates = el('aj-check-updates');
+  if (checkUpdates) checkUpdates.addEventListener('change', onCheckUpdatesToggle);
+  const errorReports = el('aj-error-reports');
+  if (errorReports) errorReports.addEventListener('change', onErrorReportsToggle);
+  const btnBuscarUpdate = el('btn-aj-buscar-update');
+  if (btnBuscarUpdate) btnBuscarUpdate.addEventListener('click', checkForUpdateNow);
+  const btnDiagnostico = el('btn-aj-diagnostico');
+  if (btnDiagnostico) btnDiagnostico.addEventListener('click', exportDiagnostics);
 
   // Settings · PDF template gallery (Plan 6). Gallery card clicks are
   // bound per-render in renderPdfTemplateGallery; these are the stable
@@ -4057,9 +4085,187 @@ function openSettings() {
   if (tVat) tVat.checked = showVat;
   show('ajustes-overlay');
 
+  // Plan 7B: load the Privacy + Updates toggles from settings (both
+  // opt-out, default ON). The update result line starts empty.
+  loadPrivacyAndUpdatesSection();
+
   // Plan 6: load the PDF template gallery + preview every time the modal
   // opens so it reflects the latest CFG.company + cloud custom templates.
   loadPdfTemplateSection();
+}
+
+// ============================================================
+// Settings · Updates + Privacy (Plan 7B · UI-UX §2.6 · PRD R15/R17/R19)
+// ============================================================
+
+/**
+ * Loads the two opt-out toggles (error reports + check-on-start) into the
+ * settings modal. The error-report toggle is read via its dedicated IPC
+ * (main applies the default); the update toggle reads from SETTINGS. A
+ * read failure leaves the default-checked boxes alone (both default ON).
+ */
+async function loadPrivacyAndUpdatesSection() {
+  // Reset the inline update result each time the modal opens.
+  const result = el('aj-update-result');
+  if (result) { result.textContent = ''; result.innerHTML = ''; }
+
+  // Check-updates-on-start: default ON unless explicitly false in settings.
+  const checkUpdates = el('aj-check-updates');
+  if (checkUpdates) {
+    checkUpdates.checked = !(SETTINGS && SETTINGS.check_updates_on_start === false);
+  }
+
+  // Error reports: read the resolved value from main (it applies the
+  // default when the field is absent). On failure keep the box ON.
+  const errorReports = el('aj-error-reports');
+  if (errorReports) {
+    try {
+      const r = await window.packprice.getErrorReportsEnabled();
+      errorReports.checked = !(r && r.ok && r.enabled === false);
+    } catch (_) {
+      errorReports.checked = true;
+    }
+  }
+}
+
+/**
+ * Manual «Buscar ahora»: asks main to check GitHub for a newer release
+ * and renders the result inline. Unlike the boot check, errors here ARE
+ * shown (the user asked). A newer version offers a Descargar link that
+ * opens the release page via openExternal (no auto-install).
+ */
+async function checkForUpdateNow() {
+  const btn = el('btn-aj-buscar-update');
+  const result = el('aj-update-result');
+  if (!btn || !result) return;
+
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Buscando…';
+  result.textContent = '';
+  result.innerHTML = '';
+  try {
+    const r = await window.packprice.checkAppUpdate();
+    if (!r || !r.ok) {
+      result.textContent = 'No se pudo comprobar. Revisa tu conexión e inténtalo de nuevo.';
+      return;
+    }
+    renderUpdateResult(result, r);
+  } catch (_) {
+    result.textContent = 'No se pudo comprobar. Revisa tu conexión e inténtalo de nuevo.';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
+/**
+ * Paints an update-check result into `target`: either «Estás en la última
+ * versión» or «Versión X disponible — [Descargar]». The Descargar link is
+ * a real button bound to openExternal (no inline handler — CSP intact).
+ */
+function renderUpdateResult(target, r) {
+  target.textContent = '';
+  target.innerHTML = '';
+  if (r.isNewer) {
+    const label = document.createElement('span');
+    label.textContent = `Versión ${r.latest} disponible — `;
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'link-button';
+    link.textContent = 'Descargar';
+    link.addEventListener('click', () => openExternalSafe(r.url));
+    target.appendChild(label);
+    target.appendChild(link);
+  } else {
+    target.textContent = 'Estás en la última versión.';
+  }
+}
+
+/**
+ * Persists the «Buscar actualizaciones al iniciar» toggle to settings.
+ * Per-PC; immediate so «Cancelar» can't revert it. Keeps the in-memory
+ * SETTINGS in sync so the boot check reflects the latest choice next run.
+ */
+async function onCheckUpdatesToggle() {
+  const checked = el('aj-check-updates').checked;
+  try {
+    await window.packprice.writeSettings({ check_updates_on_start: checked });
+    SETTINGS = { ...(SETTINGS || {}), check_updates_on_start: checked };
+  } catch (_) {
+    // A persistence failure is non-fatal; the box already reflects intent.
+    showToast('No se pudo guardar la preferencia');
+  }
+}
+
+/**
+ * Persists the «Enviar informes de error» opt-out toggle via its
+ * dedicated IPC (the secret never crosses; main validates + defaults).
+ * Immediate, like the update toggle.
+ */
+async function onErrorReportsToggle() {
+  const checked = el('aj-error-reports').checked;
+  try {
+    const r = await window.packprice.setErrorReportsEnabled(checked);
+    if (!r || !r.ok) showToast('No se pudo guardar la preferencia');
+  } catch (_) {
+    showToast('No se pudo guardar la preferencia');
+  }
+}
+
+/**
+ * «Exportar diagnóstico»: main builds the support bundle (no token, no
+ * business data), asks where to save it and opens it. We report where it
+ * landed (toast) or the error; a user cancel is silent.
+ */
+async function exportDiagnostics() {
+  const btn = el('btn-aj-diagnostico');
+  const original = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Generando…';
+  }
+  try {
+    const r = await window.packprice.exportDiagnostics();
+    if (r && r.ok) {
+      showToast('Diagnóstico guardado');
+    } else if (r && r.cancelado) {
+      // The user cancelled the save dialog — say nothing.
+    } else {
+      await window.packprice.showError({
+        titulo: 'No se pudo exportar el diagnóstico',
+        mensaje: (r && r.error) || 'Error desconocido al generar el diagnóstico.'
+      });
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  }
+}
+
+/**
+ * Boot-time update check (PRD R15). Runs only when «Buscar actualizaciones
+ * al iniciar» is on; non-blocking; network errors are swallowed silently
+ * (only the manual «Buscar ahora» surfaces them). Shows a dismissible
+ * notice only when a strictly newer release exists.
+ */
+async function maybeCheckForUpdate() {
+  if (SETTINGS && SETTINGS.check_updates_on_start === false) return;
+  let r;
+  try {
+    r = await window.packprice.checkAppUpdate();
+  } catch (_) {
+    return; // swallow on boot — a failed check must never block startup
+  }
+  if (!r || !r.ok || !r.isNewer) return;
+
+  const textEl = el('update-banner-text');
+  if (textEl) textEl.textContent = `Versión ${r.latest} disponible`;
+  const downloadBtn = el('btn-update-download');
+  if (downloadBtn) downloadBtn.onclick = () => openExternalSafe(r.url);
+  show('update-banner');
 }
 
 // ============================================================
@@ -4369,8 +4575,11 @@ async function saveSettings() {
   localStorage.setItem('pp:recordar-pack', el('aj-recordar-pack').checked ? '1' : '0');
   localStorage.setItem('pp:mostrar-iva',  el('aj-mostrar-iva').checked ? '1' : '0');
 
-  SETTINGS = { user_name: name, config_path: filePath };
-  await window.packprice.writeSettings(SETTINGS);
+  await window.packprice.writeSettings({ user_name: name, config_path: filePath });
+  // Re-read so SETTINGS keeps what only main merges (data_source, the
+  // opt-out toggles, the redacted cloud section) instead of clobbering it
+  // with just name + path.
+  SETTINGS = await window.packprice.readSettings();
   closeSettings();
   await loadConfigAndShowApp();
 }

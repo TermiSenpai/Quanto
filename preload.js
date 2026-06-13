@@ -61,6 +61,13 @@ contextBridge.exposeInMainWorld('packprice', {
   getErrorReportsEnabled:  ()    => ipcRenderer.invoke('error-reports:get'),
   setErrorReportsEnabled:  (on)  => ipcRenderer.invoke('error-reports:set', on),
 
+  // --- App-version update check (Plan 7B: PRD R15) ---
+  // Asks main to fetch the latest GitHub release and compare it to the
+  // running version. Returns { ok, current, latest, isNewer, url }; the
+  // network call lives in main (CSP intact). No auto-install — `url`
+  // opens the release page via openExternal.
+  checkAppUpdate:          ()    => ipcRenderer.invoke('update:check'),
+
   // --- Audit log (admin config changes) ---
   listAuditEntries:   (data) => ipcRenderer.invoke('audit:list', data),
   previewConfigDiff:  (data) => ipcRenderer.invoke('audit:diff-preview', data),

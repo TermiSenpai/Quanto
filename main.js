@@ -67,6 +67,7 @@ const { redactSettings, mergeSettingsWrite } = require('./lib/settings-privacy')
 const { scrubError } = require('./lib/error-scrubber');
 const { reportError, DEFAULT_DSN } = require('./lib/error-reporter');
 const { buildDiagnostics } = require('./lib/diagnostics');
+const { isNewerVersion } = require('./lib/version-compare');
 const { isPathAllowed } = require('./lib/path-guard');
 const { initialThrottleState, nextThrottleState } = require('./lib/admin-throttle');
 const { createD1Client } = require('./lib/d1-client');
@@ -242,6 +243,16 @@ function writeSettings(settings) {
 // never mask the original error.
 
 const TELEMETRY_DSN = DEFAULT_DSN;
+
+// ------------------------------------------------------------------
+// OWNER-CONFIRM CONSTANT — the public GitHub repo the update check
+// (PRD R15) queries for the latest release. This is a GUESS based on
+// package.json:author ('xkoistudio'); the owner MUST confirm the real
+// <owner>/<repo> before the repo flips public. The endpoint and the
+// download link both derive from it; it carries no secret (public API).
+// ------------------------------------------------------------------
+const GITHUB_REPO = 'xkoistudio/packprice';
+const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_REPO}/releases/latest`;
 
 // The schema version bundled in this build = the highest numbered SQL
 // migration shipped under db/migrations/. Best-effort and cached; a
@@ -1035,6 +1046,50 @@ ipcMain.handle('dialog:open-external', async (event, url) => {
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+});
+
+// --- App-version update check (PRD R15) ---
+//
+// Fetches the latest GitHub release for this repo (public REST API, no
+// token) and compares its tag to the running app version. Network ONLY
+// in main (renderer CSP untouched). The renderer just renders the
+// returned { ok, current, latest, isNewer, url } — `isNewer` is computed
+// here via the single tested lib/version-compare. There is no
+// auto-install: `url` opens the releases page in the system browser. A
+// network/parse failure returns { ok:false, error } (the manual button
+// shows it; on boot the renderer swallows it).
+ipcMain.handle('update:check', async () => {
+  const current = app.getVersion();
+  try {
+    const fetchImpl = typeof fetch === 'function' ? fetch : null;
+    if (!fetchImpl) {
+      return { ok: false, current, error: 'fetch no disponible.' };
+    }
+    const res = await fetchImpl(
+      `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
+      {
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'PackPrice-update-check'
+        }
+      }
+    );
+    if (!res || !res.ok) {
+      return { ok: false, current, error: `GitHub respondió ${res ? res.status : 'sin respuesta'}.` };
+    }
+    const data = await res.json();
+    const latest = (data && typeof data.tag_name === 'string') ? data.tag_name : '';
+    if (!latest) {
+      return { ok: false, current, error: 'La respuesta de GitHub no trae versión.' };
+    }
+    // Prefer the release's own page; fall back to the generic latest page.
+    const url = (data && typeof data.html_url === 'string' && data.html_url)
+      ? data.html_url
+      : GITHUB_RELEASES_PAGE;
+    return { ok: true, current, latest, isNewer: isNewerVersion(current, latest), url };
+  } catch (err) {
+    return { ok: false, current, error: err.message };
   }
 });
 

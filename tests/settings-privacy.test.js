@@ -107,4 +107,26 @@ describe('mergeSettingsWrite', () => {
     expect(mergeSettingsWrite(null, { user_name: 'A' })).toEqual({ user_name: 'A' });
     expect(mergeSettingsWrite({}, { cloud: { token: 'tok-1' } }).cloud.token).toBe('tok-1');
   });
+
+  // --- Plan 7B opt-out toggles: each persists independently ---
+
+  test('writing one toggle preserves the stored value of the other', () => {
+    const stored = { error_reports_enabled: false, check_updates_on_start: true };
+    const merged = mergeSettingsWrite(stored, { check_updates_on_start: false });
+    expect(merged.check_updates_on_start).toBe(false); // incoming wins
+    expect(merged.error_reports_enabled).toBe(false);  // stored kept
+  });
+
+  test('writing the error-report toggle keeps the stored update-on-start', () => {
+    const stored = { check_updates_on_start: false };
+    const merged = mergeSettingsWrite(stored, { error_reports_enabled: true });
+    expect(merged.error_reports_enabled).toBe(true);
+    expect(merged.check_updates_on_start).toBe(false);
+  });
+
+  test('an incoming toggle wins over the stored one', () => {
+    const stored = { error_reports_enabled: true };
+    const merged = mergeSettingsWrite(stored, { error_reports_enabled: false });
+    expect(merged.error_reports_enabled).toBe(false);
+  });
 });

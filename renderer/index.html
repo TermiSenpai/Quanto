@@ -508,6 +508,18 @@
       </button>
     </div>
 
+    <!-- Plan 7B: aviso no bloqueante de versión nueva al arrancar (PRD
+         R15). No instala nada; «Descargar» abre la release en el
+         navegador. Texto rellenado por app.js; se descarta al cerrarlo. -->
+    <div id="update-banner" class="reminder-banner hidden" role="status">
+      <svg class="icon"><use href="#i-refresh"/></svg>
+      <span class="reminder-banner__text" id="update-banner-text">—</span>
+      <button id="btn-update-download" class="btn btn-secondary btn-sm" type="button">Descargar</button>
+      <button id="btn-update-dismiss" class="reminder-banner__close" type="button" aria-label="Descartar">
+        <svg class="icon"><use href="#i-x"/></svg>
+      </button>
+    </div>
+
     <main class="app-body">
 
       <!-- Paso 1: selección de pack -->
@@ -1082,6 +1094,68 @@
                   <svg class="icon"><use href="#i-save"/></svg> Guardar plantilla
                 </button>
               </div>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Updates (Plan 7B · UI-UX §2.6 · PRD R15). The app-version
+               check talks to GitHub Releases; the request lives in main
+               (CSP intact). No auto-install: the result shows a Descargar
+               link that opens the release page in the system browser. -->
+          <div id="aj-updates-section">
+            <div>
+              <h3 class="h-card" style="margin-bottom: 6px;">Actualizaciones</h3>
+              <p class="text-secondary" style="font-size: 12px;">Comprueba si hay una versión más reciente en GitHub. No se instala nada automáticamente.</p>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row__text">
+                <strong>Buscar actualizaciones al iniciar</strong>
+                <span>Al abrir la app, comprueba en segundo plano si hay una versión nueva.</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="aj-check-updates" checked>
+                <span class="toggle__slider"></span>
+              </label>
+            </div>
+
+            <div class="field__row" style="margin-top: 12px; align-items: center;">
+              <button id="btn-aj-buscar-update" class="btn btn-secondary" type="button">
+                <svg class="icon"><use href="#i-refresh"/></svg> Buscar ahora
+              </button>
+              <span id="aj-update-result" class="field__hint" style="margin: 0;"></span>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Privacy (Plan 7B · UI-UX §2.6 · PRD R19/R17). The error-report
+               toggle is opt-OUT (default on); the helper text states EXACTLY
+               what is sent. «Exportar diagnóstico» builds a support bundle in
+               main (no token, no business data). -->
+          <div id="aj-privacy-section">
+            <div>
+              <h3 class="h-card" style="margin-bottom: 6px;">Privacidad</h3>
+              <p class="text-secondary" style="font-size: 12px;">PackPrice solo se conecta a internet para dos cosas: comprobar si hay una versión nueva (GitHub) y, si lo permites, enviar informes de error. Nunca se envían tus precios, clientes ni catálogo.</p>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row__text">
+                <strong>Enviar informes de error</strong>
+                <span>Cuando algo falla, se envía solo el error técnico, la versión de la app y el sistema operativo — <strong>nunca</strong> precios, clientes ni catálogo. Así podemos arreglarlo antes de que te afecte. Más detalle en el manual de usuario.</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="aj-error-reports" checked>
+                <span class="toggle__slider"></span>
+              </label>
+            </div>
+
+            <div class="field__row" style="margin-top: 12px;">
+              <button id="btn-aj-diagnostico" class="btn btn-secondary" type="button">
+                <svg class="icon"><use href="#i-share"/></svg> Exportar diagnóstico
+              </button>
+              <span class="field__hint" style="margin: 0;">Genera un archivo (sin token ni datos de negocio) para enviar a soporte.</span>
             </div>
           </div>
         </div>

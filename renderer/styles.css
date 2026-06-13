@@ -1596,6 +1596,22 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 .toggle input:checked + .toggle__slider { background: var(--accent-primary); }
 .toggle input:checked + .toggle__slider::before { transform: translateX(18px); }
 
+/* Inline text link rendered as a button (no <a href> — navigation goes
+   through openExternal in main; CSP intact). Used by the update-check
+   result «Descargar» (Plan 7B). */
+.link-button {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.link-button:hover { text-decoration: none; }
+
 /* Lista de bloques apilados (modal sm) */
 .modal__body--single .stack { display: flex; flex-direction: column; gap: 18px; }
 
