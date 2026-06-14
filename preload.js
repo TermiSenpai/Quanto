@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('packprice', {
 
   // --- File selection via native dialog ---
   selectConfigFile: ()       => ipcRenderer.invoke('dialog:select-config'),
+  selectConfigFolder: ()     => ipcRenderer.invoke('dialog:select-config-folder'),
+  folderConfigPath: (folder) => ipcRenderer.invoke('config:folder-config-path', folder),
 
   // --- Default candidate path (NAS) ---
   getDefaultConfigPath: ()   => ipcRenderer.invoke('config:default-path'),

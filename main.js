@@ -512,6 +512,32 @@ ipcMain.handle('dialog:select-config', async () => {
   return { cancelado: false, ruta: picked };
 });
 
+// Local mode (v5): the user picks a FOLDER; config.js inside it is reused
+// if present, created with defaults if not. We return the folder only; the
+// renderer shows it and later calls `config:folder-config-path` to resolve
+// it to <folder>/config.js (path join stays in main — no path in renderer).
+ipcMain.handle('dialog:select-config-folder', async () => {
+  const resultado = await dialog.showOpenDialog(mainWindow, {
+    title: 'Selecciona la carpeta donde guardar los datos',
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath: app.getPath('home')
+  });
+  if (resultado.canceled || resultado.filePaths.length === 0) {
+    return { cancelado: true };
+  }
+  return { cancelado: false, carpeta: resultado.filePaths[0] };
+});
+
+// Resolves a chosen folder to the config.js path inside it. Pure path
+// join; blessing happens later via `config:exists`/`config:create-default`
+// when the user commits, exactly like the file-pick flow.
+ipcMain.handle('config:folder-config-path', (event, carpeta) => {
+  if (typeof carpeta !== 'string' || carpeta.trim() === '') {
+    return { error: 'Carpeta no válida' };
+  }
+  return { ruta: path.join(carpeta.trim(), 'config.js') };
+});
+
 // --- Cloud (v5): first-run wizard + catalog read path ---
 //
 // Thin wiring only: the orchestration (timeouts, cache fallback, the

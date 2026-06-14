@@ -251,9 +251,10 @@ function bindWizardEvents() {
   // --- Local branch ---
   el('btn-wizard-local-back').addEventListener('click', () => showWizardView('wizard-choice'));
   el('btn-wiz-explorar').addEventListener('click', async () => {
-    const r = await window.packprice.selectConfigFile();
+    // Local mode picks a FOLDER; config.js inside it is reused or created.
+    const r = await window.packprice.selectConfigFolder();
     if (!r.cancelado) {
-      el('wiz-ruta').value = r.ruta;
+      el('wiz-ruta').value = r.carpeta;
       validateWizardLocalForm();
     }
   });
@@ -290,16 +291,8 @@ function openWizardLocal() {
   showWizardView('wizard-local');
   hide('wiz-local-error');
   validateWizardLocalForm();
-  // Suggest the NAS default path, same as the legacy welcome did.
-  window.packprice.getDefaultConfigPath()
-    .then((suggestion) => {
-      const input = el('wiz-ruta');
-      if (!input.value && suggestion && suggestion.sugerida) {
-        input.value = suggestion.sugerida;
-        validateWizardLocalForm();
-      }
-    })
-    .catch(() => { /* a suggestion must never block the UI */ });
+  // No default path: the user picks (or types) the folder where the data
+  // lives. config.js inside it is reused if present, created if not.
   setTimeout(() => el('wiz-nombre').focus(), 50);
 }
 
@@ -311,7 +304,7 @@ function validateWizardLocalForm() {
 
 async function startWizardLocal() {
   const name = el('wiz-nombre').value.trim();
-  const filePath = el('wiz-ruta').value.trim();
+  const folder = el('wiz-ruta').value.trim();
   hide('wiz-local-error');
 
   const btn = el('btn-wiz-local-empezar');
@@ -319,6 +312,17 @@ async function startWizardLocal() {
   btn.disabled = true;
   btn.textContent = 'Comprobando ruta…';
   try {
+    // The field holds a folder; resolve it to <folder>/config.js in main
+    // (the renderer has no path module). The file is reused if present,
+    // created with defaults if not (handled by ensureConfigFileReady).
+    const resolved = await window.packprice.folderConfigPath(folder);
+    if (!resolved || !resolved.ruta) {
+      el('wiz-local-error').textContent = 'No se pudo resolver la carpeta seleccionada.';
+      show('wiz-local-error');
+      return;
+    }
+    const filePath = resolved.ruta;
+
     const ok = await ensureConfigFileReady(name, filePath, (msg) => {
       el('wiz-local-error').textContent = msg;
       show('wiz-local-error');

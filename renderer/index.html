@@ -251,7 +251,7 @@
 
         <header>
           <h2>Configuración local</h2>
-          <p class="text-secondary" style="margin-top: 6px;">Indica tu nombre y la ruta del config compartido del taller.</p>
+          <p class="text-secondary" style="margin-top: 6px;">Indica tu nombre y la carpeta donde guardar los datos.</p>
         </header>
 
         <form class="form-stack" onsubmit="return false;">
@@ -261,9 +261,8 @@
           </div>
 
           <div class="field">
-            <label class="field__label" for="wiz-ruta">Archivo de configuración (config.js en el NAS)</label>
             <div class="field__row">
-              <input type="text" id="wiz-ruta" class="input input--mono" placeholder="\\172.26.0.154\Paep\Packs\config.js">
+              <input type="text" id="wiz-ruta" class="input input--mono" aria-label="Carpeta de datos" placeholder="Carpeta donde guardar los datos…">
               <button id="btn-wiz-explorar" class="btn btn-secondary" type="button">
                 <svg class="icon"><use href="#i-folder"/></svg> Explorar
               </button>
@@ -272,7 +271,7 @@
 
           <div class="alert alert-info">
             <svg class="icon"><use href="#i-info"/></svg>
-            <span>Si el archivo no existe, PackPrice puede crearlo con valores por defecto al continuar.</span>
+            <span>Si la carpeta no contiene un config.js, PackPrice lo creará con valores por defecto al continuar.</span>
           </div>
 
           <div id="wiz-local-error" class="alert alert-error hidden"></div>
