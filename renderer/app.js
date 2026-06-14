@@ -702,12 +702,14 @@ async function showErrorScreen(detail) {
     await loadConfigAndShowApp();
   };
   el('btn-error-cambiar-ruta').onclick = async () => {
-    const r = await window.packprice.selectConfigFile();
-    if (!r.cancelado) {
-      SETTINGS.config_path = r.ruta;
-      await window.packprice.writeSettings(SETTINGS);
-      await loadConfigAndShowApp();
-    }
+    // Local mode picks a FOLDER; resolve config.js inside it (main).
+    const r = await window.packprice.selectConfigFolder();
+    if (r.cancelado) return;
+    const resolved = await window.packprice.folderConfigPath(r.carpeta);
+    if (!resolved || !resolved.ruta) return;
+    SETTINGS.config_path = resolved.ruta;
+    await window.packprice.writeSettings(SETTINGS);
+    await loadConfigAndShowApp();
   };
 }
 
@@ -1164,9 +1166,10 @@ function bindEvents() {
   el('btn-aj-cancelar').addEventListener('click', closeSettings);
   el('btn-aj-guardar').addEventListener('click', saveSettings);
   el('btn-aj-explorar').addEventListener('click', async () => {
-    const r = await window.packprice.selectConfigFile();
+    // Local mode picks a FOLDER; config.js inside it is reused or created.
+    const r = await window.packprice.selectConfigFolder();
     if (!r.cancelado) {
-      el('aj-ruta').value = r.ruta;
+      el('aj-ruta').value = r.carpeta;
     }
   });
   el('ajustes-overlay').addEventListener('click', (e) => {
@@ -4076,9 +4079,19 @@ function bucketTable(buckets) {
 // Local settings modal
 // ============================================================
 
+// Strips a trailing config.js (any separator) so a stored config path
+// displays as its folder. No path module in the renderer; the regex
+// handles both "\" and "/" and leaves a non-.js value untouched.
+function configFolderDisplay(p) {
+  if (!p) return '';
+  return p.replace(/[\\/][^\\/]*\.js$/i, '');
+}
+
 function openSettings() {
   el('aj-nombre').value = SETTINGS.user_name || '';
-  el('aj-ruta').value = SETTINGS.config_path || '';
+  // Show the folder (strip the trailing config.js) — the field is now a
+  // folder, consistent with the wizard and the folder picker.
+  el('aj-ruta').value = configFolderDisplay(SETTINGS.config_path);
   // Toggles: local persistence in localStorage as a placeholder
   // until there is an official field in settings.json (see PLAN_UI §9).
   const remember = localStorage.getItem('pp:recordar-pack') === '1';
@@ -4554,25 +4567,35 @@ function closeSettings() {
 
 async function saveSettings() {
   const name = el('aj-nombre').value.trim();
-  const filePath = el('aj-ruta').value.trim();
+  const folder = el('aj-ruta').value.trim();
 
-  if (!name || !filePath) {
+  if (!name || !folder) {
     await window.packprice.showError({
       titulo: 'Datos incompletos',
-      mensaje: 'Indica nombre y ruta del config'
+      mensaje: 'Indica tu nombre y la carpeta de datos'
     });
     return;
   }
 
+  // The field holds a folder; resolve it to <folder>/config.js in main
+  // (idempotent — an already-resolved config.js path is left untouched).
+  const resolved = await window.packprice.folderConfigPath(folder);
+  if (!resolved || !resolved.ruta) {
+    await window.packprice.showError({
+      titulo: 'Carpeta no válida',
+      mensaje: 'No se pudo resolver la carpeta seleccionada.'
+    });
+    return;
+  }
+  const filePath = resolved.ruta;
+
   if (filePath !== SETTINGS.config_path) {
-    const r = await window.packprice.readConfig(filePath);
-    if (!r.ok) {
-      await window.packprice.showError({
-        titulo: 'No se puede leer el archivo',
-        mensaje: r.error
-      });
-      return;
-    }
+    // Same contract as the wizard: reuse an existing config.js, or offer
+    // to create one with defaults if the folder doesn't have it yet.
+    const ok = await ensureConfigFileReady(name, filePath, (msg) => {
+      window.packprice.showError({ titulo: 'No se pudo usar la carpeta', mensaje: msg });
+    });
+    if (!ok) return;
   }
 
   // Toggles -> localStorage

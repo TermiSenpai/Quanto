@@ -528,14 +528,16 @@ ipcMain.handle('dialog:select-config-folder', async () => {
   return { cancelado: false, carpeta: resultado.filePaths[0] };
 });
 
-// Resolves a chosen folder to the config.js path inside it. Pure path
-// join; blessing happens later via `config:exists`/`config:create-default`
-// when the user commits, exactly like the file-pick flow.
+// Resolves a chosen folder to the config.js path inside it. Idempotent:
+// a path that already points at a .js file is returned unchanged (so the
+// settings field can carry the saved config.js path untouched), while a
+// folder gets config.js appended. Pure path join; blessing happens later
+// via `config:exists`/`config:create-default` when the user commits.
 ipcMain.handle('config:folder-config-path', (event, carpeta) => {
-  if (typeof carpeta !== 'string' || carpeta.trim() === '') {
-    return { error: 'Carpeta no válida' };
-  }
-  return { ruta: path.join(carpeta.trim(), 'config.js') };
+  const s = typeof carpeta === 'string' ? carpeta.trim() : '';
+  if (s === '') return { error: 'Carpeta no válida' };
+  if (/\.js$/i.test(s)) return { ruta: s };
+  return { ruta: path.join(s, 'config.js') };
 });
 
 // --- Cloud (v5): first-run wizard + catalog read path ---
