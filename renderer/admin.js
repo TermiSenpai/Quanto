@@ -72,6 +72,25 @@ export function esc(s) {
 }
 
 // ------------------------------------------------------------
+// Search helpers (admin catalog lists)
+// ------------------------------------------------------------
+/** Lowercase + strip diacritics, so "basica" matches "Básica". */
+export function normalizeText(s) {
+  return String(s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // strip combining diacritical marks
+    .toLowerCase();
+}
+
+/** True when `query` (normalized) is contained in an already-
+ *  normalized `haystack`. An empty/whitespace query matches all. */
+export function matchesQuery(haystack, query) {
+  const q = normalizeText(query).trim();
+  if (!q) return true;
+  return haystack.includes(q);
+}
+
+// ------------------------------------------------------------
 // Color per pack: deterministic by index so each pack keeps its hue.
 // ------------------------------------------------------------
 const PACK_COLOR_TOKENS = [

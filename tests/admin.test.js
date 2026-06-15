@@ -20,7 +20,9 @@ import {
   renderAdminPacks,
   renderAdminTabContent,
   updateConfigFromInput,
-  executeAdminAction
+  executeAdminAction,
+  normalizeText,
+  matchesQuery
 } from '../renderer/admin.js';
 import { buildDefaultConfig } from '../config.default.js';
 import { collectConfigErrors } from '../lib/config-schema.js';
@@ -64,6 +66,31 @@ describe('renderAdminParameters', () => {
 
   test('no longer shows the "Extras opcionales" group', () => {
     expect(html).not.toContain('Extras opcionales');
+  });
+});
+
+// ============================================================
+// Search helpers
+// ============================================================
+describe('search helpers', () => {
+  test('normalizeText lowercases and strips accents', () => {
+    expect(normalizeText('Camiseta Básica')).toBe('camiseta basica');
+    expect(normalizeText('SUDADERA')).toBe('sudadera');
+    expect(normalizeText(null)).toBe('');
+    expect(normalizeText(123)).toBe('123');
+  });
+
+  test('matchesQuery is accent- and case-insensitive', () => {
+    const hay = normalizeText('CAMISETA Camiseta básica tshirt');
+    expect(matchesQuery(hay, 'basica')).toBe(true);   // no accent typed
+    expect(matchesQuery(hay, 'BÁSICA')).toBe(true);    // accent + caps typed
+    expect(matchesQuery(hay, 'tshirt')).toBe(true);
+    expect(matchesQuery(hay, 'polo')).toBe(false);
+  });
+
+  test('an empty query matches everything', () => {
+    expect(matchesQuery(normalizeText('anything'), '')).toBe(true);
+    expect(matchesQuery(normalizeText('anything'), '   ')).toBe(true);
   });
 });
 
