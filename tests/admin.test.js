@@ -13,14 +13,23 @@
 import { describe, test, expect } from 'vitest';
 import {
   renderAdminParameters,
-  renderAdminSuppliers,
-  renderAdminProducts,
-  renderAdminAddons,
+  renderProductsList,
+  renderProductEditor,
   renderAdminTiers,
-  renderAdminPacks,
+  renderPacksList,
+  renderPackEditor,
   renderAdminTabContent,
   updateConfigFromInput,
-  executeAdminAction
+  executeAdminAction,
+  normalizeText,
+  matchesQuery,
+  renderListToolbar,
+  wrapCollapsible,
+  buildHaystack,
+  renderSuppliersList,
+  renderSupplierEditor,
+  renderAddonsList,
+  renderAddonEditor
 } from '../renderer/admin.js';
 import { buildDefaultConfig } from '../config.default.js';
 import { collectConfigErrors } from '../lib/config-schema.js';
@@ -64,6 +73,61 @@ describe('renderAdminParameters', () => {
 
   test('no longer shows the "Extras opcionales" group', () => {
     expect(html).not.toContain('Extras opcionales');
+  });
+});
+
+// ============================================================
+// Search helpers
+// ============================================================
+describe('search helpers', () => {
+  test('normalizeText lowercases and strips accents', () => {
+    expect(normalizeText('Camiseta Básica')).toBe('camiseta basica');
+    expect(normalizeText('SUDADERA')).toBe('sudadera');
+    expect(normalizeText(null)).toBe('');
+    expect(normalizeText(123)).toBe('123');
+  });
+
+  test('matchesQuery is accent- and case-insensitive', () => {
+    const hay = normalizeText('CAMISETA Camiseta básica tshirt');
+    expect(matchesQuery(hay, 'basica')).toBe(true);   // no accent typed
+    expect(matchesQuery(hay, 'BÁSICA')).toBe(true);    // accent + caps typed
+    expect(matchesQuery(hay, 'tshirt')).toBe(true);
+    expect(matchesQuery(hay, 'polo')).toBe(false);
+  });
+
+  test('an empty query matches everything', () => {
+    expect(matchesQuery(normalizeText('anything'), '')).toBe(true);
+    expect(matchesQuery(normalizeText('anything'), '   ')).toBe(true);
+  });
+});
+
+// ============================================================
+// renderListToolbar
+// ============================================================
+describe('renderListToolbar', () => {
+  test('emits a search input pre-filled with the query and a count', () => {
+    const html = renderListToolbar('cami', 1, 4);
+    expect(html).toContain('class="admin-search"');
+    expect(html).toContain('class="admin-search__input"');
+    expect(html).toContain('value="cami"');
+    expect(html).toContain('1 de 4');
+  });
+
+  test('escapes the query value', () => {
+    const html = renderListToolbar('"<x>', 0, 0);
+    expect(html).not.toContain('"<x>');
+    expect(html).toContain('&quot;&lt;x&gt;');
+  });
+});
+
+describe('wrapCollapsible', () => {
+  test('wraps body in an open <details> carrying a section key', () => {
+    const html = wrapCollapsible('Proveedores', '<p>body</p>', 'products:BEAGLE:suppliers');
+    expect(html).toContain('<details class="admin-section" open');
+    expect(html).toContain('data-section="products:BEAGLE:suppliers"');
+    expect(html).toContain('<summary');
+    expect(html).toContain('Proveedores');
+    expect(html).toContain('<p>body</p>');
   });
 });
 
@@ -137,9 +201,83 @@ describe('suppliers actions', () => {
     expectValid(cfg);
   });
 
-  test('render disables remove for an in-use supplier', () => {
-    const html = renderAdminSuppliers(freshCfg());
+});
+
+// ============================================================
+// Suppliers list + editor
+// ============================================================
+describe('suppliers list + editor', () => {
+  test('list shows a compact row per supplier with search data', () => {
+    const html = renderSuppliersList(freshCfg(), '');
+    expect(html).toContain('class="admin-search__input"');
+    expect(html).toContain('class="admin-list__row"');
+    expect(html).toContain('data-id="ROLY"');
+    expect(html).toContain('data-edit="ROLY"');
+    // compact list does NOT inline the editable fields
+    expect(html).not.toContain('data-cfg-path="suppliers.ROLY.name"');
+  });
+
+  test('list pre-hides rows that do not match the query and counts matches', () => {
+    const cfg = freshCfg();
+    executeAdminAction(cfg, { action: 'add-supplier' }); // SUPPLIER_1 "Nuevo proveedor"
+    const html = renderSuppliersList(cfg, 'roly');
+    // ROLY row visible, the "Nuevo proveedor" row hidden
+    expect(html).toMatch(/data-id="ROLY"[^>]*class="admin-list__row"|class="admin-list__row"[^>]*data-id="ROLY"/);
+    expect(html).toMatch(/admin-list__row is-hidden[^>]*data-id="SUPPLIER_1"|data-id="SUPPLIER_1"[^>]*admin-list__row is-hidden/);
+    expect(html).toContain('1 de 2');
+  });
+
+  test('list disables remove for an in-use supplier', () => {
+    const html = renderSuppliersList(freshCfg(), '');
     expect(html).toMatch(/data-action="remove-supplier" data-id="ROLY"[\s\S]*?disabled/);
+  });
+
+  test('editor renders the single supplier form with editable fields', () => {
+    const html = renderSupplierEditor(freshCfg(), 'ROLY');
+    expect(html).toContain('class="admin-editor__head"');
+    expect(html).toContain('data-back');
+    expect(html).toContain('data-cfg-path="suppliers.ROLY.name"');
+    expect(html).toContain('data-cfg-path="suppliers.ROLY.web"');
+    // only ROLY, not other suppliers
+    expect(html).not.toContain('data-cfg-path="suppliers.SUPPLIER_1.name"');
+  });
+
+  test('editor guards a missing id', () => {
+    const html = renderSupplierEditor(freshCfg(), 'NOPE');
+    expect(html).toContain('no encontrado');
+  });
+});
+
+// ============================================================
+// add actions return the created id
+// ============================================================
+describe('add actions return the created id', () => {
+  test('add-supplier returns its id', () => {
+    const cfg = freshCfg();
+    const r = executeAdminAction(cfg, { action: 'add-supplier' });
+    expect(r.id).toBe('SUPPLIER_1');
+    expect(cfg.suppliers[r.id]).toBeDefined();
+  });
+
+  test('add-product returns its id', () => {
+    const cfg = freshCfg();
+    const r = executeAdminAction(cfg, { action: 'add-product' });
+    expect(r.id).toBe('PRODUCT_1');
+    expect(cfg.products[r.id]).toBeDefined();
+  });
+
+  test('add-addon returns its id', () => {
+    const cfg = freshCfg();
+    const r = executeAdminAction(cfg, { action: 'add-addon' });
+    expect(r.id).toBe('addon_1');
+    expect(cfg.addons[r.id]).toBeDefined();
+  });
+
+  test('add-pack returns its id', () => {
+    const cfg = freshCfg();
+    const r = executeAdminAction(cfg, { action: 'add-pack' });
+    expect(r.id).toBe('pack_1');
+    expect(cfg.packs[r.id]).toBeDefined();
   });
 });
 
@@ -212,7 +350,7 @@ describe('products actions', () => {
   });
 
   test('render replaces "Modelos Roly" with product fields', () => {
-    const html = renderAdminProducts(freshCfg());
+    const html = renderProductEditor(freshCfg(), 'BEAGLE');
     expect(html).toContain('data-cfg-path="products.BEAGLE.name"');
     expect(html).toContain('data-cfg-path="products.BEAGLE.extra_cost_3xl"');
     expect(html).toContain('Aplicar PVP recomendado');
@@ -227,15 +365,52 @@ describe('products actions', () => {
     expect(cfg.products.BEAGLE.suppliers.length).toBe(3);
     expect(cfg.products.BEAGLE.suppliers.filter(s => s.is_default).length).toBe(1);
 
-    const html = renderAdminProducts(cfg);
+    const html = renderProductEditor(cfg, 'BEAGLE');
     const badges = html.match(/class="badge badge--accent"[^>]*>Por defecto</g) || [];
     const radios = html.match(/Usar por defecto/g) || [];
-    // One badge per product (each has exactly one default supplier)...
-    expect(badges.length).toBe(Object.keys(cfg.products).length);
+    // One badge for this single product (it has exactly one default supplier)...
+    expect(badges.length).toBe(1);
     // ...while every supplier row offers the "Usar por defecto" control,
     // so a multi-supplier product has more radios than badges (the old bug
     // showed "Por defecto" on every row).
     expect(radios.length).toBeGreaterThan(badges.length);
+  });
+});
+
+describe('products list + editor', () => {
+  test('list shows a compact row per product (id, name, category) and search data', () => {
+    const html = renderProductsList(freshCfg(), '');
+    expect(html).toContain('class="admin-search__input"');
+    expect(html).toContain('data-id="BEAGLE"');
+    expect(html).toContain('data-edit="BEAGLE"');
+    expect(html).not.toContain('data-cfg-path="products.BEAGLE.name"'); // not inline
+  });
+
+  test('list filters by category text too', () => {
+    const cfg = freshCfg();
+    const cat = cfg.products.BEAGLE.category;
+    const html = renderProductsList(cfg, cat);
+    expect(html).toMatch(/data-id="BEAGLE"[^>]*data-search="[^"]*"/);
+    // a product in a different category is hidden
+  });
+
+  test('list disables remove for an in-use product', () => {
+    const html = renderProductsList(freshCfg(), '');
+    expect(html).toMatch(/data-action="remove-product" data-id="BEAGLE"[\s\S]*?disabled/);
+  });
+
+  test('editor renders one product with collapsible suppliers and price sections', () => {
+    const html = renderProductEditor(freshCfg(), 'BEAGLE');
+    expect(html).toContain('data-back');
+    expect(html).toContain('data-cfg-path="products.BEAGLE.name"');
+    expect(html).toContain('data-section="products:BEAGLE:suppliers"');
+    expect(html).toContain('data-section="products:BEAGLE:prices"');
+    expect(html).toContain('Aplicar PVP recomendado');
+    expect(html).not.toContain('data-cfg-path="products.URBAN.name"'); // only BEAGLE
+  });
+
+  test('editor guards a missing id', () => {
+    expect(renderProductEditor(freshCfg(), 'NOPE')).toContain('no encontrado');
   });
 });
 
@@ -269,6 +444,32 @@ describe('addons actions', () => {
     executeAdminAction(cfg, { action: 'toggle-addon-category', id: 'name', cat: 'tshirt' });
     expect(cfg.addons.name.applies_to).toEqual(['*']);
     expectValid(cfg);
+  });
+});
+
+// ============================================================
+// Addons list + editor
+// ============================================================
+describe('addons list + editor', () => {
+  test('list shows a row per addon with search data, no inline fields', () => {
+    const html = renderAddonsList(freshCfg(), '');
+    expect(html).toContain('class="admin-list__row"');
+    expect(html).toContain('data-id="name"');
+    expect(html).toContain('data-edit="name"');
+    expect(html).not.toContain('data-cfg-path="addons.name.label"');
+  });
+
+  test('editor renders one addon, with category checkboxes and applies-to wrapped collapsible', () => {
+    const html = renderAddonEditor(freshCfg(), 'name');
+    expect(html).toContain('data-back');
+    expect(html).toContain('data-cfg-path="addons.name.label"');
+    expect(html).toContain('data-cfg-path="addons.name.price"');
+    expect(html).toContain('data-action-change="toggle-addon-category" data-id="name"');
+    expect(html).toContain('data-section="addons:name:applies"');
+  });
+
+  test('editor guards a missing id', () => {
+    expect(renderAddonEditor(freshCfg(), 'NOPE')).toContain('no encontrado');
   });
 });
 
@@ -455,18 +656,57 @@ describe('packs builder actions', () => {
   });
 });
 
+describe('packs list + editor', () => {
+  test('list shows a row per pack with the colour dot and search data', () => {
+    const html = renderPacksList(freshCfg(), '');
+    expect(html).toContain('class="admin-search__input"');
+    expect(html).toContain('data-id="crew_full"');
+    expect(html).toContain('data-edit="crew_full"');
+    expect(html).not.toContain('data-cfg-path="packs.crew_full.name"'); // not inline
+  });
+
+  test('editor renders one pack with collapsible options/components/prices', () => {
+    const html = renderPackEditor(freshCfg(), 'crew_full');
+    expect(html).toContain('data-back');
+    expect(html).toContain('data-cfg-path="packs.crew_full.name"');
+    expect(html).toContain('data-section="packs:crew_full:options"');
+    expect(html).toContain('data-section="packs:crew_full:components"');
+    expect(html).toContain('data-section="packs:crew_full:prices"');
+    expect(html).not.toContain('data-cfg-path="packs.tshirts_only.name"'); // only crew_full
+  });
+
+  test('editor guards a missing id', () => {
+    expect(renderPackEditor(freshCfg(), 'NOPE')).toContain('no encontrado');
+  });
+});
+
 // ============================================================
 // Router
 // ============================================================
 describe('router', () => {
-  test('renderAdminTabContent routes every v4 tab', () => {
+  test('catalog tabs default to the list view', () => {
+    const cfg = freshCfg();
+    const products = renderAdminTabContent(cfg, 'products');
+    expect(products).toContain('class="admin-search__input"');
+    expect(products).toContain('data-edit="BEAGLE"');
+
+    expect(renderAdminTabContent(cfg, 'suppliers')).toContain('data-edit="ROLY"');
+    expect(renderAdminTabContent(cfg, 'addons')).toContain('data-edit="name"');
+    expect(renderAdminTabContent(cfg, 'packs')).toContain('data-edit="crew_full"');
+  });
+
+  test('catalog tabs render the editor when view=editor', () => {
+    const cfg = freshCfg();
+    expect(renderAdminTabContent(cfg, 'products', 'editor', 'BEAGLE'))
+      .toContain('data-cfg-path="products.BEAGLE.name"');
+    expect(renderAdminTabContent(cfg, 'packs', 'editor', 'crew_full'))
+      .toContain('data-cfg-path="packs.crew_full.name"');
+  });
+
+  test('non-catalog tabs are unaffected', () => {
     const cfg = freshCfg();
     expect(renderAdminTabContent(cfg, 'parameters')).toContain('parameters.vat');
-    expect(renderAdminTabContent(cfg, 'suppliers')).toContain('suppliers.ROLY.name');
-    expect(renderAdminTabContent(cfg, 'products')).toContain('products.BEAGLE.name');
-    expect(renderAdminTabContent(cfg, 'addons')).toContain('addons.name.label');
     expect(renderAdminTabContent(cfg, 'tiers')).toContain('tiers.0.label');
-    expect(renderAdminTabContent(cfg, 'packs')).toContain('packs.crew_full.name');
     expect(renderAdminTabContent(cfg, 'unknown')).toBe('');
   });
 
@@ -526,11 +766,15 @@ describe('no v3 shape leaks in rendered HTML', () => {
     const cfg = freshCfg();
     const all = [
       renderAdminParameters(cfg),
-      renderAdminSuppliers(cfg),
-      renderAdminProducts(cfg),
-      renderAdminAddons(cfg),
+      renderSuppliersList(cfg, ''),
+      renderSupplierEditor(cfg, 'ROLY'),
+      renderProductsList(cfg, ''),
+      renderProductEditor(cfg, 'BEAGLE'),
+      renderAddonsList(cfg, ''),
+      renderAddonEditor(cfg, 'name'),
       renderAdminTiers(cfg),
-      renderAdminPacks(cfg)
+      renderPacksList(cfg, ''),
+      renderPackEditor(cfg, 'crew_full')
     ].join('\n');
     expect(all).not.toContain('roly_models');
     expect(all).not.toContain('pack.type');

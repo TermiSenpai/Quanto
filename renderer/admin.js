@@ -72,6 +72,84 @@ export function esc(s) {
 }
 
 // ------------------------------------------------------------
+// Search helpers (admin catalog lists)
+// ------------------------------------------------------------
+/** Lowercase + strip diacritics, so "basica" matches "Básica". */
+export function normalizeText(s) {
+  return String(s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // strip combining diacritical marks
+    .toLowerCase();
+}
+
+/** True when `query` (normalized) is contained in an already-
+ *  normalized `haystack`. An empty/whitespace query matches all. */
+export function matchesQuery(haystack, query) {
+  const q = normalizeText(query).trim();
+  if (!q) return true;
+  return haystack.includes(q);
+}
+
+// ------------------------------------------------------------
+// List toolbar (search + count) and collapsible section
+// ------------------------------------------------------------
+const SEARCH_SVG =
+  '<svg class="icon admin-search__icon"><use href="#i-search"/></svg>';
+const CARET_SVG_SECTION =
+  '<svg class="admin-section__caret" width="14" height="14" viewBox="0 0 24 24" ' +
+  'fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
+  'stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+
+/** Search box + "N de M" count. The count is hidden until a query is
+ *  active; `app.js` updates it live as the user types. */
+export function renderListToolbar(query, count, total) {
+  const q = query || '';
+  return `
+    <div class="admin-search">
+      ${SEARCH_SVG}
+      <input type="text" class="admin-search__input" placeholder="Buscar…"
+             value="${esc(q)}" aria-label="Buscar en la lista">
+    </div>
+    <div class="admin-list-count"${q ? '' : ' hidden'}>${count} de ${total}</div>
+  `;
+}
+
+/** Native collapsible. Always rendered open; app.js re-applies the
+ *  user's collapsed sections (state.adminClosedSections) after render. */
+export function wrapCollapsible(label, bodyHtml, sectionKey) {
+  return `
+    <details class="admin-section" open data-section="${esc(sectionKey)}">
+      <summary class="admin-section__head">${CARET_SVG_SECTION}<span>${esc(label)}</span></summary>
+      <div class="admin-section__body">${bodyHtml}</div>
+    </details>
+  `;
+}
+
+/** Join parts into a normalized search haystack. */
+export function buildHaystack(parts) {
+  return normalizeText(parts.filter(v => v !== null && v !== undefined && v !== '').join(' '));
+}
+
+/** Editor header: back button + title (Spanish UI). */
+function renderEditorHead(title) {
+  return `
+    <div class="admin-editor__head">
+      <button type="button" class="btn btn-ghost" data-back>
+        <svg class="icon"><use href="#i-chevron-left"/></svg> Volver a la lista
+      </button>
+      <h3 class="admin-editor__title">${esc(title)}</h3>
+    </div>
+  `;
+}
+
+function renderEditorNotFound(label) {
+  return `
+    ${renderEditorHead('No encontrado')}
+    <p class="hint">${esc(label)} no encontrado. Vuelve a la lista.</p>
+  `;
+}
+
+// ------------------------------------------------------------
 // Color per pack: deterministic by index so each pack keeps its hue.
 // ------------------------------------------------------------
 const PACK_COLOR_TOKENS = [
@@ -120,84 +198,131 @@ export function renderAdminParameters(cfg) {
 }
 
 // ============================================================
-// SUPPLIERS
+// SUPPLIERS — list + editor
 // ============================================================
-export function renderAdminSuppliers(cfg) {
-  let html = '<p class="hint" style="margin-bottom: 12px;">Proveedores que abastecen los productos. No se puede eliminar un proveedor usado por algún producto.</p>';
+function supplierHaystack(id, s) {
+  return buildHaystack([id, s.name]);
+}
 
-  for (const [id, s] of Object.entries(cfg.suppliers || {})) {
+export function renderSuppliersList(cfg, query = '') {
+  const entries = Object.entries(cfg.suppliers || {});
+  const total = entries.length;
+  let count = 0;
+  let rows = '';
+  for (const [id, s] of entries) {
     const inUse = isSupplierInUse(cfg, id);
-    html += `
-      <div class="admin-row">
-        <div class="admin-row__head">
-          <div class="admin-row__title">
-            <span class="admin-row__id">${esc(id)}</span>
-            <strong>${esc(s.name || '—')}</strong>
-            ${inUse ? '<span class="admin-row__id" style="margin-left: 6px;">en uso</span>' : ''}
-          </div>
+    const hay = supplierHaystack(id, s);
+    const show = matchesQuery(hay, query);
+    if (show) count++;
+    rows += `
+      <div class="admin-list__row${show ? '' : ' is-hidden'}" data-id="${esc(id)}"
+           data-edit="${esc(id)}" data-search="${esc(hay)}">
+        <span class="admin-row__id">${esc(id)}</span>
+        <strong class="admin-list__name">${esc(s.name || '—')}</strong>
+        ${inUse ? '<span class="admin-list__meta">en uso</span>' : ''}
+        <span class="admin-list__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(id)}">Editar</button>
           <button type="button" class="admin-row__remove"
                   data-action="remove-supplier" data-id="${esc(id)}"
                   ${inUse ? 'disabled title="Lo usa algún producto"' : 'title="Eliminar proveedor"'}
                   aria-label="Eliminar proveedor ${esc(id)}">
             <svg class="icon"><use href="#i-x"/></svg>
           </button>
-        </div>
-        <div class="admin-grid">
-          <label>Nombre
-            <input type="text" value="${esc(s.name || '')}" data-cfg-path="suppliers.${esc(id)}.name">
-          </label>
-          <label>Web <span class="hint">opcional</span>
-            <input type="text" value="${esc(s.web || '')}" data-cfg-path="suppliers.${esc(id)}.web">
-          </label>
-          <label>Notas <span class="hint">opcional</span>
-            <input type="text" value="${esc(s.notes || '')}" data-cfg-path="suppliers.${esc(id)}.notes">
-          </label>
-        </div>
+        </span>
       </div>
     `;
   }
-
-  html += `
+  return `
+    <p class="hint" style="margin-bottom: 12px;">Proveedores que abastecen los productos. No se puede eliminar un proveedor usado por algún producto.</p>
+    ${renderListToolbar(query, count, total)}
+    <div class="admin-list">
+      ${rows}
+      <div class="admin-empty"${count ? ' hidden' : ''}>Sin resultados${query ? ` para «${esc(query)}»` : ''}.</div>
+    </div>
     <div class="admin-row-add">
       <button type="button" class="btn btn-secondary" data-action="add-supplier">
         <svg class="icon"><use href="#i-plus"/></svg> Añadir proveedor
       </button>
     </div>
   `;
-  return html;
+}
+
+export function renderSupplierEditor(cfg, id) {
+  const s = cfg.suppliers?.[id];
+  if (!s) return renderEditorNotFound('Proveedor');
+  return `
+    ${renderEditorHead(`Editar proveedor: ${esc(s.name || id)}`)}
+    <div class="admin-grid">
+      <label>Nombre
+        <input type="text" value="${esc(s.name || '')}" data-cfg-path="suppliers.${esc(id)}.name">
+      </label>
+      <label>Web <span class="hint">opcional</span>
+        <input type="text" value="${esc(s.web || '')}" data-cfg-path="suppliers.${esc(id)}.web">
+      </label>
+      <label>Notas <span class="hint">opcional</span>
+        <input type="text" value="${esc(s.notes || '')}" data-cfg-path="suppliers.${esc(id)}.notes">
+      </label>
+    </div>
+  `;
 }
 
 // ============================================================
-// PRODUCTS (replaces v3 "Modelos Roly")
+// PRODUCTS — list + editor (replaces v3 "Modelos Roly")
 // ============================================================
-export function renderAdminProducts(cfg) {
-  let html = '<p class="hint" style="margin-bottom: 12px;">Cada producto tiene su categoría, coste extra de 3XL, margen objetivo, sus proveedores (uno por defecto) y su tabla de PVP por caras y tramo. No se puede eliminar un producto usado por algún pack.</p>';
+export function renderProductsList(cfg, query = '') {
+  const entries = Object.entries(cfg.products || {});
+  const total = entries.length;
+  let count = 0;
+  let rows = '';
+  for (const [id, p] of entries) {
+    const inUse = isProductInUse(cfg, id);
+    const hay = buildHaystack([id, p.name, p.category]);
+    const show = matchesQuery(hay, query);
+    if (show) count++;
+    rows += `
+      <div class="admin-list__row${show ? '' : ' is-hidden'}" data-id="${esc(id)}"
+           data-edit="${esc(id)}" data-search="${esc(hay)}">
+        <span class="admin-row__id">${esc(id)}</span>
+        <strong class="admin-list__name">${esc(p.name || '—')}</strong>
+        ${p.category ? `<span class="admin-list__meta">${esc(p.category)}</span>` : ''}
+        ${inUse ? '<span class="admin-list__meta">en uso</span>' : ''}
+        <span class="admin-list__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(id)}">Editar</button>
+          <button type="button" class="admin-row__remove"
+                  data-action="remove-product" data-id="${esc(id)}"
+                  ${inUse ? 'disabled title="Lo usa algún pack"' : 'title="Eliminar producto"'}
+                  aria-label="Eliminar producto ${esc(id)}">
+            <svg class="icon"><use href="#i-x"/></svg>
+          </button>
+        </span>
+      </div>
+    `;
+  }
+  return `
+    <p class="hint" style="margin-bottom: 12px;">Cada producto tiene su categoría, coste extra de 3XL, margen objetivo, sus proveedores (uno por defecto) y su tabla de PVP por caras y tramo. No se puede eliminar un producto usado por algún pack.</p>
+    ${renderListToolbar(query, count, total)}
+    <div class="admin-list">
+      ${rows}
+      <div class="admin-empty"${count ? ' hidden' : ''}>Sin resultados${query ? ` para «${esc(query)}»` : ''}.</div>
+    </div>
+    <div class="admin-row-add">
+      <button type="button" class="btn btn-secondary" data-action="add-product">
+        <svg class="icon"><use href="#i-plus"/></svg> Añadir producto
+      </button>
+    </div>
+  `;
+}
+
+export function renderProductEditor(cfg, id) {
+  const p = cfg.products?.[id];
+  if (!p) return renderEditorNotFound('Producto');
 
   const supplierIds = Object.keys(cfg.suppliers || {});
   const categories = collectCategories(cfg);
 
-  for (const [id, p] of Object.entries(cfg.products || {})) {
-    const inUse = isProductInUse(cfg, id);
-    html += `<div class="admin-row">`;
-    html += `
-      <div class="admin-row__head">
-        <div class="admin-row__title">
-          <span class="admin-row__id">${esc(id)}</span>
-          <strong>${esc(p.name || '—')}</strong>
-          ${inUse ? '<span class="admin-row__id" style="margin-left: 6px;">en uso</span>' : ''}
-        </div>
-        <button type="button" class="admin-row__remove"
-                data-action="remove-product" data-id="${esc(id)}"
-                ${inUse ? 'disabled title="Lo usa algún pack"' : 'title="Eliminar producto"'}
-                aria-label="Eliminar producto ${esc(id)}">
-          <svg class="icon"><use href="#i-x"/></svg>
-        </button>
-      </div>
-    `;
-
-    // --- Basic fields ---
-    html += '<div class="admin-grid">';
-    html += `
+  // --- Basic fields ---
+  const basic = `
+    <div class="admin-grid">
       <label>Nombre
         <input type="text" value="${esc(p.name || '')}" data-cfg-path="products.${esc(id)}.name">
       </label>
@@ -211,95 +336,90 @@ export function renderAdminProducts(cfg) {
       <label>Margen objetivo <span class="hint">decimal · vacío usa el global</span>
         <input type="number" step="0.01" min="0" max="0.99" value="${esc(p.target_margin ?? '')}" data-cfg-path="products.${esc(id)}.target_margin">
       </label>
-    `;
-    html += '</div>';
+    </div>
+  `;
 
-    // --- Suppliers sub-list ---
-    html += `<div class="admin-mini-head">Proveedores</div>`;
-    (p.suppliers || []).forEach((sup, sidx) => {
-      const onlyOne = (p.suppliers || []).length <= 1;
-      const supplierOptions = supplierIds.map(sid =>
-        `<option value="${esc(sid)}" ${sid === sup.supplier ? 'selected' : ''}>${esc((cfg.suppliers[sid] || {}).name || sid)}</option>`
-      ).join('');
-      html += `
-        <div class="admin-row" style="margin-bottom: 8px;">
-          <div class="admin-row__head">
-            <div class="admin-row__title">
-              <label style="flex-direction: row; align-items: center; gap: 6px; font-weight: 600;">
-                <input type="radio" name="prod-default-${esc(id)}" ${sup.is_default ? 'checked' : ''}
-                       data-action-change="set-default-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}">
-                Usar por defecto
-              </label>
-              ${sup.is_default ? '<span class="badge badge--accent" style="margin-left: 6px;">Por defecto</span>' : ''}
-            </div>
-            <button type="button" class="admin-row__remove"
-                    data-action="remove-product-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}"
-                    ${onlyOne ? 'disabled title="Debe quedar al menos un proveedor"' : 'title="Quitar proveedor"'}
-                    aria-label="Quitar proveedor">
-              <svg class="icon"><use href="#i-x"/></svg>
-            </button>
+  // --- Suppliers sub-list ---
+  let suppliersBody = '';
+  (p.suppliers || []).forEach((sup, sidx) => {
+    const onlyOne = (p.suppliers || []).length <= 1;
+    const supplierOptions = supplierIds.map(sid =>
+      `<option value="${esc(sid)}" ${sid === sup.supplier ? 'selected' : ''}>${esc((cfg.suppliers[sid] || {}).name || sid)}</option>`
+    ).join('');
+    suppliersBody += `
+      <div class="admin-row" style="margin-bottom: 8px;">
+        <div class="admin-row__head">
+          <div class="admin-row__title">
+            <label style="flex-direction: row; align-items: center; gap: 6px; font-weight: 600;">
+              <input type="radio" name="prod-default-${esc(id)}" ${sup.is_default ? 'checked' : ''}
+                     data-action-change="set-default-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}">
+              Usar por defecto
+            </label>
+            ${sup.is_default ? '<span class="badge badge--accent" style="margin-left: 6px;">Por defecto</span>' : ''}
           </div>
-          <div class="admin-grid">
-            <label>Proveedor
-              <select data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.supplier">${supplierOptions}</select>
-            </label>
-            <label>Referencia
-              <input type="text" value="${esc(sup.ref || '')}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.ref">
-            </label>
-            <label>Precio base (€) <span class="hint">sin IVA, sin DTF</span>
-              <input type="number" step="0.0001" min="0" value="${esc(sup.price ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.price">
-            </label>
-            <label>Pedido mínimo
-              <input type="number" step="1" min="0" value="${esc(sup.min_order ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.min_order">
-            </label>
-          </div>
+          <button type="button" class="admin-row__remove"
+                  data-action="remove-product-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}"
+                  ${onlyOne ? 'disabled title="Debe quedar al menos un proveedor"' : 'title="Quitar proveedor"'}
+                  aria-label="Quitar proveedor">
+            <svg class="icon"><use href="#i-x"/></svg>
+          </button>
         </div>
-      `;
-    });
-    html += `
-      <div class="admin-row-add" style="margin-bottom: 12px;">
-        <button type="button" class="btn btn-ghost" data-action="add-product-supplier" data-id="${esc(id)}"
-                ${supplierIds.length === 0 ? 'disabled title="Crea antes un proveedor"' : ''}>
-          <svg class="icon"><use href="#i-plus"/></svg> Añadir proveedor a este producto
-        </button>
-      </div>
-    `;
-
-    // --- Price table (faces × tiers) ---
-    html += `<div class="admin-mini-head">PVP por caras y tramo (IVA incl.)</div>`;
-    for (const [faceKey, faceLabel] of PRICE_FACES) {
-      html += `<div class="admin-subhead">${faceLabel}</div>`;
-      html += '<div class="admin-grid">';
-      for (const t of cfg.tiers) {
-        const value = p.prices?.[faceKey]?.[t.id];
-        html += `
-          <label>${esc(t.id)} · ${esc(t.label || '')}
-            <input type="number" step="0.01" min="0" value="${esc(value ?? 0)}" data-cfg-path="products.${esc(id)}.prices.${esc(faceKey)}.${esc(t.id)}">
+        <div class="admin-grid">
+          <label>Proveedor
+            <select data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.supplier">${supplierOptions}</select>
           </label>
-        `;
-      }
-      html += '</div>';
-    }
-    html += `
-      <div class="admin-row-add" style="margin-top: 6px;">
-        <button type="button" class="btn btn-secondary" data-action="apply-recommended-product" data-id="${esc(id)}">
-          <svg class="icon"><use href="#i-trend"/></svg> Aplicar PVP recomendado
-        </button>
-        <span class="hint" style="margin-left: 10px;">${esc(recommendedHint(cfg, p))}</span>
+          <label>Referencia
+            <input type="text" value="${esc(sup.ref || '')}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.ref">
+          </label>
+          <label>Precio base (€) <span class="hint">sin IVA, sin DTF</span>
+            <input type="number" step="0.0001" min="0" value="${esc(sup.price ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.price">
+          </label>
+          <label>Pedido mínimo
+            <input type="number" step="1" min="0" value="${esc(sup.min_order ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.min_order">
+          </label>
+        </div>
       </div>
     `;
-
-    html += '</div>';
-  }
-
-  html += `
-    <div class="admin-row-add">
-      <button type="button" class="btn btn-secondary" data-action="add-product">
-        <svg class="icon"><use href="#i-plus"/></svg> Añadir producto
+  });
+  suppliersBody += `
+    <div class="admin-row-add" style="margin-bottom: 12px;">
+      <button type="button" class="btn btn-ghost" data-action="add-product-supplier" data-id="${esc(id)}"
+              ${supplierIds.length === 0 ? 'disabled title="Crea antes un proveedor"' : ''}>
+        <svg class="icon"><use href="#i-plus"/></svg> Añadir proveedor a este producto
       </button>
     </div>
   `;
-  return html;
+
+  // --- Price table (faces × tiers) ---
+  let pricesBody = '';
+  for (const [faceKey, faceLabel] of PRICE_FACES) {
+    pricesBody += `<div class="admin-subhead">${faceLabel}</div>`;
+    pricesBody += '<div class="admin-grid">';
+    for (const t of cfg.tiers) {
+      const value = p.prices?.[faceKey]?.[t.id];
+      pricesBody += `
+        <label>${esc(t.id)} · ${esc(t.label || '')}
+          <input type="number" step="0.01" min="0" value="${esc(value ?? 0)}" data-cfg-path="products.${esc(id)}.prices.${esc(faceKey)}.${esc(t.id)}">
+        </label>
+      `;
+    }
+    pricesBody += '</div>';
+  }
+  pricesBody += `
+    <div class="admin-row-add" style="margin-top: 6px;">
+      <button type="button" class="btn btn-secondary" data-action="apply-recommended-product" data-id="${esc(id)}">
+        <svg class="icon"><use href="#i-trend"/></svg> Aplicar PVP recomendado
+      </button>
+      <span class="hint" style="margin-left: 10px;">${esc(recommendedHint(cfg, p))}</span>
+    </div>
+  `;
+
+  return `
+    ${renderEditorHead(`Editar producto: ${esc(p.name || id)}`)}
+    ${basic}
+    ${wrapCollapsible('Proveedores', suppliersBody, `products:${id}:suppliers`)}
+    ${wrapCollapsible('PVP por caras y tramo (IVA incl.)', pricesBody, `products:${id}:prices`)}
+  `;
 }
 
 /** Short hint showing the recommended PVP for a product's two-sides
@@ -327,66 +447,85 @@ function findProductId(cfg, product) {
 }
 
 // ============================================================
-// ADDONS
+// ADDONS — list + editor
 // ============================================================
-export function renderAdminAddons(cfg) {
-  let html = '<p class="hint" style="margin-bottom: 12px;">Complementos opcionales (nombre, mangas, …). El precio es sin IVA salvo que marques «IVA incluido». «Aplica a» son categorías de producto, o «*» para todas.</p>';
-
-  const categories = collectCategories(cfg);
-
-  for (const [id, a] of Object.entries(cfg.addons || {})) {
-    const appliesTo = Array.isArray(a.applies_to) ? a.applies_to : [];
-    const all = ['*', ...categories];
-    html += `
-      <div class="admin-row">
-        <div class="admin-row__head">
-          <div class="admin-row__title">
-            <span class="admin-row__id">${esc(id)}</span>
-            <strong>${esc(a.label || '—')}</strong>
-          </div>
+export function renderAddonsList(cfg, query = '') {
+  const entries = Object.entries(cfg.addons || {});
+  const total = entries.length;
+  let count = 0;
+  let rows = '';
+  for (const [id, a] of entries) {
+    const hay = buildHaystack([id, a.label]);
+    const show = matchesQuery(hay, query);
+    if (show) count++;
+    rows += `
+      <div class="admin-list__row${show ? '' : ' is-hidden'}" data-id="${esc(id)}"
+           data-edit="${esc(id)}" data-search="${esc(hay)}">
+        <span class="admin-row__id">${esc(id)}</span>
+        <strong class="admin-list__name">${esc(a.label || '—')}</strong>
+        <span class="admin-list__meta">${esc((a.price ?? 0))} €</span>
+        <span class="admin-list__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(id)}">Editar</button>
           <button type="button" class="admin-row__remove"
                   data-action="remove-addon" data-id="${esc(id)}"
                   title="Eliminar complemento" aria-label="Eliminar complemento ${esc(id)}">
             <svg class="icon"><use href="#i-x"/></svg>
           </button>
-        </div>
-        <div class="admin-grid">
-          <label>Etiqueta
-            <input type="text" value="${esc(a.label || '')}" data-cfg-path="addons.${esc(id)}.label">
-          </label>
-          <label>Precio (€/ud)
-            <input type="number" step="0.01" min="0" value="${esc(a.price ?? 0)}" data-cfg-path="addons.${esc(id)}.price">
-          </label>
-          <label>Coste interno (€/ud) <span class="hint">para el margen</span>
-            <input type="number" step="0.01" min="0" value="${esc(a.cost ?? 0)}" data-cfg-path="addons.${esc(id)}.cost">
-          </label>
-          <label style="flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" ${a.vat_included ? 'checked' : ''} data-cfg-path="addons.${esc(id)}.vat_included">
-            El precio ya incluye IVA
-          </label>
-        </div>
-        <div class="admin-mini-head">Aplica a</div>
-        <div class="admin-grid">
-          ${all.map(cat => `
-            <label style="flex-direction: row; align-items: center; gap: 8px;">
-              <input type="checkbox" ${appliesTo.includes(cat) ? 'checked' : ''}
-                     data-action-change="toggle-addon-category" data-id="${esc(id)}" data-cat="${esc(cat)}">
-              ${cat === '*' ? 'Todas (*)' : esc(cat)}
-            </label>
-          `).join('')}
-        </div>
+        </span>
       </div>
     `;
   }
-
-  html += `
+  return `
+    <p class="hint" style="margin-bottom: 12px;">Complementos opcionales (nombre, mangas, …). El precio es sin IVA salvo que marques «IVA incluido». «Aplica a» son categorías de producto, o «*» para todas.</p>
+    ${renderListToolbar(query, count, total)}
+    <div class="admin-list">
+      ${rows}
+      <div class="admin-empty"${count ? ' hidden' : ''}>Sin resultados${query ? ` para «${esc(query)}»` : ''}.</div>
+    </div>
     <div class="admin-row-add">
       <button type="button" class="btn btn-secondary" data-action="add-addon">
         <svg class="icon"><use href="#i-plus"/></svg> Añadir complemento
       </button>
     </div>
   `;
-  return html;
+}
+
+export function renderAddonEditor(cfg, id) {
+  const a = cfg.addons?.[id];
+  if (!a) return renderEditorNotFound('Complemento');
+  const categories = collectCategories(cfg);
+  const appliesTo = Array.isArray(a.applies_to) ? a.applies_to : [];
+  const all = ['*', ...categories];
+  const appliesBody = `
+    <div class="admin-grid">
+      ${all.map(cat => `
+        <label style="flex-direction: row; align-items: center; gap: 8px;">
+          <input type="checkbox" ${appliesTo.includes(cat) ? 'checked' : ''}
+                 data-action-change="toggle-addon-category" data-id="${esc(id)}" data-cat="${esc(cat)}">
+          ${cat === '*' ? 'Todas (*)' : esc(cat)}
+        </label>
+      `).join('')}
+    </div>
+  `;
+  return `
+    ${renderEditorHead(`Editar complemento: ${esc(a.label || id)}`)}
+    <div class="admin-grid">
+      <label>Etiqueta
+        <input type="text" value="${esc(a.label || '')}" data-cfg-path="addons.${esc(id)}.label">
+      </label>
+      <label>Precio (€/ud)
+        <input type="number" step="0.01" min="0" value="${esc(a.price ?? 0)}" data-cfg-path="addons.${esc(id)}.price">
+      </label>
+      <label>Coste interno (€/ud) <span class="hint">para el margen</span>
+        <input type="number" step="0.01" min="0" value="${esc(a.cost ?? 0)}" data-cfg-path="addons.${esc(id)}.cost">
+      </label>
+      <label style="flex-direction: row; align-items: center; gap: 8px;">
+        <input type="checkbox" ${a.vat_included ? 'checked' : ''} data-cfg-path="addons.${esc(id)}.vat_included">
+        El precio ya incluye IVA
+      </label>
+    </div>
+    ${wrapCollapsible('Aplica a', appliesBody, `addons:${id}:applies`)}
+  `;
 }
 
 // ============================================================
@@ -440,35 +579,60 @@ export function renderAdminTiers(cfg) {
 }
 
 // ============================================================
-// PACKS (builder) — each pack with its color
+// PACKS (builder) — list + editor
 // ============================================================
-export function renderAdminPacks(cfg) {
-  let html = '<p class="hint" style="margin-bottom: 16px;">Crea y edita packs completos: opciones (caras, capucha…), componentes (productos y, en packs por unidad, cuántos por pack) y, en modo «por unidad» (bundle), la tabla de PVP por combinación y tramo. Los packs «por componentes» usan el PVP de cada producto (pestaña Productos).</p>';
-
-  const productIds = Object.keys(cfg.products || {});
-
+export function renderPacksList(cfg, query = '') {
+  const entries = Object.entries(cfg.packs || {});
+  const total = entries.length;
+  let count = 0;
+  let rows = '';
   let idx = 0;
-  for (const [id, pack] of Object.entries(cfg.packs)) {
+  for (const [id, pack] of entries) {
     const colorToken = packColorToken(id, idx);
     idx++;
-
-    html += `<section class="admin-pack" style="--pack-color: var(${colorToken});">`;
-    html += `
-      <header class="admin-pack__head">
+    const modeLabel = pack.pricing_mode === 'bundle' ? 'Por unidad' : 'Por componentes';
+    const hay = buildHaystack([id, pack.name, pack.description]);
+    const show = matchesQuery(hay, query);
+    if (show) count++;
+    rows += `
+      <div class="admin-list__row${show ? '' : ' is-hidden'}" data-id="${esc(id)}"
+           data-edit="${esc(id)}" data-search="${esc(hay)}" style="--pack-color: var(${colorToken});">
         <span class="admin-pack__dot"></span>
-        <h4>${esc(pack.name || id)}</h4>
-        <button type="button" class="admin-row__remove"
-                data-action="remove-pack" data-id="${esc(id)}"
-                title="Eliminar pack" aria-label="Eliminar pack ${esc(id)}">
-          <svg class="icon"><use href="#i-x"/></svg>
-        </button>
-      </header>
-      <div class="admin-pack__body">
+        <strong class="admin-list__name">${esc(pack.name || id)}</strong>
+        <span class="admin-list__meta">${modeLabel}</span>
+        <span class="admin-list__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(id)}">Editar</button>
+          <button type="button" class="admin-row__remove"
+                  data-action="remove-pack" data-id="${esc(id)}"
+                  title="Eliminar pack" aria-label="Eliminar pack ${esc(id)}">
+            <svg class="icon"><use href="#i-x"/></svg>
+          </button>
+        </span>
+      </div>
     `;
+  }
+  return `
+    <p class="hint" style="margin-bottom: 16px;">Crea y edita packs completos: opciones (caras, capucha…), componentes (productos y, en packs por unidad, cuántos por pack) y, en modo «por unidad» (bundle), la tabla de PVP por combinación y tramo. Los packs «por componentes» usan el PVP de cada producto (pestaña Productos).</p>
+    ${renderListToolbar(query, count, total)}
+    <div class="admin-list">
+      ${rows}
+      <div class="admin-empty"${count ? ' hidden' : ''}>Sin resultados${query ? ` para «${esc(query)}»` : ''}.</div>
+    </div>
+    <div class="admin-row-add">
+      <button type="button" class="btn btn-secondary" data-action="add-pack">
+        <svg class="icon"><use href="#i-plus"/></svg> Crear pack
+      </button>
+    </div>
+  `;
+}
 
-    // --- Identity ---
-    html += '<div class="admin-grid">';
-    html += `
+export function renderPackEditor(cfg, id) {
+  const pack = cfg.packs?.[id];
+  if (!pack) return renderEditorNotFound('Pack');
+
+  // Identity grid (from old loop body, lines ~470-499)
+  const identity = `
+    <div class="admin-grid">
       <label>Nombre
         <input type="text" value="${esc(pack.name || '')}" data-cfg-path="packs.${esc(id)}.name">
       </label>
@@ -495,37 +659,28 @@ export function renderAdminPacks(cfg) {
                data-action-change="toggle-free-components" data-id="${esc(id)}">
         Componentes libres (el usuario elige productos)
       </label>
-    `;
-    html += '</div>';
-
-    // --- Options ---
-    html += renderPackOptions(cfg, id, pack);
-
-    // --- Components ---
-    if (!pack.free_components) {
-      html += renderPackComponents(cfg, id, pack, productIds);
-    } else {
-      html += `<div class="admin-mini-head">Componentes</div><p class="hint">Pack de componentes libres: el usuario añade líneas con cualquier producto del catálogo.</p>`;
-    }
-
-    // --- Prices ---
-    if (pack.pricing_mode === 'bundle') {
-      html += renderBundlePrices(cfg, id, pack);
-    } else {
-      html += `<div class="admin-mini-head">Precios</div><p class="hint">Este pack factura cada componente al PVP de su producto. Edita los precios en la pestaña <strong>Productos</strong>.</p>`;
-    }
-
-    html += '</div></section>';
-  }
-
-  html += `
-    <div class="admin-row-add">
-      <button type="button" class="btn btn-secondary" data-action="add-pack">
-        <svg class="icon"><use href="#i-plus"/></svg> Crear pack
-      </button>
     </div>
   `;
-  return html;
+
+  const productIds = Object.keys(cfg.products || {});
+
+  // Components body (reuses the existing helpers).
+  const componentsBody = pack.free_components
+    ? '<p class="hint">Pack de componentes libres: el usuario añade líneas con cualquier producto del catálogo.</p>'
+    : renderPackComponents(cfg, id, pack, productIds);
+
+  // Prices body (reuses the existing helper).
+  const pricesBody = pack.pricing_mode === 'bundle'
+    ? renderBundlePrices(cfg, id, pack)
+    : '<p class="hint">Este pack factura cada componente al PVP de su producto. Edita los precios en la pestaña <strong>Productos</strong>.</p>';
+
+  return `
+    ${renderEditorHead(`Editar pack: ${esc(pack.name || id)}`)}
+    ${identity}
+    ${wrapCollapsible('Opciones', renderPackOptions(cfg, id, pack), `packs:${id}:options`)}
+    ${wrapCollapsible('Componentes', componentsBody, `packs:${id}:components`)}
+    ${wrapCollapsible('Precios', pricesBody, `packs:${id}:prices`)}
+  `;
 }
 
 function renderPackOptions(cfg, id, pack) {
@@ -681,14 +836,14 @@ function comboLabel(pack, combo) {
 // ============================================================
 // Tab router
 // ============================================================
-export function renderAdminTabContent(cfg, tab) {
+export function renderAdminTabContent(cfg, tab, view = 'list', id = null) {
   switch (tab) {
     case 'parameters': return renderAdminParameters(cfg);
-    case 'suppliers':  return renderAdminSuppliers(cfg);
-    case 'products':   return renderAdminProducts(cfg);
-    case 'addons':     return renderAdminAddons(cfg);
     case 'tiers':      return renderAdminTiers(cfg);
-    case 'packs':      return renderAdminPacks(cfg);
+    case 'suppliers':  return view === 'editor' ? renderSupplierEditor(cfg, id) : renderSuppliersList(cfg, '');
+    case 'products':   return view === 'editor' ? renderProductEditor(cfg, id)  : renderProductsList(cfg, '');
+    case 'addons':     return view === 'editor' ? renderAddonEditor(cfg, id)    : renderAddonsList(cfg, '');
+    case 'packs':      return view === 'editor' ? renderPackEditor(cfg, id)     : renderPacksList(cfg, '');
     default:           return '';
   }
 }
@@ -872,7 +1027,7 @@ function addSupplier(cfg) {
   if (!cfg.suppliers) cfg.suppliers = {};
   const id = nextId(cfg.suppliers, 'SUPPLIER_');
   cfg.suppliers[id] = { name: 'Nuevo proveedor', web: '', notes: '' };
-  return { dirty: true };
+  return { dirty: true, id };
 }
 
 function removeSupplier(cfg, id) {
@@ -917,7 +1072,7 @@ function addProduct(cfg) {
     ],
     prices
   };
-  return { dirty: true };
+  return { dirty: true, id };
 }
 
 function removeProduct(cfg, id) {
@@ -1015,7 +1170,7 @@ function addAddon(cfg) {
     cost: 0,
     applies_to: ['*']
   };
-  return { dirty: true };
+  return { dirty: true, id };
 }
 
 function removeAddon(cfg, id) {
@@ -1079,7 +1234,7 @@ function addPack(cfg) {
   // pack lets the user pick products at quote time (free_components).
   if (productIds.length === 0) pack.free_components = true;
   cfg.packs[id] = pack;
-  return { dirty: true };
+  return { dirty: true, id };
 }
 
 function removePack(cfg, id) {

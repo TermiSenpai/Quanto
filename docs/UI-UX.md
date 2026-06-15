@@ -154,6 +154,38 @@ Pantalla de error existente, con mensaje específico y dos salidas:
 
 Nunca se muestran datos inventados ni se arranca con catálogo vacío.
 
+### 2.4b Admin: lista de catálogo y editor enfocado
+
+Las cuatro pestañas de catálogo del admin (Productos, Packs, Proveedores,
+Complementos) tienen dos vistas dentro del mismo modal:
+
+**Vista de lista** (por defecto al abrir la pestaña):
+- Barra de búsqueda con icono lupa; acento-insensible; filtra por id, nombre
+  y categoría/meta sin re-renderizar (DOM filter, el foco no se pierde).
+- Contador «N de M» (oculto si no hay búsqueda activa); estado vacío
+  «Sin resultados para «…»» cuando N = 0.
+- Fila compacta por entidad: chip de id · nombre · meta secundaria · botón
+  [Editar] · botón eliminar (deshabilitado si está en uso).
+- Botón «Añadir <entidad>» al pie; abre el editor directamente sobre la
+  entidad recién creada.
+
+**Vista de editor** (al pulsar [Editar] o una fila):
+- Cabecera `← Volver a la lista` + título «Editar: <nombre>».
+- Formulario de la entidad a todo el ancho, con secciones largas envueltas en
+  `<details>` nativos plegables (abiertas por defecto):
+  - Productos: «Proveedores», «PVP por caras y tramo»
+  - Packs: «Opciones», «Componentes», «Precios»
+  - Complementos: «Aplica a»
+  - Proveedores: sin secciones plegables (formulario corto)
+- «← Volver» regresa a la lista conservando el texto de búsqueda.
+- El modelo de guardado no cambia: el único «Guardar» del pie del modal
+  persiste el catálogo completo con comprobación de conflicto.
+
+**Modal responsive:** ancho `min(1380px, 95vw)`; la rejilla `.admin-grid`
+usa `repeat(auto-fit, minmax(220px, 1fr))`, lo que muestra más columnas en
+monitores grandes y colapsa a una sola columna en estrecho (≤ 600 px →
+pantalla completa).
+
 ### 2.5 Editor de catálogo sin modo admin
 
 En v5 desaparece la puerta de contraseña: el editor de catálogo (el antiguo

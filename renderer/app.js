@@ -28,7 +28,12 @@ import {
 import {
   renderAdminTabContent,
   updateConfigFromInput,
-  executeAdminAction
+  executeAdminAction,
+  renderProductsList,
+  renderPacksList,
+  renderSuppliersList,
+  renderAddonsList,
+  matchesQuery
 } from './admin.js';
 import {
   renderAuditTab,
@@ -108,7 +113,14 @@ const state = {
   packId: null,
   isAdmin: false,
   adminTab: 'parameters',
-  showCosts: false      // secret shortcut: 3 × "." toggles the view
+  showCosts: false,            // secret shortcut: 3 × "." toggles the view
+
+  // Admin catalog list/editor (kept out of the DOM because showAdminTab
+  // re-renders the whole tab on every structural action).
+  adminView: 'list',           // 'list' | 'editor' (catalog tabs only)
+  adminEditingId: null,        // entity id shown in the editor
+  adminSearch: { products: '', packs: '', suppliers: '', addons: '' },
+  adminClosedSections: new Set() // section keys the user collapsed
 };
 
 // ============================================================
@@ -134,6 +146,20 @@ const ADMIN_TAB_META = {
   packs:      { title: 'Packs',                 desc: 'Crea y edita packs: opciones, componentes y PVP por unidad o por componentes.' },
   audit:      { title: 'Historial',              desc: 'Quién cambió qué y cuándo. En la nube también puedes restaurar versiones anteriores.' }
 };
+
+// Catalog tabs use the list↔editor (master/detail) flow; the other tabs
+// (parameters, tiers, audit) render a single form straight from the router.
+const CATALOG_TABS = new Set(['products', 'packs', 'suppliers', 'addons']);
+
+function listRendererFor(tab) {
+  switch (tab) {
+    case 'products':  return renderProductsList;
+    case 'packs':     return renderPacksList;
+    case 'suppliers': return renderSuppliersList;
+    case 'addons':    return renderAddonsList;
+    default:          return null;
+  }
+}
 
 // v5 cloud Historial: how many audit entries to fetch per page. «Cargar
 // más» appends another page at the next offset.
@@ -2354,6 +2380,11 @@ async function openAdmin() {
 
 function closeAdmin() {
   hide('admin-overlay');
+  // Drop the catalog list/editor session state so the next open starts
+  // on the list with no remembered collapsed sections.
+  state.adminView = 'list';
+  state.adminEditingId = null;
+  state.adminClosedSections.clear();
 }
 
 async function showAdminEditor() {
@@ -2379,6 +2410,11 @@ async function showAdminEditor() {
   }
   updateAdminFooter();
 
+  // Open on the list view with no remembered editor/collapsed sections,
+  // so each admin session starts fresh.
+  state.adminView = 'list';
+  state.adminEditingId = null;
+  state.adminClosedSections.clear();
   showAdminTab(state.adminTab);
 }
 
@@ -2392,6 +2428,13 @@ function updateAdminFooter() {
 
 function showAdminTab(tab, opts = {}) {
   state.adminTab = tab;
+
+  // Arriving at a tab (not an in-editor re-render) starts on the list.
+  if (!opts.keepView) {
+    state.adminView = 'list';
+    state.adminEditingId = null;
+  }
+
   document.querySelectorAll('.admin-nav__item').forEach(t => {
     t.classList.toggle('is-active', t.dataset.tab === tab);
   });
@@ -2436,7 +2479,19 @@ function showAdminTab(tab, opts = {}) {
     return;
   }
 
-  cont.innerHTML = renderAdminTabContent(CFG, tab);
+  // Catalog tabs (master/detail): the live search query is owned by
+  // state, so a re-render keeps the user's filter. The router renders the
+  // editor for the entity in state, else the list with the live query.
+  if (CATALOG_TABS.has(tab)) {
+    const query = state.adminSearch[tab] || '';
+    if (state.adminView === 'editor' && state.adminEditingId) {
+      cont.innerHTML = renderAdminTabContent(CFG, tab, 'editor', state.adminEditingId);
+    } else {
+      cont.innerHTML = listRendererFor(tab)(CFG, query);
+    }
+  } else {
+    cont.innerHTML = renderAdminTabContent(CFG, tab);
+  }
 
   // Restyle the native <select>s of this freshly rendered tab. The
   // native elements stay as source of truth, so the change wiring below
@@ -2460,12 +2515,24 @@ function showAdminTab(tab, opts = {}) {
         titulo: 'Acción no permitida',
         mensaje: result.error
       });
-      // Re-render so a rejected toggle (e.g. a radio) snaps back.
-      showAdminTab(tab, { preserveScroll: true });
+      // Re-render so a rejected toggle (e.g. a radio) snaps back — but
+      // stay where we are: a rejected action inside the editor must not
+      // kick the user back to the list.
+      showAdminTab(tab, { keepView: true, preserveScroll: true });
       return;
     }
     if (result && result.dirty) {
-      showAdminTab(tab, { preserveScroll: true });
+      // A top-level add (add-product/pack/supplier/addon) returns the new
+      // id; jump straight into its editor. Structural actions inside the
+      // editor re-render in place.
+      if (CATALOG_TABS.has(tab) && result.id && String(dataset.action || '').startsWith('add-')) {
+        state.adminView = 'editor';
+        state.adminEditingId = result.id;
+        showAdminTab(tab, { keepView: true });
+      } else {
+        showAdminTab(tab, { keepView: true, preserveScroll: true });
+      }
+      return;
     }
   };
 
@@ -2487,6 +2554,66 @@ function showAdminTab(tab, opts = {}) {
       });
     });
   });
+
+  // Catalog tabs: master/detail navigation, live search and collapsible
+  // section persistence. All UI state lives in `state` (not the DOM)
+  // because the whole tab re-renders on every structural action.
+  if (CATALOG_TABS.has(tab)) {
+    // Editor: re-apply the user's collapsed sections and track toggles.
+    cont.querySelectorAll('details[data-section]').forEach(d => {
+      const key = d.dataset.section;
+      if (state.adminClosedSections.has(key)) d.open = false;
+      d.addEventListener('toggle', () => {
+        if (d.open) state.adminClosedSections.delete(key);
+        else state.adminClosedSections.add(key);
+      });
+    });
+
+    // List: live search (DOM filter, no re-render so focus is kept).
+    const searchInput = cont.querySelector('.admin-search__input');
+    if (searchInput) {
+      const countEl = cont.querySelector('.admin-list-count');
+      const emptyEl = cont.querySelector('.admin-empty');
+      const rowsEls = Array.from(cont.querySelectorAll('.admin-list__row'));
+      const applyFilter = () => {
+        const q = searchInput.value;
+        state.adminSearch[tab] = q;
+        let shown = 0;
+        rowsEls.forEach(row => {
+          const match = matchesQuery(row.dataset.search || '', q);
+          row.classList.toggle('is-hidden', !match);
+          if (match) shown++;
+        });
+        if (countEl) {
+          countEl.textContent = `${shown} de ${rowsEls.length}`;
+          countEl.hidden = !q.trim();
+        }
+        if (emptyEl) emptyEl.hidden = shown !== 0;
+      };
+      searchInput.addEventListener('input', applyFilter);
+    }
+
+    // List: open the editor on a row click. Bind to the ROW only — the
+    // inner "Editar" button carries no data-action, so its click bubbles
+    // up to this same handler (one open, not two). The remove button has
+    // data-action, so we bail out and let its own handler run instead.
+    cont.querySelectorAll('.admin-list__row').forEach(row => {
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action]')) return; // remove button → skip
+        state.adminView = 'editor';
+        state.adminEditingId = row.dataset.edit;
+        showAdminTab(tab, { keepView: true });
+      });
+    });
+    const backBtn = cont.querySelector('[data-back]');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => {
+        state.adminView = 'list';
+        state.adminEditingId = null;
+        showAdminTab(tab, { keepView: true });
+      });
+    }
+  }
 
   if (scrollPrev !== null && scroller) {
     scroller.scrollTop = scrollPrev;
