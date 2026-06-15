@@ -836,14 +836,14 @@ function comboLabel(pack, combo) {
 // ============================================================
 // Tab router
 // ============================================================
-export function renderAdminTabContent(cfg, tab) {
+export function renderAdminTabContent(cfg, tab, view = 'list', id = null) {
   switch (tab) {
     case 'parameters': return renderAdminParameters(cfg);
-    case 'suppliers':  return renderAdminSuppliers(cfg);
-    case 'products':   return renderAdminProducts(cfg);
-    case 'addons':     return renderAdminAddons(cfg);
     case 'tiers':      return renderAdminTiers(cfg);
-    case 'packs':      return renderAdminPacks(cfg);
+    case 'suppliers':  return view === 'editor' ? renderSupplierEditor(cfg, id) : renderSuppliersList(cfg, '');
+    case 'products':   return view === 'editor' ? renderProductEditor(cfg, id)  : renderProductsList(cfg, '');
+    case 'addons':     return view === 'editor' ? renderAddonEditor(cfg, id)    : renderAddonsList(cfg, '');
+    case 'packs':      return view === 'editor' ? renderPackEditor(cfg, id)     : renderPacksList(cfg, '');
     default:           return '';
   }
 }

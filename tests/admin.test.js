@@ -684,14 +684,29 @@ describe('packs list + editor', () => {
 // Router
 // ============================================================
 describe('router', () => {
-  test('renderAdminTabContent routes every v4 tab', () => {
+  test('catalog tabs default to the list view', () => {
+    const cfg = freshCfg();
+    const products = renderAdminTabContent(cfg, 'products');
+    expect(products).toContain('class="admin-search__input"');
+    expect(products).toContain('data-edit="BEAGLE"');
+
+    expect(renderAdminTabContent(cfg, 'suppliers')).toContain('data-edit="ROLY"');
+    expect(renderAdminTabContent(cfg, 'addons')).toContain('data-edit="name"');
+    expect(renderAdminTabContent(cfg, 'packs')).toContain('data-edit="crew_full"');
+  });
+
+  test('catalog tabs render the editor when view=editor', () => {
+    const cfg = freshCfg();
+    expect(renderAdminTabContent(cfg, 'products', 'editor', 'BEAGLE'))
+      .toContain('data-cfg-path="products.BEAGLE.name"');
+    expect(renderAdminTabContent(cfg, 'packs', 'editor', 'crew_full'))
+      .toContain('data-cfg-path="packs.crew_full.name"');
+  });
+
+  test('non-catalog tabs are unaffected', () => {
     const cfg = freshCfg();
     expect(renderAdminTabContent(cfg, 'parameters')).toContain('parameters.vat');
-    expect(renderAdminTabContent(cfg, 'suppliers')).toContain('suppliers.ROLY.name');
-    expect(renderAdminTabContent(cfg, 'products')).toContain('products.BEAGLE.name');
-    expect(renderAdminTabContent(cfg, 'addons')).toContain('addons.name.label');
     expect(renderAdminTabContent(cfg, 'tiers')).toContain('tiers.0.label');
-    expect(renderAdminTabContent(cfg, 'packs')).toContain('packs.crew_full.name');
     expect(renderAdminTabContent(cfg, 'unknown')).toBe('');
   });
 
