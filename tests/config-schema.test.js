@@ -1,5 +1,5 @@
 // ============================================================
-// Tests · lib/config-schema.js (strict validator)
+// Tests · lib/config-schema.js (strict validator) — v4
 // ============================================================
 // Goal: every "broken config" we worry about must produce a
 // message that names the offending field. Pure module — no fs,
@@ -15,7 +15,7 @@ import {
 import { buildDefaultConfig } from '../config.default.js';
 
 function makeConfig() {
-  return buildDefaultConfig({ modificado_por: 'tester' });
+  return buildDefaultConfig({ modified_by: 'tester' });
 }
 
 describe('happy path', () => {
@@ -44,107 +44,189 @@ describe('top-level shape', () => {
     const errors = collectConfigErrors(cfg);
     expect(errors.join('\n')).toMatch(/version/);
   });
+
+  test('a v2 config is rejected up front (must migrate first)', () => {
+    const cfg = makeConfig();
+    cfg.version = '2.0.0';
+    const errors = collectConfigErrors(cfg);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/v2/);
+    expect(errors[0]).toMatch(/migr/i);
+  });
+
+  test('a v3 config is rejected up front (must migrate first)', () => {
+    const cfg = makeConfig();
+    cfg.version = '3.0.0';
+    const errors = collectConfigErrors(cfg);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/v3/);
+    expect(errors[0]).toMatch(/migr/i);
+  });
 });
 
 describe('parameters', () => {
-  test.each(REQUIRED_PARAMETERS)('reports when "parametros.%s" is missing', (key) => {
+  test.each(REQUIRED_PARAMETERS)('reports when "parameters.%s" is missing', (key) => {
     const cfg = makeConfig();
-    delete cfg.parametros[key];
+    delete cfg.parameters[key];
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => e.includes(`parametros.${key}`))).toBe(true);
+    expect(errors.some(e => e.includes(`parameters.${key}`))).toBe(true);
+  });
+
+  test('default_target_margin and price_rounding_ending are required', () => {
+    expect(REQUIRED_PARAMETERS).toContain('default_target_margin');
+    expect(REQUIRED_PARAMETERS).toContain('price_rounding_ending');
   });
 
   test('rejects negative parameters', () => {
     const cfg = makeConfig();
-    cfg.parametros.iva = -0.05;
+    cfg.parameters.vat = -0.05;
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => e.includes('parametros.iva'))).toBe(true);
+    expect(errors.some(e => e.includes('parameters.vat'))).toBe(true);
   });
 
-  test('rejects iva above 1 (e.g. someone wrote 21 instead of 0.21)', () => {
+  test('rejects vat above 1 (e.g. someone wrote 21 instead of 0.21)', () => {
     const cfg = makeConfig();
-    cfg.parametros.iva = 21;
+    cfg.parameters.vat = 21;
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /iva/.test(e) && /entre 0 y 1/.test(e))).toBe(true);
+    expect(errors.some(e => /vat/.test(e) && /entre 0 y 1/.test(e))).toBe(true);
   });
 
   test('rejects non-numeric parameter', () => {
     const cfg = makeConfig();
-    cfg.parametros.mo_eur_hora = 'fifteen';
+    cfg.parameters.labor_eur_hour = 'fifteen';
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => e.includes('mo_eur_hora') && /número/.test(e))).toBe(true);
+    expect(errors.some(e => e.includes('labor_eur_hour') && /número/.test(e))).toBe(true);
   });
 
-  test('accepts a config without optional extras', () => {
+  test('rejects price_rounding_ending >= 1', () => {
     const cfg = makeConfig();
-    delete cfg.parametros.extra_nombre_eur;
-    delete cfg.parametros.extra_manga_corta_eur;
-    delete cfg.parametros.extra_manga_larga_eur;
-    expect(collectConfigErrors(cfg)).toEqual([]);
+    cfg.parameters.price_rounding_ending = 1.5;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /price_rounding_ending/.test(e))).toBe(true);
   });
 });
 
-describe('Roly models', () => {
-  test('reports missing required model', () => {
+describe('suppliers', () => {
+  test('rejects a missing suppliers section', () => {
     const cfg = makeConfig();
-    delete cfg.modelos_roly.URBAN;
+    delete cfg.suppliers;
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => e.includes('modelos_roly.URBAN'))).toBe(true);
+    expect(errors.some(e => /suppliers/.test(e))).toBe(true);
   });
 
-  test('rejects negative price', () => {
+  test('rejects a supplier without name', () => {
     const cfg = makeConfig();
-    cfg.modelos_roly.BEAGLE.precio = -1;
+    cfg.suppliers.ROLY.name = '';
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => e.includes('BEAGLE.precio') && /negativo/.test(e))).toBe(true);
-  });
-
-  test('rejects non-string ref', () => {
-    const cfg = makeConfig();
-    cfg.modelos_roly.BEAGLE.ref = 12345;
-    const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => e.includes('BEAGLE.ref'))).toBe(true);
+    expect(errors.some(e => /suppliers.ROLY.name/.test(e))).toBe(true);
   });
 });
 
-describe('tramos', () => {
+describe('products', () => {
+  test('reports a product without suppliers', () => {
+    const cfg = makeConfig();
+    cfg.products.BEAGLE.suppliers = [];
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /products.BEAGLE.suppliers/.test(e))).toBe(true);
+  });
+
+  test('requires exactly one default supplier', () => {
+    const cfg = makeConfig();
+    cfg.products.BEAGLE.suppliers[0].is_default = false;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /is_default/.test(e))).toBe(true);
+  });
+
+  test('rejects more than one default supplier', () => {
+    const cfg = makeConfig();
+    cfg.products.BEAGLE.suppliers.push({ supplier: 'ROLY', ref: 'Z', price: 2, min_order: 0, is_default: true });
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /is_default/.test(e))).toBe(true);
+  });
+
+  test('rejects a non-finite supplier price', () => {
+    const cfg = makeConfig();
+    cfg.products.BEAGLE.suppliers[0].price = 'free';
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /price/.test(e))).toBe(true);
+  });
+
+  test('reports a missing price entry per tier', () => {
+    const cfg = makeConfig();
+    delete cfg.products.BEAGLE.prices.two_sides.T1;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /products.BEAGLE.prices.two_sides.T1/.test(e))).toBe(true);
+  });
+
+  test('rejects a supplier referencing an unknown provider', () => {
+    const cfg = makeConfig();
+    cfg.products.BEAGLE.suppliers[0].supplier = 'GHOST';
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /GHOST/.test(e))).toBe(true);
+  });
+});
+
+describe('addons', () => {
+  test('rejects an addon without label', () => {
+    const cfg = makeConfig();
+    cfg.addons.name.label = '';
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /addons.name.label/.test(e))).toBe(true);
+  });
+
+  test('rejects a negative addon price', () => {
+    const cfg = makeConfig();
+    cfg.addons.name.price = -1;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /addons.name.price/.test(e))).toBe(true);
+  });
+
+  test('rejects applies_to that is not an array', () => {
+    const cfg = makeConfig();
+    cfg.addons.name.applies_to = 'all';
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /applies_to/.test(e))).toBe(true);
+  });
+});
+
+describe('tiers', () => {
   test('rejects empty array', () => {
     const cfg = makeConfig();
-    cfg.tramos = [];
+    cfg.tiers = [];
     const errors = collectConfigErrors(cfg);
-    expect(errors[0]).toMatch(/tramos/);
+    expect(errors.some(e => /tiers/.test(e))).toBe(true);
   });
 
   test('rejects overlapping tiers (descending order)', () => {
     const cfg = makeConfig();
-    cfg.tramos = [
-      { id: 'T1', etiqueta: '50-99', desde: 50, hasta: 99,   reduccion_tiempo: 0   },
-      { id: 'T2', etiqueta: '10-49', desde: 10, hasta: 49,   reduccion_tiempo: 0.1 },
-      { id: 'T3', etiqueta: '100+',  desde: 100, hasta: null, reduccion_tiempo: 0.2 }
+    cfg.tiers = [
+      { id: 'T1', label: '50-99', from: 50,  to: 99,   time_reduction: 0   },
+      { id: 'T2', label: '10-49', from: 10,  to: 49,   time_reduction: 0.1 },
+      { id: 'T3', label: '100+',  from: 100, to: null, time_reduction: 0.2 }
     ];
     const errors = collectConfigErrors(cfg);
     expect(errors.some(e => /solapa/.test(e))).toBe(true);
   });
 
-  test('rejects tramo where hasta < desde', () => {
+  test('rejects a tier where to < from', () => {
     const cfg = makeConfig();
-    cfg.tramos[0].hasta = 5; // desde=10 > hasta=5
+    cfg.tiers[0].to = 5; // from=10 > to=5
     const errors = collectConfigErrors(cfg);
     expect(errors.some(e => /menor/.test(e))).toBe(true);
   });
 
-  test('rejects tramo without id', () => {
+  test('rejects a tier without id', () => {
     const cfg = makeConfig();
-    cfg.tramos[0].id = '';
+    cfg.tiers[0].id = '';
     const errors = collectConfigErrors(cfg);
     expect(errors.some(e => /id/.test(e))).toBe(true);
   });
 
-  test('rejects reduccion_tiempo >= 1', () => {
+  test('rejects time_reduction >= 1', () => {
     const cfg = makeConfig();
-    cfg.tramos[1].reduccion_tiempo = 1.0;
+    cfg.tiers[1].time_reduction = 1.0;
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /reduccion_tiempo/.test(e))).toBe(true);
+    expect(errors.some(e => /time_reduction/.test(e))).toBe(true);
   });
 });
 
@@ -153,71 +235,124 @@ describe('packs', () => {
     const cfg = makeConfig();
     cfg.packs = {};
     const errors = collectConfigErrors(cfg);
-    expect(errors[0]).toMatch(/packs/);
+    expect(errors.some(e => /packs/.test(e))).toBe(true);
   });
 
-  test('reports missing PVP entry per tramo on pena pack', () => {
+  test('rejects an invalid pricing_mode', () => {
     const cfg = makeConfig();
-    delete cfg.packs.pena_completa.pvp.sin_capucha.dos_caras.T1;
+    cfg.packs.tshirts_only.pricing_mode = 'banana';
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /pena_completa.pvp.sin_capucha.dos_caras.T1/.test(e))).toBe(true);
+    expect(errors.some(e => /banana/.test(e))).toBe(true);
   });
 
-  test('individual pack with unknown modelo is flagged', () => {
+  test('reports a bundle price missing for a combo × tier', () => {
     const cfg = makeConfig();
-    cfg.packs.solo_camisetas.modelo = 'UFO';
+    delete cfg.packs.crew_full.bundle_prices['without_hood|two_sides'].T1;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /crew_full.bundle_prices.without_hood\|two_sides.T1/.test(e))).toBe(true);
+  });
+
+  test('reports a missing bundle combo entirely', () => {
+    const cfg = makeConfig();
+    delete cfg.packs.crew_full.bundle_prices['with_hood|one_side'];
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /with_hood\|one_side/.test(e))).toBe(true);
+  });
+
+  test('components pack referencing an unknown product is flagged', () => {
+    const cfg = makeConfig();
+    cfg.packs.tshirts_only.components[0].product = 'UFO';
     const errors = collectConfigErrors(cfg);
     expect(errors.some(e => /UFO/.test(e))).toBe(true);
   });
 
-  test('mixto pack with broken packs_referencia', () => {
+  test('maps_product pointing to an unknown product is flagged', () => {
     const cfg = makeConfig();
-    cfg.packs.sudaderas_mixto.packs_referencia.URBAN = 'no_existe';
+    cfg.packs.crew_full.options[0].maps_product.with_hood = 'NOPE';
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /no_existe/.test(e))).toBe(true);
+    expect(errors.some(e => /NOPE/.test(e))).toBe(true);
   });
 
-  test('personalizado pack with broken modelo reference', () => {
+  test('missing min_total is flagged', () => {
     const cfg = makeConfig();
-    cfg.packs.personalizado.modelos_referencia.BEAGLE = 'fake_pack';
+    delete cfg.packs.tshirts_only.min_total;
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /fake_pack/.test(e))).toBe(true);
-  });
-
-  test('unknown pack tipo is flagged', () => {
-    const cfg = makeConfig();
-    cfg.packs.solo_camisetas.tipo = 'banana';
-    const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /banana/.test(e))).toBe(true);
+    expect(errors.some(e => /min_total/.test(e))).toBe(true);
   });
 });
 
 describe('admin', () => {
-  test('rejects when admin.clave is missing and no tiene_clave flag', () => {
+  test('rejects when admin.password is missing and no has_password flag', () => {
     const cfg = makeConfig();
     cfg.admin = {};
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /admin.clave/.test(e))).toBe(true);
+    expect(errors.some(e => /admin.password/.test(e))).toBe(true);
   });
 
-  test('accepts the renderer-side shape (tiene_clave=true, no raw clave)', () => {
+  test('accepts the renderer-side shape (has_password=true, no raw password)', () => {
     const cfg = makeConfig();
-    cfg.admin = { tiene_clave: true };
+    cfg.admin = { has_password: true };
     const errors = collectConfigErrors(cfg);
-    expect(errors.some(e => /admin.clave/.test(e))).toBe(false);
+    expect(errors.some(e => /admin.password/.test(e))).toBe(false);
   });
 });
 
 describe('validateConfigSchema (throwing wrapper)', () => {
   test('throws with all errors joined when invalid', () => {
     const cfg = makeConfig();
-    delete cfg.parametros.iva;
-    delete cfg.parametros.mo_eur_hora;
-    expect(() => validateConfigSchema(cfg)).toThrow(/iva/);
-    expect(() => validateConfigSchema(cfg)).toThrow(/mo_eur_hora/);
+    delete cfg.parameters.vat;
+    delete cfg.parameters.labor_eur_hour;
+    expect(() => validateConfigSchema(cfg)).toThrow(/vat/);
+    expect(() => validateConfigSchema(cfg)).toThrow(/labor_eur_hour/);
   });
 
   test('does not throw on the default config', () => {
     expect(() => validateConfigSchema(makeConfig())).not.toThrow();
+  });
+});
+
+describe('company — optional PDF settings (Plan 6)', () => {
+  test('the default config seeds pdf_template and brand_color and still validates', () => {
+    const cfg = makeConfig();
+    expect(cfg.company.pdf_template).toBe('clasica');
+    expect(cfg.company.brand_color).toBe('#3D7BD9');
+    expect(collectConfigErrors(cfg)).toEqual([]);
+  });
+
+  test('accepts a company without pdf_template / brand_color', () => {
+    const cfg = makeConfig();
+    delete cfg.company.pdf_template;
+    delete cfg.company.brand_color;
+    expect(collectConfigErrors(cfg)).toEqual([]);
+  });
+
+  test('accepts an empty brand_color (treated as unset)', () => {
+    const cfg = makeConfig();
+    cfg.company.brand_color = '';
+    expect(collectConfigErrors(cfg)).toEqual([]);
+  });
+
+  test('accepts a 3-digit and a 6-digit hex brand_color', () => {
+    for (const hex of ['#08f', '#0088FF', '#abc', '#AABBCC']) {
+      const cfg = makeConfig();
+      cfg.company.brand_color = hex;
+      expect(collectConfigErrors(cfg)).toEqual([]);
+    }
+  });
+
+  test('rejects a malformed brand_color', () => {
+    for (const bad of ['red', '#12', '#xyzxyz', '3D7BD9', '#1234', 42]) {
+      const cfg = makeConfig();
+      cfg.company.brand_color = bad;
+      const errors = collectConfigErrors(cfg);
+      expect(errors.some(e => /brand_color/.test(e))).toBe(true);
+    }
+  });
+
+  test('rejects a non-string pdf_template', () => {
+    const cfg = makeConfig();
+    cfg.company.pdf_template = 42;
+    const errors = collectConfigErrors(cfg);
+    expect(errors.some(e => /pdf_template/.test(e))).toBe(true);
   });
 });

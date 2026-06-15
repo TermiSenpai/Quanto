@@ -31,6 +31,18 @@ También hace algo más útil para un equipo pequeño: **bloquea decisiones**. U
 | 09  | [Modo admin con detección de conflictos](09-modo-admin-conflictos/README.md)          | mtime + sha256, backups automáticos, diálogos nativos.              |
 | 10  | [Empaquetado, distribución y futuro](10-empaquetado-y-futuro/README.md)               | electron-builder portable, roadmap V0→V5, ampliación con el tiempo. |
 | 11  | [Tier-1 profesionalidad real](11-tier-1-profesionalidad-real/README.md)               | Validación, logs, auditoría con diff, historial e PDF.              |
+| 12  | [Configurabilidad total (v4)](12-v4-configurabilidad-total/README.md)                 | Catálogo editable, motor unificado, 3XL real, PVP recomendado, pnpm. |
+| 13  | [La v5: nube sin servidor y producto](13-v5-cloud-y-producto/README.md)               | Local o Cloudflare D1 sin servidor, sin gate de admin, auditoría + rollback, presupuestos + estadísticas, plantillas PDF, telemetría opt-out. |
+
+---
+
+## Cómo escribir nuevas entradas
+
+Desde la v5, el devlog es **por release**: cada versión distribuida publica su
+capítulo siguiendo [`TEMPLATE.md`](TEMPLATE.md) — resumen ejecutivo, capturas
+en `images/`, diagramas Mermaid, caminos descartados y decisiones bloqueadas.
+La entrada se publica **antes** de distribuir el `.exe` (es parte de la
+definición de hecho, ver `CLAUDE.md` §8).
 
 ---
 
@@ -54,4 +66,4 @@ Para el resto, [`CLAUDE.md`](../CLAUDE.md) tiene la versión normativa de las re
 
 ---
 
-*Devlog redactado al cierre del ciclo de diseño y entrega de la beta. Última revisión: 2026-04-30.*
+*Devlog por release desde la v5. Última revisión: 2026-06-13 (v5.0.0-beta).*

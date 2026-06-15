@@ -148,7 +148,7 @@
           <div class="stat"><strong>3</strong><span>Modelos Roly</span></div>
           <div class="stat"><strong>4</strong><span>Tramos por volumen</span></div>
         </div>
-        <p class="split__foot-line text-mono" style="margin-top: 16px;">v2.0.0 · uso interno taller</p>
+        <p class="split__foot-line text-mono" style="margin-top: 16px;">v3.0.0-beta</p>
       </div>
     </aside>
 
@@ -191,15 +191,222 @@
     </main>
   </section>
 
+  <!-- ================== PANTALLA: ASISTENTE PRIMER ARRANQUE ================== -->
+  <!-- v5: shown when no data source is configured (no data_source in
+       settings and no legacy config path). Two choices — Local (file
+       mode, reuses the existing path picker) and Nube (Cloudflare D1,
+       3 guided steps). English ids; Spanish copy from UI-UX §2.0. -->
+  <section id="setup-wizard" class="pantalla split hidden">
+    <aside class="split__left">
+      <div class="topbar__brand">
+        <span class="topbar__brand-icon"><svg class="icon icon--lg"><use href="#i-pack"/></svg></span>
+        <span class="topbar__brand-title">PackPrice</span>
+      </div>
+
+      <div class="split__hero">
+        <span class="badge badge--inverse"><svg class="icon"><use href="#i-info"/></svg> Primer arranque</span>
+        <h1>¿Dónde guardamos tus datos?</h1>
+        <p>Elige una vez. Podrás cambiar de origen más adelante desde los ajustes — local y nube son intercambiables.</p>
+      </div>
+
+      <div>
+        <p class="split__foot-line text-mono">v4.0.0-beta</p>
+      </div>
+    </aside>
+
+    <main class="split__right">
+
+      <!-- Paso 0: elegir Local vs Nube -->
+      <div id="wizard-choice" class="wizard-view">
+        <header>
+          <h2>Elige cómo trabajar</h2>
+          <p class="text-secondary" style="margin-top: 6px;">Las dos opciones son válidas y reversibles.</p>
+        </header>
+
+        <div class="wizard-cards">
+          <button id="wizard-pick-local" class="wizard-card" type="button">
+            <span class="wizard-card__icon"><svg class="icon icon--lg"><use href="#i-folder"/></svg></span>
+            <span class="wizard-card__title">Local</span>
+            <span class="wizard-card__desc">En este equipo o en una carpeta de red (NAS).</span>
+            <span class="wizard-card__cta">Elegir local <svg class="icon"><use href="#i-arrow-right"/></svg></span>
+          </button>
+
+          <button id="wizard-pick-cloud" class="wizard-card" type="button">
+            <span class="wizard-card__icon"><svg class="icon icon--lg"><use href="#i-layers"/></svg></span>
+            <span class="wizard-card__title">Nube</span>
+            <span class="wizard-card__desc">En tu cuenta de Cloudflare (gratis), accesible desde todos tus equipos.</span>
+            <span class="wizard-card__cta">Elegir nube <svg class="icon"><use href="#i-arrow-right"/></svg></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Rama Local: nombre + selector de ruta (modo archivo actual) -->
+      <div id="wizard-local" class="wizard-view hidden">
+        <div class="back-row">
+          <button id="btn-wizard-local-back" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#i-chevron-left"/></svg> Volver
+          </button>
+          <span class="label-eyebrow">MODO LOCAL</span>
+        </div>
+
+        <header>
+          <h2>Configuración local</h2>
+          <p class="text-secondary" style="margin-top: 6px;">Indica tu nombre y la carpeta donde guardar los datos.</p>
+        </header>
+
+        <form class="form-stack" onsubmit="return false;">
+          <div class="field">
+            <label class="field__label" for="wiz-nombre">Tu nombre</label>
+            <input type="text" id="wiz-nombre" class="input" placeholder="Ej: Alberto, Fede, …" autocomplete="off">
+          </div>
+
+          <div class="field">
+            <div class="field__row">
+              <input type="text" id="wiz-ruta" class="input input--mono" aria-label="Carpeta de datos" placeholder="Carpeta donde guardar los datos…">
+              <button id="btn-wiz-explorar" class="btn btn-secondary" type="button">
+                <svg class="icon"><use href="#i-folder"/></svg> Explorar
+              </button>
+            </div>
+          </div>
+
+          <div id="wiz-local-error" class="alert alert-error hidden"></div>
+        </form>
+
+        <div class="split__right-actions">
+          <span class="help">¿Necesitas ayuda? Contacta con tu administrador</span>
+          <button id="btn-wiz-local-empezar" class="btn btn-primary" disabled>
+            Empezar <svg class="icon"><use href="#i-arrow-right"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Rama Nube: 3 pasos guiados con barra de progreso -->
+      <div id="wizard-cloud" class="wizard-view hidden">
+        <div class="back-row">
+          <button id="btn-wizard-cloud-back" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#i-chevron-left"/></svg> Volver
+          </button>
+          <span class="label-eyebrow">MODO NUBE</span>
+        </div>
+
+        <div class="wizard-steps" id="wizard-steps">
+          <span class="wizard-steps__dot is-current" data-step="1">1</span>
+          <span class="wizard-steps__line"></span>
+          <span class="wizard-steps__dot" data-step="2">2</span>
+          <span class="wizard-steps__line"></span>
+          <span class="wizard-steps__dot" data-step="3">3</span>
+        </div>
+
+        <!-- Paso 1: cuenta -->
+        <div id="cloud-step-1" class="cloud-step">
+          <header>
+            <h2>¿Tienes cuenta de Cloudflare?</h2>
+            <p class="text-secondary" style="margin-top: 6px;">Es gratis. Si aún no tienes una, créala en un minuto y vuelve aquí.</p>
+          </header>
+
+          <div class="field">
+            <label class="field__label" for="cloud-nombre">Tu nombre</label>
+            <input type="text" id="cloud-nombre" class="input" placeholder="Ej: Alberto, Fede, …" autocomplete="off">
+            <span class="field__hint">Quedará registrado como autor de los cambios.</span>
+          </div>
+
+          <div class="split__right-actions">
+            <button id="btn-cloud-signup" class="btn btn-ghost" type="button">
+              <svg class="icon"><use href="#i-share"/></svg> Crear cuenta de Cloudflare
+            </button>
+            <button id="btn-cloud-step1-next" class="btn btn-primary" type="button">
+              Ya tengo cuenta <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Paso 2: clave de acceso (token) -->
+        <div id="cloud-step-2" class="cloud-step hidden">
+          <header>
+            <h2>Crea tu clave de acceso</h2>
+            <p class="text-secondary" style="margin-top: 6px;">Abre la página del token, créala con la plantilla indicada y pégala aquí. La comprobamos al instante.</p>
+          </header>
+
+          <div class="split__right-actions" style="justify-content: flex-start;">
+            <button id="btn-cloud-open-token" class="btn btn-secondary" type="button">
+              <svg class="icon"><use href="#i-key"/></svg> Abrir la página del token
+            </button>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="cloud-token">Pega aquí tu clave</label>
+            <input type="password" id="cloud-token" class="input input--mono" placeholder="Clave de acceso de Cloudflare" autocomplete="off">
+            <span class="field__hint">La clave se guarda solo en este equipo y nunca se comparte.</span>
+          </div>
+
+          <div id="cloud-token-error" class="alert alert-error hidden"></div>
+
+          <div class="split__right-actions">
+            <button id="btn-cloud-step2-back" class="btn btn-ghost" type="button">
+              <svg class="icon"><use href="#i-chevron-left"/></svg> Atrás
+            </button>
+            <button id="btn-cloud-step2-next" class="btn btn-primary" type="button" disabled>
+              Comprobar clave <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Paso 3: automático (cuenta + aprovisionamiento) -->
+        <div id="cloud-step-3" class="cloud-step hidden">
+          <header>
+            <h2>Conectando tu base de datos</h2>
+            <p class="text-secondary" style="margin-top: 6px;">Sin preguntas técnicas: lo hacemos por ti.</p>
+          </header>
+
+          <!-- Selector de cuenta (solo si el token da acceso a varias) -->
+          <div id="cloud-account-pick" class="field hidden">
+            <label class="field__label" for="cloud-account">Tu clave da acceso a varias cuentas. Elige una:</label>
+            <select id="cloud-account" class="input"></select>
+            <div class="split__right-actions" style="margin-top: 12px;">
+              <button id="btn-cloud-step3-back" class="btn btn-ghost" type="button">
+                <svg class="icon"><use href="#i-chevron-left"/></svg> Atrás
+              </button>
+              <button id="btn-cloud-provision" class="btn btn-primary" type="button">
+                Conectar <svg class="icon"><use href="#i-arrow-right"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Progreso del aprovisionamiento -->
+          <div id="cloud-progress" class="cloud-progress hidden">
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="cloud-progress-msg" aria-live="polite">Buscando tu base de datos…</span>
+          </div>
+
+          <div id="cloud-step3-error" class="alert alert-error hidden"></div>
+
+          <!-- Acciones tras un fallo de aprovisionamiento (cualquier
+               causa): reintentar en el sitio o volver al paso del token.
+               Visibles para 1 o varias cuentas, nunca un callejón sin
+               salida (UI-UX §2.0). -->
+          <div id="cloud-step3-fail-actions" class="split__right-actions hidden">
+            <button id="btn-cloud-step3-back-fail" class="btn btn-ghost" type="button">
+              <svg class="icon"><use href="#i-chevron-left"/></svg> Atrás
+            </button>
+            <button id="btn-cloud-step3-retry" class="btn btn-primary" type="button">
+              <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </section>
+
   <!-- ================== PANTALLA: ERROR DE CARGA ================== -->
   <section id="pantalla-error" class="pantalla pantalla-centro hidden">
     <div class="error-card">
       <div class="error-card__head">
         <span class="error-card__icon"><svg class="icon icon--lg"><use href="#i-warn"/></svg></span>
-        <h2>No se pudo cargar la configuración</h2>
+        <h2 id="error-titulo">No se pudo cargar la configuración</h2>
       </div>
       <p id="error-detalle" class="alert alert-error"></p>
-      <p class="text-secondary">Comprueba que el NAS está accesible y la ruta del config es correcta.</p>
+      <p id="error-hint" class="text-secondary">Comprueba que el NAS está accesible y la ruta del config es correcta.</p>
       <div class="error-card__actions">
         <button id="btn-error-reintentar" class="btn btn-primary">
           <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
@@ -209,6 +416,10 @@
         </button>
         <button id="btn-error-cambiar-ruta" class="btn btn-ghost">
           <svg class="icon"><use href="#i-folder"/></svg> Cambiar ubicación…
+        </button>
+        <!-- v5 cloud: shown only on NO_CLOUD_NO_CACHE (UI-UX §2.4) -->
+        <button id="btn-error-modo-local" class="btn btn-secondary hidden">
+          <svg class="icon"><use href="#i-folder"/></svg> Usar modo local…
         </button>
       </div>
     </div>
@@ -226,6 +437,13 @@
       </div>
 
       <div class="topbar__info">
+        <!-- v5: data-status indicator (UI-UX §2.1). Hidden in file
+             mode by default; app.js shows + fills it per data_source.
+             Distinguished by text + icon, not colour alone (§2.8). -->
+        <span id="data-status" class="badge badge--neutral badge--dot hidden" role="status" aria-live="polite">
+          <svg class="icon"><use href="#i-folder"/></svg>
+          <span id="data-status-label">Modo local</span>
+        </span>
         <span class="topbar__chip"><svg class="icon"><use href="#i-user"/></svg><span id="info-usuario">-</span></span>
         <span class="topbar__chip"><svg class="icon"><use href="#i-clock"/></svg>Config <span id="info-fecha-cfg">-</span></span>
         <span class="topbar__chip text-mono">v<span id="cfg-version">-</span></span>
@@ -234,6 +452,16 @@
       <div class="topbar__actions">
         <button id="btn-historial" class="btn btn-ghost" title="Ver presupuestos guardados">
           <svg class="icon"><use href="#i-clipboard"/></svg> Historial
+        </button>
+        <!-- v5: estadísticas (UI-UX §2.7). Visible siempre; en modo archivo
+             la pantalla informa de que requiere modo nube. -->
+        <button id="btn-estadisticas" class="btn btn-ghost" title="Ver estadísticas del taller">
+          <svg class="icon"><use href="#i-trend"/></svg> Estadísticas
+        </button>
+        <!-- v5: cloud refresh (UI-UX §2.1). Hidden in file mode; the
+             legacy "Recargar" button below remains the file-mode reload. -->
+        <button id="refresh-catalog" class="btn btn-ghost hidden" title="Comprobar si hay datos nuevos en la nube">
+          <svg class="icon"><use href="#i-refresh"/></svg> <span id="refresh-catalog-label">Actualizar</span>
         </button>
         <button id="btn-recargar" class="btn btn-ghost" title="Vuelve a leer config.js del NAS">
           <svg class="icon"><use href="#i-refresh"/></svg> Recargar
@@ -246,6 +474,45 @@
         </button>
       </div>
     </header>
+
+    <!-- v5: read-only offline banner (UI-UX §2.2). Persistent under the
+         topbar when the catalog came from the local cache. role="status"
+         so screen readers announce it; copy filled in by app.js. -->
+    <div id="offline-banner" class="offline-banner hidden" role="status">
+      <svg class="icon"><use href="#i-warn"/></svg>
+      <span class="offline-banner__text">
+        <strong>Sin conexión.</strong>
+        Estás viendo precios del <strong id="offline-banner-date">—</strong>.
+        Puedes presupuestar, pero no editar el catálogo.
+      </span>
+      <button id="btn-offline-retry" class="btn btn-secondary btn-sm" type="button">
+        <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
+      </button>
+    </div>
+
+    <!-- v5: recordatorio de presupuestos al arrancar (UI-UX §2.7). No
+         bloquea: es un aviso discreto que lleva al historial y se
+         descarta por el día. Texto rellenado por app.js. -->
+    <div id="quote-reminder" class="reminder-banner hidden" role="status">
+      <svg class="icon"><use href="#i-clock"/></svg>
+      <span class="reminder-banner__text" id="quote-reminder-text">—</span>
+      <button id="btn-reminder-review" class="btn btn-secondary btn-sm" type="button">Revisar</button>
+      <button id="btn-reminder-dismiss" class="reminder-banner__close" type="button" aria-label="Descartar">
+        <svg class="icon"><use href="#i-x"/></svg>
+      </button>
+    </div>
+
+    <!-- Plan 7B: aviso no bloqueante de versión nueva al arrancar (PRD
+         R15). No instala nada; «Descargar» abre la release en el
+         navegador. Texto rellenado por app.js; se descarta al cerrarlo. -->
+    <div id="update-banner" class="reminder-banner hidden" role="status">
+      <svg class="icon"><use href="#i-refresh"/></svg>
+      <span class="reminder-banner__text" id="update-banner-text">—</span>
+      <button id="btn-update-download" class="btn btn-secondary btn-sm" type="button">Descargar</button>
+      <button id="btn-update-dismiss" class="reminder-banner__close" type="button" aria-label="Descartar">
+        <svg class="icon"><use href="#i-x"/></svg>
+      </button>
+    </div>
 
     <main class="app-body">
 
@@ -305,51 +572,38 @@
 
               <div class="tallas-row">
                 <div class="field">
+                  <label class="field__label" for="cant_3xl">
+                    3XL <span class="field__hint">(colchón interno · no se factura)</span>
+                  </label>
+                  <input type="number" id="cant_3xl" min="0" value="0">
+                </div>
+                <div class="field">
                   <label class="field__label" for="cant_4xl">
-                    4XL <span class="field__hint">(+<span data-cfg="recargo_4xl_eur">3</span> €/prenda)</span>
+                    4XL <span class="field__hint">(+<span data-cfg="surcharge_4xl_eur">3</span> €/prenda)</span>
                   </label>
                   <input type="number" id="cant_4xl" min="0" value="0">
                 </div>
                 <div class="field">
                   <label class="field__label" for="cant_5xl">
-                    5XL+ <span class="field__hint">(+<span data-cfg="recargo_5xl_eur">5</span> €/prenda)</span>
+                    5XL+ <span class="field__hint">(+<span data-cfg="surcharge_5xl_eur">5</span> €/prenda)</span>
                   </label>
                   <input type="number" id="cant_5xl" min="0" value="0">
                 </div>
               </div>
             </article>
 
-            <article class="section-card">
+            <article class="section-card" id="addons-card">
               <div class="section-card__head">
                 <div>
                   <h2 class="h-card">Extras opcionales</h2>
                   <p class="text-secondary" style="margin-top: 4px; font-size: 13px;">
-                    Personalización extra. Precios sin IVA: se suman al subtotal y se aplica el IVA al total.
+                    Personalización extra. Precios sin IVA salvo indicación: se suman al subtotal y se aplica el IVA al total.
                   </p>
                 </div>
                 <span class="badge badge--neutral">IVA no incluido</span>
               </div>
 
-              <div class="form-grid-3">
-                <div class="field">
-                  <label class="field__label" for="cant_nombres">
-                    Nombre <span class="field__hint">(+<span data-cfg="extra_nombre_eur">1.5</span> €/ud)</span>
-                  </label>
-                  <input type="number" id="cant_nombres" min="0" value="0">
-                </div>
-                <div class="field">
-                  <label class="field__label" for="cant_mangas_cortas">
-                    Mangas cortas <span class="field__hint">(+<span data-cfg="extra_manga_corta_eur">1.5</span> €/manga)</span>
-                  </label>
-                  <input type="number" id="cant_mangas_cortas" min="0" value="0">
-                </div>
-                <div class="field">
-                  <label class="field__label" for="cant_mangas_largas">
-                    Manga larga <span class="field__hint">(+<span data-cfg="extra_manga_larga_eur">3</span> €/manga)</span>
-                  </label>
-                  <input type="number" id="cant_mangas_largas" min="0" value="0">
-                </div>
-              </div>
+              <div class="form-grid-3" id="addons-container"></div>
             </article>
 
             <div id="error-msg" class="alert alert-error hidden"></div>
@@ -407,7 +661,76 @@
           </div>
         </div>
 
+        <!-- Datos del cliente (obligatorios, validación en línea · UI-UX §2.7).
+             Viajan al historial, a D1 y al PDF junto con la validez de 15 días. -->
+        <article class="section-card" id="cliente-card" style="margin-top: 16px;">
+          <div class="section-card__head">
+            <div>
+              <h2 class="h-card">Datos del cliente</h2>
+              <p class="text-secondary" style="margin-top: 4px; font-size: 13px;">
+                Obligatorios para guardar o exportar el presupuesto. <span id="cliente-validez" class="text-muted"></span>
+              </p>
+            </div>
+            <span class="badge badge--neutral"><svg class="icon"><use href="#i-user"/></svg> Cliente</span>
+          </div>
+          <div class="form-grid-2">
+            <div class="field">
+              <label class="field__label" for="cliente-nombre">Nombre del cliente</label>
+              <input type="text" id="cliente-nombre" class="input" placeholder="Ej: Peña El Barril" autocomplete="off"
+                     aria-describedby="cliente-nombre-error">
+              <span id="cliente-nombre-error" class="field__error hidden" role="alert">Indica el nombre del cliente.</span>
+            </div>
+            <div class="field">
+              <label class="field__label" for="cliente-telefono">Teléfono del cliente</label>
+              <input type="tel" id="cliente-telefono" class="input" placeholder="Ej: 600 123 456" autocomplete="off"
+                     aria-describedby="cliente-telefono-error">
+              <span id="cliente-telefono-error" class="field__error hidden" role="alert">Indica el teléfono del cliente.</span>
+            </div>
+          </div>
+        </article>
+
         <div id="resultado-content" style="margin-top: 16px;"></div>
+      </section>
+
+      <!-- Paso (pantalla): Estadísticas (UI-UX §2.7). Solo modo nube; en
+           modo archivo muestra el aviso de que requiere la nube. -->
+      <section id="seccion-estadisticas" class="hidden">
+        <div class="back-row">
+          <button id="btn-stats-volver" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#i-chevron-left"/></svg> Volver a la calculadora
+          </button>
+          <span class="label-eyebrow">ESTADÍSTICAS</span>
+        </div>
+
+        <div class="stats-head" style="margin-top: 16px;">
+          <div>
+            <h1>Estadísticas del taller</h1>
+            <p class="text-secondary">Datos de todos los equipos. ¿Qué se usa y qué se vende?</p>
+          </div>
+          <div class="stats-period" id="stats-period" role="group" aria-label="Periodo">
+            <button class="stats-period__btn is-active" type="button" data-period="season">Temporada</button>
+            <button class="stats-period__btn" type="button" data-period="30d">30 días</button>
+            <button class="stats-period__btn" type="button" data-period="year">Año</button>
+            <button class="stats-period__btn" type="button" data-period="range">Rango…</button>
+          </div>
+        </div>
+
+        <!-- Selector de rango (visible solo con "Rango…") -->
+        <div id="stats-range" class="stats-range hidden">
+          <div class="field">
+            <label class="field__label" for="stats-from">Desde</label>
+            <input type="date" id="stats-from" class="input">
+          </div>
+          <div class="field">
+            <label class="field__label" for="stats-to">Hasta</label>
+            <input type="date" id="stats-to" class="input">
+          </div>
+          <button id="btn-stats-apply" class="btn btn-primary" type="button">
+            <svg class="icon"><use href="#i-trend"/></svg> Aplicar
+          </button>
+        </div>
+
+        <div id="stats-body" style="margin-top: 16px;"></div>
       </section>
 
     </main>
@@ -429,23 +752,14 @@
         </button>
       </header>
 
-      <!-- Login -->
-      <div id="admin-login" class="admin-login">
-        <p class="text-secondary">Introduce la clave de administrador para continuar:</p>
-        <div class="field__row">
-          <input type="password" id="admin-clave" class="input" placeholder="Clave">
-          <button id="btn-admin-login" class="btn btn-primary" type="button">
-            <svg class="icon"><use href="#i-key"/></svg> Entrar
-          </button>
-        </div>
-        <div id="admin-login-error" class="alert alert-error hidden">
-          <svg class="icon"><use href="#i-warn"/></svg>
-          <span>Clave incorrecta</span>
-        </div>
-      </div>
-
       <!-- Editor -->
       <div id="admin-editor" class="hidden" style="display: contents;">
+        <!-- v5 cloud (UI-UX §2.5): the password gate is gone; the author
+             that will be recorded is shown instead. Hidden in file mode. -->
+        <div id="admin-editor-author" class="modal__author hidden">
+          <svg class="icon"><use href="#i-user"/></svg>
+          <span>Editando como <strong id="admin-editor-author-name">—</strong></span>
+        </div>
         <div class="modal__warn">
           <svg class="icon"><use href="#i-warn"/></svg>
           <span>Los demás usuarios verán los cambios al pulsar «Recargar» en su PackPrice. Se hace backup automático antes de cada escritura.</span>
@@ -453,20 +767,26 @@
 
         <div class="modal__body">
           <nav class="admin-nav" id="admin-nav">
-            <button class="admin-nav__item is-active" data-tab="parametros" type="button">
+            <button class="admin-nav__item is-active" data-tab="parameters" type="button">
               <svg class="icon"><use href="#i-sliders"/></svg> Parámetros
             </button>
-            <button class="admin-nav__item" data-tab="modelos" type="button">
-              <svg class="icon"><use href="#i-shirt"/></svg> Modelos Roly
+            <button class="admin-nav__item" data-tab="suppliers" type="button">
+              <svg class="icon"><use href="#i-folder"/></svg> Proveedores
             </button>
-            <button class="admin-nav__item" data-tab="tramos" type="button">
+            <button class="admin-nav__item" data-tab="products" type="button">
+              <svg class="icon"><use href="#i-shirt"/></svg> Productos
+            </button>
+            <button class="admin-nav__item" data-tab="addons" type="button">
+              <svg class="icon"><use href="#i-layers"/></svg> Complementos
+            </button>
+            <button class="admin-nav__item" data-tab="tiers" type="button">
               <svg class="icon"><use href="#i-trend"/></svg> Tramos por volumen
             </button>
             <button class="admin-nav__item" data-tab="packs" type="button">
-              <svg class="icon"><use href="#i-tag"/></svg> Packs (PVP)
+              <svg class="icon"><use href="#i-tag"/></svg> Packs
             </button>
-            <button class="admin-nav__item" data-tab="auditoria" type="button">
-              <svg class="icon"><use href="#i-clock"/></svg> Auditoría
+            <button class="admin-nav__item" data-tab="audit" type="button">
+              <svg class="icon"><use href="#i-clock"/></svg> Historial
             </button>
           </nav>
 
@@ -521,6 +841,41 @@
           <button id="btn-diff-cancelar" class="btn btn-ghost" type="button">Cancelar</button>
           <button id="btn-diff-confirmar" class="btn btn-primary" type="button">
             <svg class="icon"><use href="#i-save"/></svg> Confirmar y guardar
+          </button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ================== MODAL: CONFLICTO POR ENTIDAD (CLOUD) ================== -->
+  <!-- v5 (UI-UX §2.3): per-entity save conflict. Same modal style as the
+       admin diff; shows the server value vs yours and three exits. -->
+  <div id="conflict-overlay" class="overlay hidden">
+    <div class="modal modal--sm" role="dialog" aria-labelledby="conflict-title">
+      <header class="modal__head">
+        <div class="modal__head-title">
+          <span class="modal__head-icon"><svg class="icon icon--lg"><use href="#i-warn"/></svg></span>
+          <div class="modal__head-text">
+            <h2 id="conflict-title">Conflicto de edición</h2>
+            <p id="conflict-subtitle">Otro equipo modificó esta entidad mientras editabas.</p>
+          </div>
+        </div>
+        <button id="btn-cerrar-conflict" class="modal__close" type="button" aria-label="Cerrar">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div id="conflict-body"></div>
+      </div>
+      <footer class="modal__foot">
+        <span class="modal__foot-left" id="conflict-progress"></span>
+        <div class="modal__foot-right">
+          <button id="btn-conflict-cancelar" class="btn btn-ghost" type="button">Cancelar</button>
+          <button id="btn-conflict-load-server" class="btn btn-secondary" type="button">
+            <svg class="icon"><use href="#i-refresh"/></svg> Cargar versión del servidor
+          </button>
+          <button id="btn-conflict-overwrite" class="btn btn-primary" type="button">
+            <svg class="icon"><use href="#i-save"/></svg> Sobrescribir con la mía
           </button>
         </div>
       </footer>
@@ -586,7 +941,7 @@
 
   <!-- ================== MODAL: AJUSTES LOCALES ================== -->
   <div id="ajustes-overlay" class="overlay hidden">
-    <div class="modal modal--sm" role="dialog" aria-labelledby="ajustes-title">
+    <div class="modal" role="dialog" aria-labelledby="ajustes-title">
       <header class="modal__head">
         <div class="modal__head-title">
           <span class="modal__head-icon"><svg class="icon icon--lg"><use href="#i-settings"/></svg></span>
@@ -614,7 +969,7 @@
           </div>
 
           <div class="field">
-            <label class="field__label" for="aj-ruta">Archivo de configuración (config.js)</label>
+            <label class="field__label" for="aj-ruta">Carpeta de datos</label>
             <div class="field__row">
               <input type="text" id="aj-ruta" class="input input--mono">
               <button id="btn-aj-explorar" class="btn btn-secondary" type="button">
@@ -650,6 +1005,137 @@
               <input type="checkbox" id="aj-mostrar-iva" checked>
               <span class="toggle__slider"></span>
             </label>
+          </div>
+
+          <hr class="divider">
+
+          <!-- PDF template gallery + preview + brand color (Plan 6 · UI-UX §2.5).
+               Shared data (company.pdf_template / company.brand_color), so all
+               PCs print alike. The preview is a SANDBOXED iframe (no scripts);
+               its HTML comes from main (pdf:preview), never injected here. -->
+          <div id="aj-pdf-section">
+            <div class="pdf-tpl__head">
+              <span class="modal__head-icon"><svg class="icon"><use href="#i-clipboard"/></svg></span>
+              <div>
+                <h3 class="h-card" style="margin-bottom: 2px;">Plantilla de presupuesto</h3>
+                <p class="text-secondary" style="font-size: 12px; margin: 0;">El diseño del PDF para todos los equipos. Elige una plantilla y previsualízala con un presupuesto de ejemplo.</p>
+              </div>
+            </div>
+
+            <div class="pdf-tpl">
+              <div class="pdf-tpl__gallery" id="aj-tpl-gallery" role="radiogroup" aria-label="Plantilla de presupuesto">
+                <!-- cards rendered by app.js (renderPdfTemplateGallery) -->
+              </div>
+
+              <div class="pdf-tpl__side">
+                <div class="field">
+                  <label class="field__label" for="aj-brand-color">Color de marca</label>
+                  <div class="field__row">
+                    <input type="color" id="aj-brand-color" class="color-input" value="#3D7BD9" aria-label="Color de marca">
+                    <span class="field__hint" style="margin: 0;">Las plantillas con color (Moderna, Corporativa) usan este tono; el oscuro y el suave se derivan solos.</span>
+                  </div>
+                </div>
+
+                <div class="pdf-tpl__preview">
+                  <div class="pdf-tpl__preview-label">Vista previa</div>
+                  <!-- sandbox WITHOUT allow-scripts: srcdoc renders isolated,
+                       same-origin about:srcdoc under default-src 'self'. -->
+                  <iframe id="aj-tpl-preview" class="pdf-tpl__frame" sandbox title="Vista previa del presupuesto"></iframe>
+                </div>
+              </div>
+            </div>
+
+            <!-- Custom templates are a cloud feature. The add button shows
+                 only in cloud mode; file mode shows the note instead. -->
+            <div class="pdf-tpl__custom">
+              <button id="btn-aj-tpl-add" class="btn btn-secondary hidden" type="button">
+                <svg class="icon"><use href="#i-plus"/></svg> Añadir plantilla personalizada…
+              </button>
+              <p id="aj-tpl-custom-note" class="field__hint hidden">Las plantillas personalizadas necesitan el modo nube. En modo local solo están disponibles las 6 integradas.</p>
+            </div>
+
+            <!-- Inline importer for a custom HTML+CSS template (cloud mode).
+                 Hidden until «Añadir…» is clicked. -->
+            <div id="aj-tpl-add-form" class="pdf-tpl__addform hidden">
+              <div class="field">
+                <label class="field__label" for="aj-tpl-name">Nombre de la plantilla</label>
+                <input type="text" id="aj-tpl-name" class="input" placeholder="Mi plantilla">
+              </div>
+              <div class="field">
+                <label class="field__label" for="aj-tpl-html">HTML + CSS de la plantilla</label>
+                <textarea id="aj-tpl-html" class="input input--mono" rows="6" placeholder="<!doctype html>… (usa &#123;&#123;company.name&#125;&#125;, &#123;&#123;totals.total&#125;&#125;, etc.)"></textarea>
+                <span class="field__hint">Se valida al guardar: se rechazan scripts, iframes y recursos externos. El CSS va en una etiqueta &lt;style&gt; dentro del HTML.</span>
+              </div>
+              <div id="aj-tpl-add-error" class="field__error hidden"></div>
+              <div class="field__row" style="justify-content: flex-end;">
+                <button id="btn-aj-tpl-add-cancel" class="btn btn-ghost" type="button">Cancelar</button>
+                <button id="btn-aj-tpl-add-save" class="btn btn-primary" type="button">
+                  <svg class="icon"><use href="#i-save"/></svg> Guardar plantilla
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Updates (Plan 7B · UI-UX §2.6 · PRD R15). The app-version
+               check talks to GitHub Releases; the request lives in main
+               (CSP intact). No auto-install: the result shows a Descargar
+               link that opens the release page in the system browser. -->
+          <div id="aj-updates-section">
+            <div>
+              <h3 class="h-card" style="margin-bottom: 6px;">Actualizaciones</h3>
+              <p class="text-secondary" style="font-size: 12px;">Comprueba si hay una versión más reciente en GitHub. No se instala nada automáticamente.</p>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row__text">
+                <strong>Buscar actualizaciones al iniciar</strong>
+                <span>Al abrir la app, comprueba en segundo plano si hay una versión nueva.</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="aj-check-updates" checked>
+                <span class="toggle__slider"></span>
+              </label>
+            </div>
+
+            <div class="field__row" style="margin-top: 12px; align-items: center;">
+              <button id="btn-aj-buscar-update" class="btn btn-secondary" type="button">
+                <svg class="icon"><use href="#i-refresh"/></svg> Buscar ahora
+              </button>
+              <span id="aj-update-result" class="field__hint" style="margin: 0;"></span>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Privacy (Plan 7B · UI-UX §2.6 · PRD R19/R17). The error-report
+               toggle is opt-OUT (default on); the helper text states EXACTLY
+               what is sent. «Exportar diagnóstico» builds a support bundle in
+               main (no token, no business data). -->
+          <div id="aj-privacy-section">
+            <div>
+              <h3 class="h-card" style="margin-bottom: 6px;">Privacidad</h3>
+              <p class="text-secondary" style="font-size: 12px;">PackPrice solo se conecta a internet para dos cosas: comprobar si hay una versión nueva (GitHub) y, si lo permites, enviar informes de error. Nunca se envían tus precios, clientes ni catálogo.</p>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row__text">
+                <strong>Enviar informes de error</strong>
+                <span>Cuando algo falla, se envía solo el error técnico, la versión de la app y el sistema operativo — <strong>nunca</strong> precios, clientes ni catálogo. Así podemos arreglarlo antes de que te afecte. Más detalle en el manual de usuario.</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="aj-error-reports" checked>
+                <span class="toggle__slider"></span>
+              </label>
+            </div>
+
+            <div class="field__row" style="margin-top: 12px;">
+              <button id="btn-aj-diagnostico" class="btn btn-secondary" type="button">
+                <svg class="icon"><use href="#i-share"/></svg> Exportar diagnóstico
+              </button>
+              <span class="field__hint" style="margin: 0;">Genera un archivo (sin token ni datos de negocio) para enviar a soporte.</span>
+            </div>
           </div>
         </div>
       </div>

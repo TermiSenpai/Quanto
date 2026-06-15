@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Monthly, grouped, low-noise. electron / electron-builder bumps MUST be tested
+  # by packaging the .exe before merge (CLAUDE.md §8.3) — review them carefully.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci

@@ -1,0 +1,54 @@
+name: Bug report
+description: Something priced wrong, crashed, or behaved unexpectedly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything security-sensitive, **do not** file here — follow SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see? What did you expect instead?
+      placeholder: I calculated a crew pack of 12 and the total was wrong…
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps. For pricing bugs, include the pack type, quantity, sides, hood, and any extras.
+      placeholder: |
+        1. Crew pack, 12 units, 2 sides, no hood
+        2. Calculate
+        3. Total shows X, expected 311.40 €
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown in the app, or from package.json (e.g. 2.0.0-preview).
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Pricing / calculation
+        - Config read/write (NAS)
+        - Admin mode / conflict
+        - Quote history
+        - PDF export
+        - Startup / first run
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: Relevant lines from the in-app log viewer or %APPDATA%\packprice\logs\.
+      render: text

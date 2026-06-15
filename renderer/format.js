@@ -1,7 +1,7 @@
 // ============================================================
-// Helpers de DOM y formato
+// DOM and formatting helpers
 // ============================================================
-// Sin estado, sin lógica de negocio. Reutilizables y testeables.
+// Stateless, no business logic. Reusable and testable.
 // ============================================================
 
 export function el(id) {
@@ -16,11 +16,11 @@ export function hide(id) {
   el(id).classList.add('hidden');
 }
 
-export function intDe(id) {
+export function intFromInput(id) {
   return parseInt(el(id).value, 10) || 0;
 }
 
-export function fmtEur(num) {
+export function formatEur(num) {
   if (num === null || num === undefined || isNaN(num)) return '-';
   return num.toLocaleString('es-ES', {
     minimumFractionDigits: 2,
@@ -28,7 +28,7 @@ export function fmtEur(num) {
   }) + ' €';
 }
 
-export function fmtPct(num) {
+export function formatPct(num) {
   if (num === null || num === undefined || isNaN(num)) return '-';
   return (num * 100).toFixed(1) + ' %';
 }

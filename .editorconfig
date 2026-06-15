@@ -1,0 +1,20 @@
+# EditorConfig — https://editorconfig.org
+# Enforces the style rules in CLAUDE.md §6 across any editor, no dependency.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Markdown: two trailing spaces are a hard line break — don't trim them.
+[*.md]
+trim_trailing_whitespace = false
+
+# Windows shell scripts must keep CRLF to run correctly.
+[*.{bat,cmd,ps1}]
+end_of_line = crlf

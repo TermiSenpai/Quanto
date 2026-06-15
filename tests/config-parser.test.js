@@ -1,196 +1,195 @@
 // ============================================================
-// Tests del parser y validador del config (lib/config-parser.js)
+// Parser and validator tests (lib/config-parser.js)
 // ============================================================
-// Especialmente importantes los tests de SEGURIDAD: el parser
-// reemplaza el antiguo `vm.runInNewContext` precisamente porque
-// `vm` no es una frontera de seguridad. Aquí verificamos que
-// payloads maliciosos NO ejecutan código.
+// The SECURITY tests are especially important: the parser replaced
+// the old `vm.runInNewContext` precisely because `vm` is not a
+// security boundary. Here we verify that malicious payloads do NOT
+// execute code.
 // ============================================================
 import { describe, test, expect } from 'vitest';
 import {
-  extraerJsonDeConfig,
-  validarFormaConfig,
-  stripAdminClave,
-  reinyectarAdminClave,
-  serializarConfig
+  extractJsonFromConfig,
+  validateConfigShape,
+  stripAdminPassword,
+  injectAdminPassword,
+  serializeConfig
 } from '../lib/config-parser.js';
 import { buildDefaultConfig } from '../config.default.js';
 
-describe('extraerJsonDeConfig — happy path', () => {
-  test('round-trip: serializar → extraer devuelve el mismo objeto', () => {
-    const original = buildDefaultConfig({ modificado_por: 'tester' });
-    const texto = serializarConfig(original);
-    const recuperado = extraerJsonDeConfig(texto);
-    expect(recuperado).toEqual(original);
+describe('extractJsonFromConfig — happy path', () => {
+  test('round-trip: serialize → extract returns the same object', () => {
+    const original = buildDefaultConfig({ modified_by: 'tester' });
+    const text = serializeConfig(original);
+    const recovered = extractJsonFromConfig(text);
+    expect(recovered).toEqual(original);
   });
 
-  test('admite comentarios y espacio en blanco al principio', () => {
-    const texto = `// comentario
-// otro
+  test('accepts leading comments and whitespace', () => {
+    const text = `// comment
+// another
 window.PACKPRICE_CONFIG = ${JSON.stringify({ a: 1, b: { c: 'hola' } })};
 `;
-    expect(extraerJsonDeConfig(texto)).toEqual({ a: 1, b: { c: 'hola' } });
+    expect(extractJsonFromConfig(text)).toEqual({ a: 1, b: { c: 'hola' } });
   });
 
-  test('tolera el punto y coma final ausente', () => {
-    const texto = `window.PACKPRICE_CONFIG = ${JSON.stringify({ a: 1 })}`;
-    expect(extraerJsonDeConfig(texto)).toEqual({ a: 1 });
+  test('tolerates a missing trailing semicolon', () => {
+    const text = `window.PACKPRICE_CONFIG = ${JSON.stringify({ a: 1 })}`;
+    expect(extractJsonFromConfig(text)).toEqual({ a: 1 });
   });
 
-  test('respeta llaves dentro de strings', () => {
+  test('respects braces inside strings', () => {
     const obj = { mensaje: 'hola { mundo } { adios' };
-    const texto = `window.PACKPRICE_CONFIG = ${JSON.stringify(obj)};`;
-    expect(extraerJsonDeConfig(texto)).toEqual(obj);
+    const text = `window.PACKPRICE_CONFIG = ${JSON.stringify(obj)};`;
+    expect(extractJsonFromConfig(text)).toEqual(obj);
   });
 
-  test('respeta strings con escapes de comillas', () => {
+  test('respects strings with escaped quotes', () => {
     const obj = { mensaje: 'dijo "hola"' };
-    const texto = `window.PACKPRICE_CONFIG = ${JSON.stringify(obj)};`;
-    expect(extraerJsonDeConfig(texto)).toEqual(obj);
+    const text = `window.PACKPRICE_CONFIG = ${JSON.stringify(obj)};`;
+    expect(extractJsonFromConfig(text)).toEqual(obj);
   });
 });
 
-describe('extraerJsonDeConfig — errores claros', () => {
-  test('falta marcador window.PACKPRICE_CONFIG', () => {
-    expect(() => extraerJsonDeConfig('var x = 1;')).toThrow(/PACKPRICE_CONFIG/);
+describe('extractJsonFromConfig — clear errors', () => {
+  test('missing window.PACKPRICE_CONFIG marker', () => {
+    expect(() => extractJsonFromConfig('var x = 1;')).toThrow(/PACKPRICE_CONFIG/);
   });
 
-  test('no hay objeto JSON tras el marcador', () => {
-    expect(() => extraerJsonDeConfig('window.PACKPRICE_CONFIG = 42;')).toThrow();
+  test('no JSON object after the marker', () => {
+    expect(() => extractJsonFromConfig('window.PACKPRICE_CONFIG = 42;')).toThrow();
   });
 
-  test('JSON malformado falla con mensaje útil', () => {
-    expect(() => extraerJsonDeConfig('window.PACKPRICE_CONFIG = { roto: }')).toThrow();
+  test('malformed JSON fails with a useful message', () => {
+    expect(() => extractJsonFromConfig('window.PACKPRICE_CONFIG = { roto: }')).toThrow();
   });
 
-  test('llaves desbalanceadas', () => {
-    expect(() => extraerJsonDeConfig('window.PACKPRICE_CONFIG = { "a": 1'))
+  test('unbalanced braces', () => {
+    expect(() => extractJsonFromConfig('window.PACKPRICE_CONFIG = { "a": 1'))
       .toThrow(/desbalanceadas|JSON/);
   });
 
-  test('contenido no-string', () => {
-    expect(() => extraerJsonDeConfig(null)).toThrow();
-    expect(() => extraerJsonDeConfig(123)).toThrow();
+  test('non-string content', () => {
+    expect(() => extractJsonFromConfig(null)).toThrow();
+    expect(() => extractJsonFromConfig(123)).toThrow();
   });
 });
 
-describe('extraerJsonDeConfig — SEGURIDAD: no ejecuta código', () => {
-  test('payload con IIFE no se ejecuta (regresión RCE)', () => {
-    let efecto = false;
-    // Simulamos lo que hubiera intentado: si el contenido se ejecutase
-    // como JS (como hacía vm.runInNewContext), `efecto` cambiaría.
-    // Con JSON.parse, esto debe fallar como JSON inválido.
-    globalThis.__packprice_pwned__ = () => { efecto = true; };
-    const texto = `window.PACKPRICE_CONFIG = (globalThis.__packprice_pwned__(), { admin: { clave: 'x' } });`;
-    expect(() => extraerJsonDeConfig(texto)).toThrow();
-    expect(efecto).toBe(false);
+describe('extractJsonFromConfig — SECURITY: does not run code', () => {
+  test('IIFE payload does not execute (RCE regression)', () => {
+    let effect = false;
+    // Simulates the intended attack: if the content were executed
+    // as JS (as vm.runInNewContext did), `effect` would flip. With
+    // JSON.parse this must fail as invalid JSON.
+    globalThis.__packprice_pwned__ = () => { effect = true; };
+    const text = `window.PACKPRICE_CONFIG = (globalThis.__packprice_pwned__(), { admin: { password: 'x' } });`;
+    expect(() => extractJsonFromConfig(text)).toThrow();
+    expect(effect).toBe(false);
     delete globalThis.__packprice_pwned__;
   });
 
-  test('payload con this.constructor.constructor no se ejecuta', () => {
-    // Vector clásico de escape de vm. JSON.parse no lo entiende.
-    const texto = `window.PACKPRICE_CONFIG = this.constructor.constructor('return process')();`;
-    expect(() => extraerJsonDeConfig(texto)).toThrow();
+  test('this.constructor.constructor payload does not execute', () => {
+    const text = `window.PACKPRICE_CONFIG = this.constructor.constructor('return process')();`;
+    expect(() => extractJsonFromConfig(text)).toThrow();
   });
 
-  test('llamada a require explícita no se ejecuta', () => {
-    const texto = `window.PACKPRICE_CONFIG = require('child_process').execSync('whoami');`;
-    expect(() => extraerJsonDeConfig(texto)).toThrow();
+  test('explicit require call does not execute', () => {
+    const text = `window.PACKPRICE_CONFIG = require('child_process').execSync('whoami');`;
+    expect(() => extractJsonFromConfig(text)).toThrow();
   });
 
-  test('property en string con llave no rompe el parser', () => {
-    // La cadena contiene `}` que NO debe cerrar el objeto exterior.
+  test('a brace inside a string does not break the parser', () => {
+    // The string contains `}` that must NOT close the outer object.
     const obj = { evil: '"} ; require("child_process").execSync("rm -rf /") ; ({"x":1' };
-    const texto = `window.PACKPRICE_CONFIG = ${JSON.stringify(obj)};`;
-    expect(extraerJsonDeConfig(texto)).toEqual(obj);
+    const text = `window.PACKPRICE_CONFIG = ${JSON.stringify(obj)};`;
+    expect(extractJsonFromConfig(text)).toEqual(obj);
   });
 });
 
-describe('validarFormaConfig', () => {
-  test('config por defecto pasa', () => {
-    expect(() => validarFormaConfig(buildDefaultConfig())).not.toThrow();
+describe('validateConfigShape', () => {
+  test('default config passes', () => {
+    expect(() => validateConfigShape(buildDefaultConfig())).not.toThrow();
   });
 
   test.each([
-    ['parametros'],
-    ['modelos_roly'],
-    ['tramos'],
+    ['parameters'],
+    ['products'],
+    ['tiers'],
     ['packs'],
     ['admin']
-  ])('falla si falta sección %s', (clave) => {
+  ])('fails if section %s is missing', (section) => {
     const cfg = buildDefaultConfig();
-    delete cfg[clave];
-    expect(() => validarFormaConfig(cfg)).toThrow(new RegExp(clave));
+    delete cfg[section];
+    expect(() => validateConfigShape(cfg)).toThrow(new RegExp(section));
   });
 
-  test('rechaza tramos vacíos', () => {
+  test('rejects empty tiers', () => {
     const cfg = buildDefaultConfig();
-    cfg.tramos = [];
-    expect(() => validarFormaConfig(cfg)).toThrow(/tramos/);
+    cfg.tiers = [];
+    expect(() => validateConfigShape(cfg)).toThrow(/tiers/);
   });
 
-  test('rechaza tramos sin id', () => {
+  test('rejects tiers without id', () => {
     const cfg = buildDefaultConfig();
-    cfg.tramos = [{ desde: 10 }];
-    expect(() => validarFormaConfig(cfg)).toThrow(/tramo/);
+    cfg.tiers = [{ from: 10 }];
+    expect(() => validateConfigShape(cfg)).toThrow(/tramo/);
   });
 
-  test('rechaza objetos no-objeto', () => {
-    expect(() => validarFormaConfig(null)).toThrow();
-    expect(() => validarFormaConfig([])).toThrow();
-    expect(() => validarFormaConfig('string')).toThrow();
+  test('rejects non-objects', () => {
+    expect(() => validateConfigShape(null)).toThrow();
+    expect(() => validateConfigShape([])).toThrow();
+    expect(() => validateConfigShape('string')).toThrow();
   });
 });
 
-describe('stripAdminClave', () => {
-  test('elimina la clave y deja flag tiene_clave', () => {
+describe('stripAdminPassword', () => {
+  test('removes the password and leaves a has_password flag', () => {
     const cfg = buildDefaultConfig();
-    expect(cfg.admin.clave).toBeTruthy();
-    const stripped = stripAdminClave(cfg);
-    expect(stripped.admin.clave).toBeUndefined();
-    expect(stripped.admin.tiene_clave).toBe(true);
-    // No mutar el original
-    expect(cfg.admin.clave).toBeTruthy();
+    expect(cfg.admin.password).toBeTruthy();
+    const stripped = stripAdminPassword(cfg);
+    expect(stripped.admin.password).toBeUndefined();
+    expect(stripped.admin.has_password).toBe(true);
+    // Does not mutate the original
+    expect(cfg.admin.password).toBeTruthy();
   });
 
-  test('tiene_clave=false si no había clave', () => {
+  test('has_password=false when there was no password', () => {
     const cfg = buildDefaultConfig();
-    cfg.admin.clave = '';
-    expect(stripAdminClave(cfg).admin.tiene_clave).toBe(false);
+    cfg.admin.password = '';
+    expect(stripAdminPassword(cfg).admin.has_password).toBe(false);
   });
 
-  test('inputs raros no rompen', () => {
-    expect(stripAdminClave(null)).toBe(null);
-    expect(stripAdminClave({}).admin.tiene_clave).toBe(false);
+  test('odd inputs do not break', () => {
+    expect(stripAdminPassword(null)).toBe(null);
+    expect(stripAdminPassword({}).admin.has_password).toBe(false);
   });
 });
 
-describe('reinyectarAdminClave', () => {
-  test('reinyecta la clave actual cuando el renderer no manda nueva', () => {
+describe('injectAdminPassword', () => {
+  test('reinjects the current password when the renderer sends none', () => {
     const cfg = buildDefaultConfig();
-    const stripped = stripAdminClave(cfg);
-    const restaurado = reinyectarAdminClave(stripped, 'clave-disco');
-    expect(restaurado.admin.clave).toBe('clave-disco');
-    expect(restaurado.admin.tiene_clave).toBeUndefined();
+    const stripped = stripAdminPassword(cfg);
+    const restored = injectAdminPassword(stripped, 'disk-password');
+    expect(restored.admin.password).toBe('disk-password');
+    expect(restored.admin.has_password).toBeUndefined();
   });
 
-  test('si el renderer manda clave nueva, se respeta', () => {
-    const stripped = stripAdminClave(buildDefaultConfig());
-    stripped.admin.clave = 'nueva';
-    const r = reinyectarAdminClave(stripped, 'antigua');
-    expect(r.admin.clave).toBe('nueva');
+  test('if the renderer sends a new password, it wins', () => {
+    const stripped = stripAdminPassword(buildDefaultConfig());
+    stripped.admin.password = 'new';
+    const r = injectAdminPassword(stripped, 'old');
+    expect(r.admin.password).toBe('new');
   });
 
-  test('rechaza inputs no-objeto', () => {
-    expect(() => reinyectarAdminClave(null, 'x')).toThrow();
+  test('rejects non-object inputs', () => {
+    expect(() => injectAdminPassword(null, 'x')).toThrow();
   });
 });
 
-describe('serializarConfig', () => {
-  test('produce un archivo que vuelve a parsearse', () => {
-    const cfg = buildDefaultConfig({ modificado_por: 'X' });
-    const txt = serializarConfig(cfg);
+describe('serializeConfig', () => {
+  test('produces a file that parses back', () => {
+    const cfg = buildDefaultConfig({ modified_by: 'X' });
+    const txt = serializeConfig(cfg);
     expect(txt).toContain('window.PACKPRICE_CONFIG');
-    expect(extraerJsonDeConfig(txt)).toEqual(cfg);
+    expect(extractJsonFromConfig(txt)).toEqual(cfg);
   });
 });

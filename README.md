@@ -67,10 +67,10 @@ packs app/
 ## Quick start
 
 ```bash
-npm install        # first time only
-npm run dev        # iterate in development mode
-npm test           # run tests
-npm run build:win  # build the portable .exe into dist/
+pnpm install        # first time only
+pnpm dev        # iterate in development mode
+pnpm test           # run tests
+pnpm build:win  # build the portable .exe into dist/
 ```
 
 Packaging details, distribution to other PCs and troubleshooting: [README-build.md](README-build.md) (Spanish).
@@ -99,7 +99,7 @@ Internal project of a small business (2–3 users). Third-party PRs are not acce
 
 1. Read [CLAUDE.md](CLAUDE.md) (conventions, principles, what NOT to do).
 2. Read [PLAN_Calculadora.md](PLAN_Calculadora.md) if you're going to change business logic.
-3. Run `npm test` before proposing changes.
+3. Run `pnpm test` before proposing changes.
 4. Keep calculation functions pure and testable.
 
 ---

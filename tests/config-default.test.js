@@ -1,76 +1,119 @@
 // ============================================================
-// Tests del schema por defecto (config.default.js)
+// Default schema tests (config.default.js) — v4
 // ============================================================
-// Defensa contra refactores que pierden silenciosamente claves
-// estructurales que el resto de la app espera.
+// Guards against refactors that silently drop structural keys the
+// rest of the app depends on.
 // ============================================================
 import { describe, test, expect } from 'vitest';
-import { buildDefaultConfig, VERSION, ADMIN_CLAVE_DEFAULT } from '../config.default.js';
+import { buildDefaultConfig, VERSION, ADMIN_PASSWORD_DEFAULT } from '../config.default.js';
 
 describe('buildDefaultConfig', () => {
-  test('devuelve la versión y campos meta', () => {
+  test('returns the version and meta fields', () => {
     const cfg = buildDefaultConfig();
     expect(cfg.version).toBe(VERSION);
-    expect(typeof cfg.fecha_actualizacion).toBe('string');
-    expect(typeof cfg.modificado_por).toBe('string');
+    expect(VERSION).toMatch(/^4\./);
+    expect(typeof cfg.updated_at).toBe('string');
+    expect(typeof cfg.modified_by).toBe('string');
   });
 
-  test('incluye clave admin por defecto', () => {
-    expect(buildDefaultConfig().admin.clave).toBe(ADMIN_CLAVE_DEFAULT);
+  test('includes the default admin password', () => {
+    expect(buildDefaultConfig().admin.password).toBe(ADMIN_PASSWORD_DEFAULT);
   });
 
-  test('contiene los packs esperados', () => {
+  test('has every top-level v4 section', () => {
+    const cfg = buildDefaultConfig();
+    for (const section of [
+      'parameters', 'suppliers', 'products', 'tiers',
+      'addons', 'packs', 'company', 'quote_settings'
+    ]) {
+      expect(cfg[section]).toBeDefined();
+    }
+  });
+
+  test('contains the expected packs', () => {
     const cfg = buildDefaultConfig();
     for (const id of [
-      'pena_completa',
-      'solo_camisetas',
-      'solo_clasica',
-      'solo_urban',
-      'sudaderas_mixto',
-      'personalizado'
+      'crew_full',
+      'tshirts_only',
+      'classic_only',
+      'urban_only',
+      'hoodies_mixed',
+      'custom'
     ]) {
       expect(cfg.packs[id]).toBeDefined();
     }
   });
 
-  test('contiene los modelos Roly esperados', () => {
+  test('contains the expected products with a default supplier', () => {
     const cfg = buildDefaultConfig();
     for (const id of ['BEAGLE', 'CLASICA', 'URBAN']) {
-      expect(cfg.modelos_roly[id]).toBeDefined();
-      expect(typeof cfg.modelos_roly[id].precio).toBe('number');
+      const p = cfg.products[id];
+      expect(p).toBeDefined();
+      expect(typeof p.name).toBe('string');
+      expect(typeof p.category).toBe('string');
+      const def = p.suppliers.find(s => s.is_default);
+      expect(def).toBeDefined();
+      expect(typeof def.price).toBe('number');
+      expect(p.prices.two_sides).toBeDefined();
+      expect(p.prices.one_side).toBeDefined();
     }
   });
 
-  test('cuatro tramos T1..T4 con T4 abierto por arriba', () => {
+  test('suppliers registry has Roly', () => {
     const cfg = buildDefaultConfig();
-    expect(cfg.tramos).toHaveLength(4);
-    expect(cfg.tramos.map(t => t.id)).toEqual(['T1', 'T2', 'T3', 'T4']);
-    expect(cfg.tramos[3].hasta).toBeNull();
+    expect(cfg.suppliers.ROLY).toBeDefined();
+    expect(cfg.suppliers.ROLY.name).toBe('Roly');
   });
 
-  test('parametros incluye todos los campos numéricos críticos', () => {
+  test('addons declare label, price and applies_to', () => {
     const cfg = buildDefaultConfig();
-    const necesarios = [
-      'mo_eur_hora', 'iva', 'merma_pct', 'indirectos_eur_prenda',
-      'buffer_3xl_eur_pack', 'recargo_4xl_eur', 'recargo_5xl_eur',
-      'envio_roly_eur_bulto', 'prendas_por_bulto',
-      'dtf_eur_metro', 'dtf_metros_2caras', 'dtf_metros_1cara',
-      'planchado_eur_cara', 'minutos_2caras_base', 'minutos_1cara_base',
-      'extra_nombre_eur', 'extra_manga_corta_eur', 'extra_manga_larga_eur'
+    for (const id of ['name', 'short_sleeve', 'long_sleeve']) {
+      const a = cfg.addons[id];
+      expect(a).toBeDefined();
+      expect(typeof a.label).toBe('string');
+      expect(typeof a.price).toBe('number');
+      expect(Array.isArray(a.applies_to)).toBe(true);
+    }
+  });
+
+  test('four tiers T1..T4 with T4 open-ended', () => {
+    const cfg = buildDefaultConfig();
+    expect(cfg.tiers).toHaveLength(4);
+    expect(cfg.tiers.map(t => t.id)).toEqual(['T1', 'T2', 'T3', 'T4']);
+    expect(cfg.tiers[3].to).toBeNull();
+  });
+
+  test('parameters include all critical numeric fields (v4)', () => {
+    const cfg = buildDefaultConfig();
+    const required = [
+      'labor_eur_hour', 'vat', 'waste_pct', 'overhead_eur_garment',
+      'surcharge_4xl_eur', 'surcharge_5xl_eur',
+      'roly_shipping_eur_bundle', 'garments_per_bundle',
+      'dtf_eur_meter', 'dtf_meters_two_sides', 'dtf_meters_one_side',
+      'pressing_eur_side', 'minutes_two_sides_base', 'minutes_one_side_base',
+      'default_target_margin', 'price_rounding_ending'
     ];
-    for (const k of necesarios) {
-      expect(typeof cfg.parametros[k]).toBe('number');
+    for (const k of required) {
+      expect(typeof cfg.parameters[k]).toBe('number');
     }
   });
 
-  test('cada llamada devuelve copia independiente (mutaciones no afectan)', () => {
+  test('v3 parameters that v4 removed are gone', () => {
+    const cfg = buildDefaultConfig();
+    expect(cfg.parameters.buffer_3xl_eur_pack).toBeUndefined();
+    expect(cfg.parameters.extra_name_eur).toBeUndefined();
+    expect(cfg.parameters.extra_short_sleeve_eur).toBeUndefined();
+    expect(cfg.parameters.extra_long_sleeve_eur).toBeUndefined();
+  });
+
+  test('each call returns an independent copy (mutations do not leak)', () => {
     const a = buildDefaultConfig();
     const b = buildDefaultConfig();
-    a.parametros.iva = 0.99;
-    expect(b.parametros.iva).not.toBe(0.99);
+    a.parameters.vat = 0.99;
+    expect(b.parameters.vat).not.toBe(0.99);
   });
 
-  test('respeta meta.modificado_por', () => {
-    expect(buildDefaultConfig({ modificado_por: 'Alberto' }).modificado_por).toBe('Alberto');
+  test('respects meta.modified_by', () => {
+    expect(buildDefaultConfig({ modified_by: 'Alberto' }).modified_by).toBe('Alberto');
   });
 });
