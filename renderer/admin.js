@@ -579,35 +579,60 @@ export function renderAdminTiers(cfg) {
 }
 
 // ============================================================
-// PACKS (builder) — each pack with its color
+// PACKS (builder) — list + editor
 // ============================================================
-export function renderAdminPacks(cfg) {
-  let html = '<p class="hint" style="margin-bottom: 16px;">Crea y edita packs completos: opciones (caras, capucha…), componentes (productos y, en packs por unidad, cuántos por pack) y, en modo «por unidad» (bundle), la tabla de PVP por combinación y tramo. Los packs «por componentes» usan el PVP de cada producto (pestaña Productos).</p>';
-
-  const productIds = Object.keys(cfg.products || {});
-
+export function renderPacksList(cfg, query = '') {
+  const entries = Object.entries(cfg.packs || {});
+  const total = entries.length;
+  let count = 0;
+  let rows = '';
   let idx = 0;
-  for (const [id, pack] of Object.entries(cfg.packs)) {
+  for (const [id, pack] of entries) {
     const colorToken = packColorToken(id, idx);
     idx++;
-
-    html += `<section class="admin-pack" style="--pack-color: var(${colorToken});">`;
-    html += `
-      <header class="admin-pack__head">
+    const modeLabel = pack.pricing_mode === 'bundle' ? 'Por unidad' : 'Por componentes';
+    const hay = buildHaystack([id, pack.name, pack.description]);
+    const show = matchesQuery(hay, query);
+    if (show) count++;
+    rows += `
+      <div class="admin-list__row${show ? '' : ' is-hidden'}" data-id="${esc(id)}"
+           data-edit="${esc(id)}" data-search="${esc(hay)}" style="--pack-color: var(${colorToken});">
         <span class="admin-pack__dot"></span>
-        <h4>${esc(pack.name || id)}</h4>
-        <button type="button" class="admin-row__remove"
-                data-action="remove-pack" data-id="${esc(id)}"
-                title="Eliminar pack" aria-label="Eliminar pack ${esc(id)}">
-          <svg class="icon"><use href="#i-x"/></svg>
-        </button>
-      </header>
-      <div class="admin-pack__body">
+        <strong class="admin-list__name">${esc(pack.name || id)}</strong>
+        <span class="admin-list__meta">${modeLabel}</span>
+        <span class="admin-list__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(id)}">Editar</button>
+          <button type="button" class="admin-row__remove"
+                  data-action="remove-pack" data-id="${esc(id)}"
+                  title="Eliminar pack" aria-label="Eliminar pack ${esc(id)}">
+            <svg class="icon"><use href="#i-x"/></svg>
+          </button>
+        </span>
+      </div>
     `;
+  }
+  return `
+    <p class="hint" style="margin-bottom: 16px;">Crea y edita packs completos: opciones (caras, capucha…), componentes (productos y, en packs por unidad, cuántos por pack) y, en modo «por unidad» (bundle), la tabla de PVP por combinación y tramo. Los packs «por componentes» usan el PVP de cada producto (pestaña Productos).</p>
+    ${renderListToolbar(query, count, total)}
+    <div class="admin-list">
+      ${rows}
+      <div class="admin-empty"${count ? ' hidden' : ''}>Sin resultados${query ? ` para «${esc(query)}»` : ''}.</div>
+    </div>
+    <div class="admin-row-add">
+      <button type="button" class="btn btn-secondary" data-action="add-pack">
+        <svg class="icon"><use href="#i-plus"/></svg> Crear pack
+      </button>
+    </div>
+  `;
+}
 
-    // --- Identity ---
-    html += '<div class="admin-grid">';
-    html += `
+export function renderPackEditor(cfg, id) {
+  const pack = cfg.packs?.[id];
+  if (!pack) return renderEditorNotFound('Pack');
+
+  // Identity grid (from old loop body, lines ~470-499)
+  const identity = `
+    <div class="admin-grid">
       <label>Nombre
         <input type="text" value="${esc(pack.name || '')}" data-cfg-path="packs.${esc(id)}.name">
       </label>
@@ -634,37 +659,28 @@ export function renderAdminPacks(cfg) {
                data-action-change="toggle-free-components" data-id="${esc(id)}">
         Componentes libres (el usuario elige productos)
       </label>
-    `;
-    html += '</div>';
-
-    // --- Options ---
-    html += renderPackOptions(cfg, id, pack);
-
-    // --- Components ---
-    if (!pack.free_components) {
-      html += renderPackComponents(cfg, id, pack, productIds);
-    } else {
-      html += `<div class="admin-mini-head">Componentes</div><p class="hint">Pack de componentes libres: el usuario añade líneas con cualquier producto del catálogo.</p>`;
-    }
-
-    // --- Prices ---
-    if (pack.pricing_mode === 'bundle') {
-      html += renderBundlePrices(cfg, id, pack);
-    } else {
-      html += `<div class="admin-mini-head">Precios</div><p class="hint">Este pack factura cada componente al PVP de su producto. Edita los precios en la pestaña <strong>Productos</strong>.</p>`;
-    }
-
-    html += '</div></section>';
-  }
-
-  html += `
-    <div class="admin-row-add">
-      <button type="button" class="btn btn-secondary" data-action="add-pack">
-        <svg class="icon"><use href="#i-plus"/></svg> Crear pack
-      </button>
     </div>
   `;
-  return html;
+
+  const productIds = Object.keys(cfg.products || {});
+
+  // Components body (reuses the existing helpers).
+  const componentsBody = pack.free_components
+    ? '<p class="hint">Pack de componentes libres: el usuario añade líneas con cualquier producto del catálogo.</p>'
+    : renderPackComponents(cfg, id, pack, productIds);
+
+  // Prices body (reuses the existing helper).
+  const pricesBody = pack.pricing_mode === 'bundle'
+    ? renderBundlePrices(cfg, id, pack)
+    : '<p class="hint">Este pack factura cada componente al PVP de su producto. Edita los precios en la pestaña <strong>Productos</strong>.</p>';
+
+  return `
+    ${renderEditorHead(`Editar pack: ${esc(pack.name || id)}`)}
+    ${identity}
+    ${wrapCollapsible('Opciones', renderPackOptions(cfg, id, pack), `packs:${id}:options`)}
+    ${wrapCollapsible('Componentes', componentsBody, `packs:${id}:components`)}
+    ${wrapCollapsible('Precios', pricesBody, `packs:${id}:prices`)}
+  `;
 }
 
 function renderPackOptions(cfg, id, pack) {

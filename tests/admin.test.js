@@ -16,7 +16,8 @@ import {
   renderProductsList,
   renderProductEditor,
   renderAdminTiers,
-  renderAdminPacks,
+  renderPacksList,
+  renderPackEditor,
   renderAdminTabContent,
   updateConfigFromInput,
   executeAdminAction,
@@ -655,6 +656,30 @@ describe('packs builder actions', () => {
   });
 });
 
+describe('packs list + editor', () => {
+  test('list shows a row per pack with the colour dot and search data', () => {
+    const html = renderPacksList(freshCfg(), '');
+    expect(html).toContain('class="admin-search__input"');
+    expect(html).toContain('data-id="crew_full"');
+    expect(html).toContain('data-edit="crew_full"');
+    expect(html).not.toContain('data-cfg-path="packs.crew_full.name"'); // not inline
+  });
+
+  test('editor renders one pack with collapsible options/components/prices', () => {
+    const html = renderPackEditor(freshCfg(), 'crew_full');
+    expect(html).toContain('data-back');
+    expect(html).toContain('data-cfg-path="packs.crew_full.name"');
+    expect(html).toContain('data-section="packs:crew_full:options"');
+    expect(html).toContain('data-section="packs:crew_full:components"');
+    expect(html).toContain('data-section="packs:crew_full:prices"');
+    expect(html).not.toContain('data-cfg-path="packs.tshirts_only.name"'); // only crew_full
+  });
+
+  test('editor guards a missing id', () => {
+    expect(renderPackEditor(freshCfg(), 'NOPE')).toContain('no encontrado');
+  });
+});
+
 // ============================================================
 // Router
 // ============================================================
@@ -733,7 +758,8 @@ describe('no v3 shape leaks in rendered HTML', () => {
       renderAddonsList(cfg, ''),
       renderAddonEditor(cfg, 'name'),
       renderAdminTiers(cfg),
-      renderAdminPacks(cfg)
+      renderPacksList(cfg, ''),
+      renderPackEditor(cfg, 'crew_full')
     ].join('\n');
     expect(all).not.toContain('roly_models');
     expect(all).not.toContain('pack.type');
