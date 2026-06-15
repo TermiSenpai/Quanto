@@ -22,7 +22,9 @@ import {
   updateConfigFromInput,
   executeAdminAction,
   normalizeText,
-  matchesQuery
+  matchesQuery,
+  renderListToolbar,
+  wrapCollapsible
 } from '../renderer/admin.js';
 import { buildDefaultConfig } from '../config.default.js';
 import { collectConfigErrors } from '../lib/config-schema.js';
@@ -91,6 +93,36 @@ describe('search helpers', () => {
   test('an empty query matches everything', () => {
     expect(matchesQuery(normalizeText('anything'), '')).toBe(true);
     expect(matchesQuery(normalizeText('anything'), '   ')).toBe(true);
+  });
+});
+
+// ============================================================
+// renderListToolbar
+// ============================================================
+describe('renderListToolbar', () => {
+  test('emits a search input pre-filled with the query and a count', () => {
+    const html = renderListToolbar('cami', 1, 4);
+    expect(html).toContain('class="admin-search"');
+    expect(html).toContain('class="admin-search__input"');
+    expect(html).toContain('value="cami"');
+    expect(html).toContain('1 de 4');
+  });
+
+  test('escapes the query value', () => {
+    const html = renderListToolbar('"<x>', 0, 0);
+    expect(html).not.toContain('"<x>');
+    expect(html).toContain('&quot;&lt;x&gt;');
+  });
+});
+
+describe('wrapCollapsible', () => {
+  test('wraps body in an open <details> carrying a section key', () => {
+    const html = wrapCollapsible('Proveedores', '<p>body</p>', 'products:BEAGLE:suppliers');
+    expect(html).toContain('<details class="admin-section" open');
+    expect(html).toContain('data-section="products:BEAGLE:suppliers"');
+    expect(html).toContain('<summary');
+    expect(html).toContain('Proveedores');
+    expect(html).toContain('<p>body</p>');
   });
 });
 

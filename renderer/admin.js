@@ -91,6 +91,41 @@ export function matchesQuery(haystack, query) {
 }
 
 // ------------------------------------------------------------
+// List toolbar (search + count) and collapsible section
+// ------------------------------------------------------------
+const SEARCH_SVG =
+  '<svg class="icon admin-search__icon"><use href="#i-search"/></svg>';
+const CARET_SVG_SECTION =
+  '<svg class="admin-section__caret" width="14" height="14" viewBox="0 0 24 24" ' +
+  'fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
+  'stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+
+/** Search box + "N de M" count. The count is hidden until a query is
+ *  active; `app.js` updates it live as the user types. */
+export function renderListToolbar(query, count, total) {
+  const q = query || '';
+  return `
+    <div class="admin-search">
+      ${SEARCH_SVG}
+      <input type="text" class="admin-search__input" placeholder="Buscar…"
+             value="${esc(q)}" aria-label="Buscar en la lista">
+    </div>
+    <div class="admin-list-count"${q ? '' : ' hidden'}>${count} de ${total}</div>
+  `;
+}
+
+/** Native collapsible. Always rendered open; app.js re-applies the
+ *  user's collapsed sections (state.adminClosedSections) after render. */
+export function wrapCollapsible(label, bodyHtml, sectionKey) {
+  return `
+    <details class="admin-section" open data-section="${esc(sectionKey)}">
+      <summary class="admin-section__head">${CARET_SVG_SECTION}<span>${esc(label)}</span></summary>
+      <div class="admin-section__body">${bodyHtml}</div>
+    </details>
+  `;
+}
+
+// ------------------------------------------------------------
 // Color per pack: deterministic by index so each pack keeps its hue.
 // ------------------------------------------------------------
 const PACK_COLOR_TOKENS = [
