@@ -279,6 +279,22 @@ admin.js collects edits via data-cfg-path
   → return ok / conflict
 ```
 
+**Admin catalog tab render (list ↔ editor):**
+
+The four catalog tabs (products / packs / suppliers / addons) have two views
+routed by `renderAdminTabContent(cfg, tab, view, id)` in `admin.js`:
+
+- `view = 'list'` → `render<Entity>List(cfg, query)` — compact rows + search bar.
+- `view = 'editor'` → `render<Entity>Editor(cfg, id)` — focused single-entity
+  form with collapsible `<details>` sections.
+
+`app.js`'s `showAdminTab(tab, opts)` decides which to call based on
+`state.adminView` and `state.adminEditingId`. All transient UI state — current
+view, entity id under edit, per-tab search text, collapsed section keys — lives
+in `app.js` `state` (never in the DOM) and is re-applied after each full-tab
+re-render. Non-catalog tabs (`parameters`, `tiers`, `audit`) ignore these fields
+and render as before.
+
 **App start:**
 
 ```
