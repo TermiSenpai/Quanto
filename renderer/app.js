@@ -53,6 +53,7 @@ import {
   tierBars, marginGroups, deviationBuckets, topProductBars, topAddonBars,
   specialSizeBars, rangeForPeriod
 } from './stats-view.js';
+import { enhanceDropdowns } from './dropdown.js';
 
 // ============================================================
 // Module state
@@ -455,6 +456,7 @@ function prepareCloudStep3() {
     select.innerHTML = accounts
       .map(a => `<option value="${escAttr(a.id)}">${escapeHTML(a.name)}</option>`)
       .join('');
+    enhanceDropdowns(pick);
     pick.classList.remove('hidden');
     progress.classList.add('hidden');
     return;
@@ -1071,10 +1073,6 @@ function bindEvents() {
 
   el('btn-admin-toggle').addEventListener('click', openAdmin);
   el('btn-cerrar-admin').addEventListener('click', closeAdmin);
-  el('btn-admin-login').addEventListener('click', adminLogin);
-  el('admin-clave').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') adminLogin();
-  });
   el('btn-guardar-config').addEventListener('click', saveConfigToNas);
   el('btn-cancelar-admin').addEventListener('click', cancelAdminChanges);
 
@@ -1681,6 +1679,7 @@ function createCustomLine(productIds, selectedProduct, quantity, idx = 0) {
       </button>
     </div>
   `;
+  enhanceDropdowns(wrap);
   return wrap;
 }
 
@@ -2339,55 +2338,25 @@ async function reloadConfig() {
 async function openAdmin() {
   show('admin-overlay');
 
-  // v5 cloud (UI-UX §2.5): no password gate — the editor opens directly
-  // and the recorded author replaces the login. File mode keeps the
-  // password gate below, untouched. (Offline cloud already disables the
-  // entry button in refreshOfflineBanner, so editing only happens online.)
-  if (isCloudMode()) {
-    state.isAdmin = true;
-    await showAdminEditor();
-    return;
-  }
-
-  if (state.isAdmin) {
-    await showAdminEditor();
-  } else {
-    show('admin-login');
-    hide('admin-editor');
-    setTimeout(() => el('admin-clave').focus(), 100);
-  }
-}
-
-function closeAdmin() {
-  hide('admin-overlay');
-  hide('admin-login-error');
-  el('admin-clave').value = '';
-}
-
-async function adminLogin() {
-  const password = el('admin-clave').value;
-  // The admin password never travels to the renderer: verification
-  // happens in main (timing-safe). So DevTools cannot read the
-  // password from the loaded CFG.
-  const r = await window.packprice.verifyAdminPassword({
-    ruta: SETTINGS.config_path,
-    clave: password
-  });
-  if (r && r.ok && r.valida) {
+  // No password gate (file or cloud): the editor opens directly and the
+  // recorded author replaces the login (UI-UX §2.5). Protection against
+  // mistakes is the save-confirmation dialog + per-write audit author +
+  // snapshot rollback. (Offline cloud already disables the entry button
+  // in refreshOfflineBanner, so editing only happens online.)
+  if (!state.isAdmin) {
     state.isAdmin = true;
     el('btn-admin-toggle').innerHTML = '<svg class="icon"><use href="#i-lock"/></svg> Admin activo';
     el('btn-admin-toggle').classList.remove('btn-secondary');
     el('btn-admin-toggle').classList.add('btn-primary');
-    hide('admin-login-error');
-    el('admin-clave').value = '';
-    await showAdminEditor();
-  } else {
-    show('admin-login-error');
   }
+  await showAdminEditor();
+}
+
+function closeAdmin() {
+  hide('admin-overlay');
 }
 
 async function showAdminEditor() {
-  hide('admin-login');
   show('admin-editor');
 
   CFG_BACKUP = deepClone(CFG);
@@ -2468,6 +2437,11 @@ function showAdminTab(tab, opts = {}) {
   }
 
   cont.innerHTML = renderAdminTabContent(CFG, tab);
+
+  // Restyle the native <select>s of this freshly rendered tab. The
+  // native elements stay as source of truth, so the change wiring below
+  // (data-cfg-path / data-action-change) attaches to them as usual.
+  enhanceDropdowns(cont);
 
   // Plain field edits: inputs, selects and checkboxes carrying a
   // data-cfg-path. These do not re-render (preserve cursor/scroll);

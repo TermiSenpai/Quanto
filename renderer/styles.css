@@ -320,6 +320,94 @@ select.input option {
   color: var(--fg-primary);
 }
 
+/* ----------------------------------------------------------
+   Desplegable estilizado (renderer/dropdown.js)
+   Sustituye el panel nativo del <select> por uno propio. El
+   <select> sigue en el DOM como fuente de verdad, oculto.
+   ---------------------------------------------------------- */
+.pp-select { position: relative; display: block; width: 100%; }
+
+/* El <select> nativo: oculto a la vista pero accesible/funcional. */
+.pp-select__native {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+.pp-select__trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-secondary);
+  color: var(--fg-primary);
+  border-radius: var(--radius-md);
+  font-family: inherit; font-size: 14px; font-weight: 500;
+  text-align: left; cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.pp-select__trigger:hover { border-color: var(--fg-muted); }
+.pp-select__trigger:focus-visible,
+.pp-select.is-open .pp-select__trigger {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.pp-select__trigger:disabled { opacity: .55; cursor: not-allowed; }
+
+.pp-select__label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pp-select__caret { flex: none; color: var(--fg-secondary); transition: transform .15s ease; }
+.pp-select.is-open .pp-select__caret { transform: rotate(180deg); color: var(--accent-text-on-soft); }
+
+.pp-select__panel {
+  position: absolute; left: 0; right: 0; top: calc(100% + 6px);
+  z-index: 60;
+  max-height: 280px; overflow-y: auto;
+  padding: 6px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
+  animation: pp-select-in .12s ease-out;
+}
+.pp-select--up .pp-select__panel { top: auto; bottom: calc(100% + 6px); }
+@keyframes pp-select-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.pp-select__option {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 14px; color: var(--fg-primary);
+  cursor: pointer; user-select: none;
+}
+.pp-select__option:hover,
+.pp-select__option.is-active { background: var(--surface-tertiary); }
+.pp-select__option.is-selected {
+  background: var(--accent-soft);
+  color: var(--accent-text-on-soft);
+  font-weight: 600;
+}
+.pp-select__option[aria-disabled="true"] { opacity: .4; cursor: not-allowed; }
+/* Check del seleccionado: máscara SVG sobre currentColor, sin assets. */
+.pp-select__option::after {
+  content: ''; flex: none;
+  width: 16px; height: 16px;
+  opacity: 0;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>") center / 16px no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>") center / 16px no-repeat;
+}
+.pp-select__option.is-selected::after { opacity: 1; }
+
+/* En el grid de admin el wrapper hereda el alineado inferior del select. */
+.admin-grid .pp-select { margin-top: auto; }
+
 input[type="text"],
 input[type="number"],
 input[type="password"] {
@@ -1543,15 +1631,6 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 .modal__foot-right {
   display: flex;
   gap: 10px;
-}
-
-/* Login admin */
-.admin-login {
-  padding: 24px 28px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 460px;
 }
 
 /* ----------------------------------------------------------

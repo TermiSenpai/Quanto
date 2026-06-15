@@ -212,10 +212,11 @@ hand while an admin editor is open).
 - **Tramo / tier (T1–T4)** — quantity range driving PVP and time reduction.
 - **DTF** — Direct-to-Film print technique.
 - **NAS** — workshop file server (`172.26.0.154`).
-- **Admin mode** — legacy name for the config editor. File mode still gates it
-  with the shared password (anti-accidental-click, not security); **v5 removes
-  the gate**: the catalog editor is always available, protected by save
-  confirmation + audit + snapshot rollback instead.
+- **Admin mode** — legacy name for the config editor. The **password gate is
+  removed** in both file and cloud mode (WIP toward the full v5 cleanup): the
+  catalog editor opens directly, protected by save confirmation + audit +
+  snapshot rollback instead. The `verifyAdminPassword` IPC (main) and the
+  `admin_password` config field remain as dead code pending a schema migration.
 
 ---
 
