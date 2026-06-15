@@ -13,7 +13,8 @@
 import { describe, test, expect } from 'vitest';
 import {
   renderAdminParameters,
-  renderAdminProducts,
+  renderProductsList,
+  renderProductEditor,
   renderAdminTiers,
   renderAdminPacks,
   renderAdminTabContent,
@@ -348,7 +349,7 @@ describe('products actions', () => {
   });
 
   test('render replaces "Modelos Roly" with product fields', () => {
-    const html = renderAdminProducts(freshCfg());
+    const html = renderProductEditor(freshCfg(), 'BEAGLE');
     expect(html).toContain('data-cfg-path="products.BEAGLE.name"');
     expect(html).toContain('data-cfg-path="products.BEAGLE.extra_cost_3xl"');
     expect(html).toContain('Aplicar PVP recomendado');
@@ -363,15 +364,52 @@ describe('products actions', () => {
     expect(cfg.products.BEAGLE.suppliers.length).toBe(3);
     expect(cfg.products.BEAGLE.suppliers.filter(s => s.is_default).length).toBe(1);
 
-    const html = renderAdminProducts(cfg);
+    const html = renderProductEditor(cfg, 'BEAGLE');
     const badges = html.match(/class="badge badge--accent"[^>]*>Por defecto</g) || [];
     const radios = html.match(/Usar por defecto/g) || [];
-    // One badge per product (each has exactly one default supplier)...
-    expect(badges.length).toBe(Object.keys(cfg.products).length);
+    // One badge for this single product (it has exactly one default supplier)...
+    expect(badges.length).toBe(1);
     // ...while every supplier row offers the "Usar por defecto" control,
     // so a multi-supplier product has more radios than badges (the old bug
     // showed "Por defecto" on every row).
     expect(radios.length).toBeGreaterThan(badges.length);
+  });
+});
+
+describe('products list + editor', () => {
+  test('list shows a compact row per product (id, name, category) and search data', () => {
+    const html = renderProductsList(freshCfg(), '');
+    expect(html).toContain('class="admin-search__input"');
+    expect(html).toContain('data-id="BEAGLE"');
+    expect(html).toContain('data-edit="BEAGLE"');
+    expect(html).not.toContain('data-cfg-path="products.BEAGLE.name"'); // not inline
+  });
+
+  test('list filters by category text too', () => {
+    const cfg = freshCfg();
+    const cat = cfg.products.BEAGLE.category;
+    const html = renderProductsList(cfg, cat);
+    expect(html).toMatch(/data-id="BEAGLE"[^>]*data-search="[^"]*"/);
+    // a product in a different category is hidden
+  });
+
+  test('list disables remove for an in-use product', () => {
+    const html = renderProductsList(freshCfg(), '');
+    expect(html).toMatch(/data-action="remove-product" data-id="BEAGLE"[\s\S]*?disabled/);
+  });
+
+  test('editor renders one product with collapsible suppliers and price sections', () => {
+    const html = renderProductEditor(freshCfg(), 'BEAGLE');
+    expect(html).toContain('data-back');
+    expect(html).toContain('data-cfg-path="products.BEAGLE.name"');
+    expect(html).toContain('data-section="products:BEAGLE:suppliers"');
+    expect(html).toContain('data-section="products:BEAGLE:prices"');
+    expect(html).toContain('Aplicar PVP recomendado');
+    expect(html).not.toContain('data-cfg-path="products.URBAN.name"'); // only BEAGLE
+  });
+
+  test('editor guards a missing id', () => {
+    expect(renderProductEditor(freshCfg(), 'NOPE')).toContain('no encontrado');
   });
 });
 
@@ -690,7 +728,8 @@ describe('no v3 shape leaks in rendered HTML', () => {
       renderAdminParameters(cfg),
       renderSuppliersList(cfg, ''),
       renderSupplierEditor(cfg, 'ROLY'),
-      renderAdminProducts(cfg),
+      renderProductsList(cfg, ''),
+      renderProductEditor(cfg, 'BEAGLE'),
       renderAddonsList(cfg, ''),
       renderAddonEditor(cfg, 'name'),
       renderAdminTiers(cfg),

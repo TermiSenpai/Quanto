@@ -267,36 +267,62 @@ export function renderSupplierEditor(cfg, id) {
 }
 
 // ============================================================
-// PRODUCTS (replaces v3 "Modelos Roly")
+// PRODUCTS — list + editor (replaces v3 "Modelos Roly")
 // ============================================================
-export function renderAdminProducts(cfg) {
-  let html = '<p class="hint" style="margin-bottom: 12px;">Cada producto tiene su categoría, coste extra de 3XL, margen objetivo, sus proveedores (uno por defecto) y su tabla de PVP por caras y tramo. No se puede eliminar un producto usado por algún pack.</p>';
+export function renderProductsList(cfg, query = '') {
+  const entries = Object.entries(cfg.products || {});
+  const total = entries.length;
+  let count = 0;
+  let rows = '';
+  for (const [id, p] of entries) {
+    const inUse = isProductInUse(cfg, id);
+    const hay = buildHaystack([id, p.name, p.category]);
+    const show = matchesQuery(hay, query);
+    if (show) count++;
+    rows += `
+      <div class="admin-list__row${show ? '' : ' is-hidden'}" data-id="${esc(id)}"
+           data-edit="${esc(id)}" data-search="${esc(hay)}">
+        <span class="admin-row__id">${esc(id)}</span>
+        <strong class="admin-list__name">${esc(p.name || '—')}</strong>
+        ${p.category ? `<span class="admin-list__meta">${esc(p.category)}</span>` : ''}
+        ${inUse ? '<span class="admin-list__meta">en uso</span>' : ''}
+        <span class="admin-list__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(id)}">Editar</button>
+          <button type="button" class="admin-row__remove"
+                  data-action="remove-product" data-id="${esc(id)}"
+                  ${inUse ? 'disabled title="Lo usa algún pack"' : 'title="Eliminar producto"'}
+                  aria-label="Eliminar producto ${esc(id)}">
+            <svg class="icon"><use href="#i-x"/></svg>
+          </button>
+        </span>
+      </div>
+    `;
+  }
+  return `
+    <p class="hint" style="margin-bottom: 12px;">Cada producto tiene su categoría, coste extra de 3XL, margen objetivo, sus proveedores (uno por defecto) y su tabla de PVP por caras y tramo. No se puede eliminar un producto usado por algún pack.</p>
+    ${renderListToolbar(query, count, total)}
+    <div class="admin-list">
+      ${rows}
+      <div class="admin-empty"${count ? ' hidden' : ''}>Sin resultados${query ? ` para «${esc(query)}»` : ''}.</div>
+    </div>
+    <div class="admin-row-add">
+      <button type="button" class="btn btn-secondary" data-action="add-product">
+        <svg class="icon"><use href="#i-plus"/></svg> Añadir producto
+      </button>
+    </div>
+  `;
+}
+
+export function renderProductEditor(cfg, id) {
+  const p = cfg.products?.[id];
+  if (!p) return renderEditorNotFound('Producto');
 
   const supplierIds = Object.keys(cfg.suppliers || {});
   const categories = collectCategories(cfg);
 
-  for (const [id, p] of Object.entries(cfg.products || {})) {
-    const inUse = isProductInUse(cfg, id);
-    html += `<div class="admin-row">`;
-    html += `
-      <div class="admin-row__head">
-        <div class="admin-row__title">
-          <span class="admin-row__id">${esc(id)}</span>
-          <strong>${esc(p.name || '—')}</strong>
-          ${inUse ? '<span class="admin-row__id" style="margin-left: 6px;">en uso</span>' : ''}
-        </div>
-        <button type="button" class="admin-row__remove"
-                data-action="remove-product" data-id="${esc(id)}"
-                ${inUse ? 'disabled title="Lo usa algún pack"' : 'title="Eliminar producto"'}
-                aria-label="Eliminar producto ${esc(id)}">
-          <svg class="icon"><use href="#i-x"/></svg>
-        </button>
-      </div>
-    `;
-
-    // --- Basic fields ---
-    html += '<div class="admin-grid">';
-    html += `
+  // --- Basic fields ---
+  const basic = `
+    <div class="admin-grid">
       <label>Nombre
         <input type="text" value="${esc(p.name || '')}" data-cfg-path="products.${esc(id)}.name">
       </label>
@@ -310,95 +336,90 @@ export function renderAdminProducts(cfg) {
       <label>Margen objetivo <span class="hint">decimal · vacío usa el global</span>
         <input type="number" step="0.01" min="0" max="0.99" value="${esc(p.target_margin ?? '')}" data-cfg-path="products.${esc(id)}.target_margin">
       </label>
-    `;
-    html += '</div>';
+    </div>
+  `;
 
-    // --- Suppliers sub-list ---
-    html += `<div class="admin-mini-head">Proveedores</div>`;
-    (p.suppliers || []).forEach((sup, sidx) => {
-      const onlyOne = (p.suppliers || []).length <= 1;
-      const supplierOptions = supplierIds.map(sid =>
-        `<option value="${esc(sid)}" ${sid === sup.supplier ? 'selected' : ''}>${esc((cfg.suppliers[sid] || {}).name || sid)}</option>`
-      ).join('');
-      html += `
-        <div class="admin-row" style="margin-bottom: 8px;">
-          <div class="admin-row__head">
-            <div class="admin-row__title">
-              <label style="flex-direction: row; align-items: center; gap: 6px; font-weight: 600;">
-                <input type="radio" name="prod-default-${esc(id)}" ${sup.is_default ? 'checked' : ''}
-                       data-action-change="set-default-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}">
-                Usar por defecto
-              </label>
-              ${sup.is_default ? '<span class="badge badge--accent" style="margin-left: 6px;">Por defecto</span>' : ''}
-            </div>
-            <button type="button" class="admin-row__remove"
-                    data-action="remove-product-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}"
-                    ${onlyOne ? 'disabled title="Debe quedar al menos un proveedor"' : 'title="Quitar proveedor"'}
-                    aria-label="Quitar proveedor">
-              <svg class="icon"><use href="#i-x"/></svg>
-            </button>
+  // --- Suppliers sub-list ---
+  let suppliersBody = '';
+  (p.suppliers || []).forEach((sup, sidx) => {
+    const onlyOne = (p.suppliers || []).length <= 1;
+    const supplierOptions = supplierIds.map(sid =>
+      `<option value="${esc(sid)}" ${sid === sup.supplier ? 'selected' : ''}>${esc((cfg.suppliers[sid] || {}).name || sid)}</option>`
+    ).join('');
+    suppliersBody += `
+      <div class="admin-row" style="margin-bottom: 8px;">
+        <div class="admin-row__head">
+          <div class="admin-row__title">
+            <label style="flex-direction: row; align-items: center; gap: 6px; font-weight: 600;">
+              <input type="radio" name="prod-default-${esc(id)}" ${sup.is_default ? 'checked' : ''}
+                     data-action-change="set-default-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}">
+              Usar por defecto
+            </label>
+            ${sup.is_default ? '<span class="badge badge--accent" style="margin-left: 6px;">Por defecto</span>' : ''}
           </div>
-          <div class="admin-grid">
-            <label>Proveedor
-              <select data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.supplier">${supplierOptions}</select>
-            </label>
-            <label>Referencia
-              <input type="text" value="${esc(sup.ref || '')}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.ref">
-            </label>
-            <label>Precio base (€) <span class="hint">sin IVA, sin DTF</span>
-              <input type="number" step="0.0001" min="0" value="${esc(sup.price ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.price">
-            </label>
-            <label>Pedido mínimo
-              <input type="number" step="1" min="0" value="${esc(sup.min_order ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.min_order">
-            </label>
-          </div>
+          <button type="button" class="admin-row__remove"
+                  data-action="remove-product-supplier" data-id="${esc(id)}" data-idx="${esc(sidx)}"
+                  ${onlyOne ? 'disabled title="Debe quedar al menos un proveedor"' : 'title="Quitar proveedor"'}
+                  aria-label="Quitar proveedor">
+            <svg class="icon"><use href="#i-x"/></svg>
+          </button>
         </div>
-      `;
-    });
-    html += `
-      <div class="admin-row-add" style="margin-bottom: 12px;">
-        <button type="button" class="btn btn-ghost" data-action="add-product-supplier" data-id="${esc(id)}"
-                ${supplierIds.length === 0 ? 'disabled title="Crea antes un proveedor"' : ''}>
-          <svg class="icon"><use href="#i-plus"/></svg> Añadir proveedor a este producto
-        </button>
-      </div>
-    `;
-
-    // --- Price table (faces × tiers) ---
-    html += `<div class="admin-mini-head">PVP por caras y tramo (IVA incl.)</div>`;
-    for (const [faceKey, faceLabel] of PRICE_FACES) {
-      html += `<div class="admin-subhead">${faceLabel}</div>`;
-      html += '<div class="admin-grid">';
-      for (const t of cfg.tiers) {
-        const value = p.prices?.[faceKey]?.[t.id];
-        html += `
-          <label>${esc(t.id)} · ${esc(t.label || '')}
-            <input type="number" step="0.01" min="0" value="${esc(value ?? 0)}" data-cfg-path="products.${esc(id)}.prices.${esc(faceKey)}.${esc(t.id)}">
+        <div class="admin-grid">
+          <label>Proveedor
+            <select data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.supplier">${supplierOptions}</select>
           </label>
-        `;
-      }
-      html += '</div>';
-    }
-    html += `
-      <div class="admin-row-add" style="margin-top: 6px;">
-        <button type="button" class="btn btn-secondary" data-action="apply-recommended-product" data-id="${esc(id)}">
-          <svg class="icon"><use href="#i-trend"/></svg> Aplicar PVP recomendado
-        </button>
-        <span class="hint" style="margin-left: 10px;">${esc(recommendedHint(cfg, p))}</span>
+          <label>Referencia
+            <input type="text" value="${esc(sup.ref || '')}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.ref">
+          </label>
+          <label>Precio base (€) <span class="hint">sin IVA, sin DTF</span>
+            <input type="number" step="0.0001" min="0" value="${esc(sup.price ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.price">
+          </label>
+          <label>Pedido mínimo
+            <input type="number" step="1" min="0" value="${esc(sup.min_order ?? 0)}" data-cfg-path="products.${esc(id)}.suppliers.${esc(sidx)}.min_order">
+          </label>
+        </div>
       </div>
     `;
-
-    html += '</div>';
-  }
-
-  html += `
-    <div class="admin-row-add">
-      <button type="button" class="btn btn-secondary" data-action="add-product">
-        <svg class="icon"><use href="#i-plus"/></svg> Añadir producto
+  });
+  suppliersBody += `
+    <div class="admin-row-add" style="margin-bottom: 12px;">
+      <button type="button" class="btn btn-ghost" data-action="add-product-supplier" data-id="${esc(id)}"
+              ${supplierIds.length === 0 ? 'disabled title="Crea antes un proveedor"' : ''}>
+        <svg class="icon"><use href="#i-plus"/></svg> Añadir proveedor a este producto
       </button>
     </div>
   `;
-  return html;
+
+  // --- Price table (faces × tiers) ---
+  let pricesBody = '';
+  for (const [faceKey, faceLabel] of PRICE_FACES) {
+    pricesBody += `<div class="admin-subhead">${faceLabel}</div>`;
+    pricesBody += '<div class="admin-grid">';
+    for (const t of cfg.tiers) {
+      const value = p.prices?.[faceKey]?.[t.id];
+      pricesBody += `
+        <label>${esc(t.id)} · ${esc(t.label || '')}
+          <input type="number" step="0.01" min="0" value="${esc(value ?? 0)}" data-cfg-path="products.${esc(id)}.prices.${esc(faceKey)}.${esc(t.id)}">
+        </label>
+      `;
+    }
+    pricesBody += '</div>';
+  }
+  pricesBody += `
+    <div class="admin-row-add" style="margin-top: 6px;">
+      <button type="button" class="btn btn-secondary" data-action="apply-recommended-product" data-id="${esc(id)}">
+        <svg class="icon"><use href="#i-trend"/></svg> Aplicar PVP recomendado
+      </button>
+      <span class="hint" style="margin-left: 10px;">${esc(recommendedHint(cfg, p))}</span>
+    </div>
+  `;
+
+  return `
+    ${renderEditorHead(`Editar producto: ${esc(p.name || id)}`)}
+    ${basic}
+    ${wrapCollapsible('Proveedores', suppliersBody, `products:${id}:suppliers`)}
+    ${wrapCollapsible('PVP por caras y tramo (IVA incl.)', pricesBody, `products:${id}:prices`)}
+  `;
 }
 
 /** Short hint showing the recommended PVP for a product's two-sides
