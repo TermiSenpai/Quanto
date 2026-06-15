@@ -13,9 +13,7 @@
 import { describe, test, expect } from 'vitest';
 import {
   renderAdminParameters,
-  renderAdminSuppliers,
   renderAdminProducts,
-  renderAdminAddons,
   renderAdminTiers,
   renderAdminPacks,
   renderAdminTabContent,
@@ -24,7 +22,12 @@ import {
   normalizeText,
   matchesQuery,
   renderListToolbar,
-  wrapCollapsible
+  wrapCollapsible,
+  buildHaystack,
+  renderSuppliersList,
+  renderSupplierEditor,
+  renderAddonsList,
+  renderAddonEditor
 } from '../renderer/admin.js';
 import { buildDefaultConfig } from '../config.default.js';
 import { collectConfigErrors } from '../lib/config-schema.js';
@@ -196,9 +199,50 @@ describe('suppliers actions', () => {
     expectValid(cfg);
   });
 
-  test('render disables remove for an in-use supplier', () => {
-    const html = renderAdminSuppliers(freshCfg());
+});
+
+// ============================================================
+// Suppliers list + editor
+// ============================================================
+describe('suppliers list + editor', () => {
+  test('list shows a compact row per supplier with search data', () => {
+    const html = renderSuppliersList(freshCfg(), '');
+    expect(html).toContain('class="admin-search__input"');
+    expect(html).toContain('class="admin-list__row"');
+    expect(html).toContain('data-id="ROLY"');
+    expect(html).toContain('data-edit="ROLY"');
+    // compact list does NOT inline the editable fields
+    expect(html).not.toContain('data-cfg-path="suppliers.ROLY.name"');
+  });
+
+  test('list pre-hides rows that do not match the query and counts matches', () => {
+    const cfg = freshCfg();
+    executeAdminAction(cfg, { action: 'add-supplier' }); // SUPPLIER_1 "Nuevo proveedor"
+    const html = renderSuppliersList(cfg, 'roly');
+    // ROLY row visible, the "Nuevo proveedor" row hidden
+    expect(html).toMatch(/data-id="ROLY"[^>]*class="admin-list__row"|class="admin-list__row"[^>]*data-id="ROLY"/);
+    expect(html).toMatch(/admin-list__row is-hidden[^>]*data-id="SUPPLIER_1"|data-id="SUPPLIER_1"[^>]*admin-list__row is-hidden/);
+    expect(html).toContain('1 de 2');
+  });
+
+  test('list disables remove for an in-use supplier', () => {
+    const html = renderSuppliersList(freshCfg(), '');
     expect(html).toMatch(/data-action="remove-supplier" data-id="ROLY"[\s\S]*?disabled/);
+  });
+
+  test('editor renders the single supplier form with editable fields', () => {
+    const html = renderSupplierEditor(freshCfg(), 'ROLY');
+    expect(html).toContain('class="admin-editor__head"');
+    expect(html).toContain('data-back');
+    expect(html).toContain('data-cfg-path="suppliers.ROLY.name"');
+    expect(html).toContain('data-cfg-path="suppliers.ROLY.web"');
+    // only ROLY, not other suppliers
+    expect(html).not.toContain('data-cfg-path="suppliers.SUPPLIER_1.name"');
+  });
+
+  test('editor guards a missing id', () => {
+    const html = renderSupplierEditor(freshCfg(), 'NOPE');
+    expect(html).toContain('no encontrado');
   });
 });
 
@@ -361,6 +405,32 @@ describe('addons actions', () => {
     executeAdminAction(cfg, { action: 'toggle-addon-category', id: 'name', cat: 'tshirt' });
     expect(cfg.addons.name.applies_to).toEqual(['*']);
     expectValid(cfg);
+  });
+});
+
+// ============================================================
+// Addons list + editor
+// ============================================================
+describe('addons list + editor', () => {
+  test('list shows a row per addon with search data, no inline fields', () => {
+    const html = renderAddonsList(freshCfg(), '');
+    expect(html).toContain('class="admin-list__row"');
+    expect(html).toContain('data-id="name"');
+    expect(html).toContain('data-edit="name"');
+    expect(html).not.toContain('data-cfg-path="addons.name.label"');
+  });
+
+  test('editor renders one addon, with category checkboxes and applies-to wrapped collapsible', () => {
+    const html = renderAddonEditor(freshCfg(), 'name');
+    expect(html).toContain('data-back');
+    expect(html).toContain('data-cfg-path="addons.name.label"');
+    expect(html).toContain('data-cfg-path="addons.name.price"');
+    expect(html).toContain('data-action-change="toggle-addon-category" data-id="name"');
+    expect(html).toContain('data-section="addons:name:applies"');
+  });
+
+  test('editor guards a missing id', () => {
+    expect(renderAddonEditor(freshCfg(), 'NOPE')).toContain('no encontrado');
   });
 });
 
@@ -618,9 +688,11 @@ describe('no v3 shape leaks in rendered HTML', () => {
     const cfg = freshCfg();
     const all = [
       renderAdminParameters(cfg),
-      renderAdminSuppliers(cfg),
+      renderSuppliersList(cfg, ''),
+      renderSupplierEditor(cfg, 'ROLY'),
       renderAdminProducts(cfg),
-      renderAdminAddons(cfg),
+      renderAddonsList(cfg, ''),
+      renderAddonEditor(cfg, 'name'),
       renderAdminTiers(cfg),
       renderAdminPacks(cfg)
     ].join('\n');

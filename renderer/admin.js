@@ -125,6 +125,30 @@ export function wrapCollapsible(label, bodyHtml, sectionKey) {
   `;
 }
 
+/** Join parts into a normalized search haystack. */
+export function buildHaystack(parts) {
+  return normalizeText(parts.filter(v => v !== null && v !== undefined && v !== '').join(' '));
+}
+
+/** Editor header: back button + title (Spanish UI). */
+function renderEditorHead(title) {
+  return `
+    <div class="admin-editor__head">
+      <button type="button" class="btn btn-ghost" data-back>
+        <svg class="icon"><use href="#i-chevron-left"/></svg> Volver a la lista
+      </button>
+      <h3 class="admin-editor__title">${esc(title)}</h3>
+    </div>
+  `;
+}
+
+function renderEditorNotFound(label) {
+  return `
+    ${renderEditorHead('No encontrado')}
+    <p class="hint">${esc(label)} no encontrado. Vuelve a la lista.</p>
+  `;
+}
+
 // ------------------------------------------------------------
 // Color per pack: deterministic by index so each pack keeps its hue.
 // ------------------------------------------------------------
@@ -174,51 +198,72 @@ export function renderAdminParameters(cfg) {
 }
 
 // ============================================================
-// SUPPLIERS
+// SUPPLIERS — list + editor
 // ============================================================
-export function renderAdminSuppliers(cfg) {
-  let html = '<p class="hint" style="margin-bottom: 12px;">Proveedores que abastecen los productos. No se puede eliminar un proveedor usado por algún producto.</p>';
+function supplierHaystack(id, s) {
+  return buildHaystack([id, s.name]);
+}
 
-  for (const [id, s] of Object.entries(cfg.suppliers || {})) {
+export function renderSuppliersList(cfg, query = '') {
+  const entries = Object.entries(cfg.suppliers || {});
+  const total = entries.length;
+  let count = 0;
+  let rows = '';
+  for (const [id, s] of entries) {
     const inUse = isSupplierInUse(cfg, id);
-    html += `
-      <div class="admin-row">
-        <div class="admin-row__head">
-          <div class="admin-row__title">
-            <span class="admin-row__id">${esc(id)}</span>
-            <strong>${esc(s.name || '—')}</strong>
-            ${inUse ? '<span class="admin-row__id" style="margin-left: 6px;">en uso</span>' : ''}
-          </div>
+    const hay = supplierHaystack(id, s);
+    const show = matchesQuery(hay, query);
+    if (show) count++;
+    rows += `
+      <div class="admin-list__row${show ? '' : ' is-hidden'}" data-id="${esc(id)}"
+           data-edit="${esc(id)}" data-search="${esc(hay)}">
+        <span class="admin-row__id">${esc(id)}</span>
+        <strong class="admin-list__name">${esc(s.name || '—')}</strong>
+        ${inUse ? '<span class="admin-list__meta">en uso</span>' : ''}
+        <span class="admin-list__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(id)}">Editar</button>
           <button type="button" class="admin-row__remove"
                   data-action="remove-supplier" data-id="${esc(id)}"
                   ${inUse ? 'disabled title="Lo usa algún producto"' : 'title="Eliminar proveedor"'}
                   aria-label="Eliminar proveedor ${esc(id)}">
             <svg class="icon"><use href="#i-x"/></svg>
           </button>
-        </div>
-        <div class="admin-grid">
-          <label>Nombre
-            <input type="text" value="${esc(s.name || '')}" data-cfg-path="suppliers.${esc(id)}.name">
-          </label>
-          <label>Web <span class="hint">opcional</span>
-            <input type="text" value="${esc(s.web || '')}" data-cfg-path="suppliers.${esc(id)}.web">
-          </label>
-          <label>Notas <span class="hint">opcional</span>
-            <input type="text" value="${esc(s.notes || '')}" data-cfg-path="suppliers.${esc(id)}.notes">
-          </label>
-        </div>
+        </span>
       </div>
     `;
   }
-
-  html += `
+  return `
+    <p class="hint" style="margin-bottom: 12px;">Proveedores que abastecen los productos. No se puede eliminar un proveedor usado por algún producto.</p>
+    ${renderListToolbar(query, count, total)}
+    <div class="admin-list">
+      ${rows}
+      <div class="admin-empty"${count ? ' hidden' : ''}>Sin resultados${query ? ` para «${esc(query)}»` : ''}.</div>
+    </div>
     <div class="admin-row-add">
       <button type="button" class="btn btn-secondary" data-action="add-supplier">
         <svg class="icon"><use href="#i-plus"/></svg> Añadir proveedor
       </button>
     </div>
   `;
-  return html;
+}
+
+export function renderSupplierEditor(cfg, id) {
+  const s = cfg.suppliers?.[id];
+  if (!s) return renderEditorNotFound('Proveedor');
+  return `
+    ${renderEditorHead(`Editar proveedor: ${esc(s.name || id)}`)}
+    <div class="admin-grid">
+      <label>Nombre
+        <input type="text" value="${esc(s.name || '')}" data-cfg-path="suppliers.${esc(id)}.name">
+      </label>
+      <label>Web <span class="hint">opcional</span>
+        <input type="text" value="${esc(s.web || '')}" data-cfg-path="suppliers.${esc(id)}.web">
+      </label>
+      <label>Notas <span class="hint">opcional</span>
+        <input type="text" value="${esc(s.notes || '')}" data-cfg-path="suppliers.${esc(id)}.notes">
+      </label>
+    </div>
+  `;
 }
 
 // ============================================================
@@ -381,66 +426,85 @@ function findProductId(cfg, product) {
 }
 
 // ============================================================
-// ADDONS
+// ADDONS — list + editor
 // ============================================================
-export function renderAdminAddons(cfg) {
-  let html = '<p class="hint" style="margin-bottom: 12px;">Complementos opcionales (nombre, mangas, …). El precio es sin IVA salvo que marques «IVA incluido». «Aplica a» son categorías de producto, o «*» para todas.</p>';
-
-  const categories = collectCategories(cfg);
-
-  for (const [id, a] of Object.entries(cfg.addons || {})) {
-    const appliesTo = Array.isArray(a.applies_to) ? a.applies_to : [];
-    const all = ['*', ...categories];
-    html += `
-      <div class="admin-row">
-        <div class="admin-row__head">
-          <div class="admin-row__title">
-            <span class="admin-row__id">${esc(id)}</span>
-            <strong>${esc(a.label || '—')}</strong>
-          </div>
+export function renderAddonsList(cfg, query = '') {
+  const entries = Object.entries(cfg.addons || {});
+  const total = entries.length;
+  let count = 0;
+  let rows = '';
+  for (const [id, a] of entries) {
+    const hay = buildHaystack([id, a.label]);
+    const show = matchesQuery(hay, query);
+    if (show) count++;
+    rows += `
+      <div class="admin-list__row${show ? '' : ' is-hidden'}" data-id="${esc(id)}"
+           data-edit="${esc(id)}" data-search="${esc(hay)}">
+        <span class="admin-row__id">${esc(id)}</span>
+        <strong class="admin-list__name">${esc(a.label || '—')}</strong>
+        <span class="admin-list__meta">${esc((a.price ?? 0))} €</span>
+        <span class="admin-list__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(id)}">Editar</button>
           <button type="button" class="admin-row__remove"
                   data-action="remove-addon" data-id="${esc(id)}"
                   title="Eliminar complemento" aria-label="Eliminar complemento ${esc(id)}">
             <svg class="icon"><use href="#i-x"/></svg>
           </button>
-        </div>
-        <div class="admin-grid">
-          <label>Etiqueta
-            <input type="text" value="${esc(a.label || '')}" data-cfg-path="addons.${esc(id)}.label">
-          </label>
-          <label>Precio (€/ud)
-            <input type="number" step="0.01" min="0" value="${esc(a.price ?? 0)}" data-cfg-path="addons.${esc(id)}.price">
-          </label>
-          <label>Coste interno (€/ud) <span class="hint">para el margen</span>
-            <input type="number" step="0.01" min="0" value="${esc(a.cost ?? 0)}" data-cfg-path="addons.${esc(id)}.cost">
-          </label>
-          <label style="flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" ${a.vat_included ? 'checked' : ''} data-cfg-path="addons.${esc(id)}.vat_included">
-            El precio ya incluye IVA
-          </label>
-        </div>
-        <div class="admin-mini-head">Aplica a</div>
-        <div class="admin-grid">
-          ${all.map(cat => `
-            <label style="flex-direction: row; align-items: center; gap: 8px;">
-              <input type="checkbox" ${appliesTo.includes(cat) ? 'checked' : ''}
-                     data-action-change="toggle-addon-category" data-id="${esc(id)}" data-cat="${esc(cat)}">
-              ${cat === '*' ? 'Todas (*)' : esc(cat)}
-            </label>
-          `).join('')}
-        </div>
+        </span>
       </div>
     `;
   }
-
-  html += `
+  return `
+    <p class="hint" style="margin-bottom: 12px;">Complementos opcionales (nombre, mangas, …). El precio es sin IVA salvo que marques «IVA incluido». «Aplica a» son categorías de producto, o «*» para todas.</p>
+    ${renderListToolbar(query, count, total)}
+    <div class="admin-list">
+      ${rows}
+      <div class="admin-empty"${count ? ' hidden' : ''}>Sin resultados${query ? ` para «${esc(query)}»` : ''}.</div>
+    </div>
     <div class="admin-row-add">
       <button type="button" class="btn btn-secondary" data-action="add-addon">
         <svg class="icon"><use href="#i-plus"/></svg> Añadir complemento
       </button>
     </div>
   `;
-  return html;
+}
+
+export function renderAddonEditor(cfg, id) {
+  const a = cfg.addons?.[id];
+  if (!a) return renderEditorNotFound('Complemento');
+  const categories = collectCategories(cfg);
+  const appliesTo = Array.isArray(a.applies_to) ? a.applies_to : [];
+  const all = ['*', ...categories];
+  const appliesBody = `
+    <div class="admin-grid">
+      ${all.map(cat => `
+        <label style="flex-direction: row; align-items: center; gap: 8px;">
+          <input type="checkbox" ${appliesTo.includes(cat) ? 'checked' : ''}
+                 data-action-change="toggle-addon-category" data-id="${esc(id)}" data-cat="${esc(cat)}">
+          ${cat === '*' ? 'Todas (*)' : esc(cat)}
+        </label>
+      `).join('')}
+    </div>
+  `;
+  return `
+    ${renderEditorHead(`Editar complemento: ${esc(a.label || id)}`)}
+    <div class="admin-grid">
+      <label>Etiqueta
+        <input type="text" value="${esc(a.label || '')}" data-cfg-path="addons.${esc(id)}.label">
+      </label>
+      <label>Precio (€/ud)
+        <input type="number" step="0.01" min="0" value="${esc(a.price ?? 0)}" data-cfg-path="addons.${esc(id)}.price">
+      </label>
+      <label>Coste interno (€/ud) <span class="hint">para el margen</span>
+        <input type="number" step="0.01" min="0" value="${esc(a.cost ?? 0)}" data-cfg-path="addons.${esc(id)}.cost">
+      </label>
+      <label style="flex-direction: row; align-items: center; gap: 8px;">
+        <input type="checkbox" ${a.vat_included ? 'checked' : ''} data-cfg-path="addons.${esc(id)}.vat_included">
+        El precio ya incluye IVA
+      </label>
+    </div>
+    ${wrapCollapsible('Aplica a', appliesBody, `addons:${id}:applies`)}
+  `;
 }
 
 // ============================================================
