@@ -171,6 +171,39 @@ describe('suppliers actions', () => {
 });
 
 // ============================================================
+// add actions return the created id
+// ============================================================
+describe('add actions return the created id', () => {
+  test('add-supplier returns its id', () => {
+    const cfg = freshCfg();
+    const r = executeAdminAction(cfg, { action: 'add-supplier' });
+    expect(r.id).toBe('SUPPLIER_1');
+    expect(cfg.suppliers[r.id]).toBeDefined();
+  });
+
+  test('add-product returns its id', () => {
+    const cfg = freshCfg();
+    const r = executeAdminAction(cfg, { action: 'add-product' });
+    expect(r.id).toBe('PRODUCT_1');
+    expect(cfg.products[r.id]).toBeDefined();
+  });
+
+  test('add-addon returns its id', () => {
+    const cfg = freshCfg();
+    const r = executeAdminAction(cfg, { action: 'add-addon' });
+    expect(r.id).toBe('addon_1');
+    expect(cfg.addons[r.id]).toBeDefined();
+  });
+
+  test('add-pack returns its id', () => {
+    const cfg = freshCfg();
+    const r = executeAdminAction(cfg, { action: 'add-pack' });
+    expect(r.id).toBe('pack_1');
+    expect(cfg.packs[r.id]).toBeDefined();
+  });
+});
+
+// ============================================================
 // Products
 // ============================================================
 describe('products actions', () => {

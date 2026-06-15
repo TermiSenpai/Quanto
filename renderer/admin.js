@@ -891,7 +891,7 @@ function addSupplier(cfg) {
   if (!cfg.suppliers) cfg.suppliers = {};
   const id = nextId(cfg.suppliers, 'SUPPLIER_');
   cfg.suppliers[id] = { name: 'Nuevo proveedor', web: '', notes: '' };
-  return { dirty: true };
+  return { dirty: true, id };
 }
 
 function removeSupplier(cfg, id) {
@@ -936,7 +936,7 @@ function addProduct(cfg) {
     ],
     prices
   };
-  return { dirty: true };
+  return { dirty: true, id };
 }
 
 function removeProduct(cfg, id) {
@@ -1034,7 +1034,7 @@ function addAddon(cfg) {
     cost: 0,
     applies_to: ['*']
   };
-  return { dirty: true };
+  return { dirty: true, id };
 }
 
 function removeAddon(cfg, id) {
@@ -1098,7 +1098,7 @@ function addPack(cfg) {
   // pack lets the user pick products at quote time (free_components).
   if (productIds.length === 0) pack.free_components = true;
   cfg.packs[id] = pack;
-  return { dirty: true };
+  return { dirty: true, id };
 }
 
 function removePack(cfg, id) {
