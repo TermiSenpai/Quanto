@@ -6,7 +6,7 @@
       "id": "GoRl1",
       "x": 0,
       "y": 0,
-      "name": "PackPrice — UI/UX",
+      "name": "Quanto — UI/UX",
       "width": 7440,
       "height": 2780,
       "fill": "$surface-primary",
@@ -19,7 +19,7 @@
           "y": 60,
           "name": "title",
           "fill": "$fg-primary",
-          "content": "PackPrice — Sistema de diseño y pantallas",
+          "content": "Quanto — Sistema de diseño y pantallas",
           "fontFamily": "Inter",
           "fontSize": 48,
           "fontWeight": "700"
@@ -960,36 +960,68 @@
                       "children": [
                         {
                           "type": "frame",
-                          "id": "ebUyM",
-                          "name": "welcomeBrandIcon",
-                          "width": 36,
-                          "height": 36,
-                          "fill": "$accent-primary",
-                          "cornerRadius": "$radius-md",
-                          "justifyContent": "center",
-                          "alignItems": "center",
+                          "id": "GUQbJ",
+                          "name": "quantoWordmark",
+                          "width": 106.02,
+                          "height": 37.696,
+                          "layout": "none",
                           "children": [
                             {
-                              "type": "icon",
-                              "id": "IROCo",
-                              "name": "welcomeBrandIconI",
-                              "width": 20,
-                              "height": 20,
-                              "icon": "package",
-                              "library": "lucide",
-                              "fill": "$fg-inverse"
+                              "type": "path",
+                              "id": "URyvi",
+                              "x": 0,
+                              "y": 0,
+                              "name": "qPriceLine",
+                              "geometry": "M40 38c5 7 10 12 18 12l104 0",
+                              "viewBox": [
+                                0,
+                                0,
+                                180,
+                                64
+                              ],
+                              "fill": "#00000000",
+                              "width": 106.02,
+                              "height": 37.696,
+                              "stroke": "#6C82FF",
+                              "strokeWidth": 2.945,
+                              "strokeLinecap": "round"
+                            },
+                            {
+                              "type": "ellipse",
+                              "id": "e4qmun",
+                              "x": 9.424,
+                              "y": 8.245999999999999,
+                              "name": "qRing",
+                              "fill": "#00000000",
+                              "width": 17.669999999999998,
+                              "height": 17.669999999999998,
+                              "stroke": "#FFFFFF",
+                              "strokeWidth": 4.122999999999999
+                            },
+                            {
+                              "type": "ellipse",
+                              "id": "yeefV",
+                              "x": 96.00699999999999,
+                              "y": 26.505,
+                              "name": "qDot",
+                              "fill": "#6C82FF",
+                              "width": 5.89,
+                              "height": 5.89
+                            },
+                            {
+                              "type": "text",
+                              "id": "jbM3R",
+                              "x": 30.038999999999998,
+                              "y": 4,
+                              "name": "qWord",
+                              "fill": "#FFFFFF",
+                              "content": "uanto",
+                              "fontFamily": "Inter",
+                              "fontSize": 23.56,
+                              "fontWeight": "700",
+                              "letterSpacing": -0.8835
                             }
                           ]
-                        },
-                        {
-                          "type": "text",
-                          "id": "hMjKo",
-                          "name": "welcomeBrandTxt",
-                          "fill": "$fg-inverse",
-                          "content": "PackPrice",
-                          "fontFamily": "Inter",
-                          "fontSize": 20,
-                          "fontWeight": "700"
                         }
                       ]
                     },
@@ -1427,7 +1459,7 @@
                               "fill": "$accent-text-on-soft",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Si el archivo no existe, PackPrice puede crearlo con valores por defecto al continuar.",
+                              "content": "Si el archivo no existe, Quanto puede crearlo con valores por defecto al continuar.",
                               "lineHeight": 1.5,
                               "fontFamily": "Inter",
                               "fontSize": 12,
@@ -1548,36 +1580,68 @@
                   "children": [
                     {
                       "type": "frame",
-                      "id": "INhRS",
-                      "name": "brandIcon",
-                      "width": 32,
-                      "height": 32,
-                      "fill": "$surface-inverse",
-                      "cornerRadius": "$radius-md",
-                      "justifyContent": "center",
-                      "alignItems": "center",
+                      "id": "y7QqZ",
+                      "name": "quantoWordmark",
+                      "width": 85,
+                      "height": 30,
+                      "layout": "none",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "wl7Nr",
-                          "name": "brandIconI",
-                          "width": 18,
-                          "height": 18,
-                          "icon": "package",
-                          "library": "lucide",
-                          "fill": "$fg-inverse"
+                          "type": "path",
+                          "id": "cK854",
+                          "x": 0,
+                          "y": 0,
+                          "name": "qPriceLine",
+                          "geometry": "M40 38c5 7 10 12 18 12l104 0",
+                          "viewBox": [
+                            0,
+                            0,
+                            180,
+                            64
+                          ],
+                          "fill": "#00000000",
+                          "width": 85,
+                          "height": 30,
+                          "stroke": "#3D5AF1",
+                          "strokeWidth": 2.4,
+                          "strokeLinecap": "round"
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "RrIke",
+                          "x": 7.5,
+                          "y": 6.6,
+                          "name": "qRing",
+                          "fill": "#00000000",
+                          "width": 14.1,
+                          "height": 14.1,
+                          "stroke": "#0F1A2B",
+                          "strokeWidth": 3.3
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "AWaAl",
+                          "x": 76.6,
+                          "y": 21.1,
+                          "name": "qDot",
+                          "fill": "#3D5AF1",
+                          "width": 4.7,
+                          "height": 4.7
+                        },
+                        {
+                          "type": "text",
+                          "id": "T2ujUH",
+                          "x": 24,
+                          "y": 3,
+                          "name": "qWord",
+                          "fill": "#0F1A2B",
+                          "content": "uanto",
+                          "fontFamily": "Inter",
+                          "fontSize": 19,
+                          "fontWeight": "700",
+                          "letterSpacing": -0.7
                         }
                       ]
-                    },
-                    {
-                      "type": "text",
-                      "id": "eI7TI",
-                      "name": "brandTitle",
-                      "fill": "$fg-primary",
-                      "content": "PackPrice",
-                      "fontFamily": "Inter",
-                      "fontSize": 16,
-                      "fontWeight": "700"
                     },
                     {
                       "type": "rectangle",
@@ -2151,7 +2215,7 @@
                       "id": "xa6h3",
                       "name": "fLeft3",
                       "fill": "$fg-muted",
-                      "content": "PackPrice · uso interno taller",
+                      "content": "Quanto · uso interno taller",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "normal"
@@ -2238,36 +2302,68 @@
                   "children": [
                     {
                       "type": "frame",
-                      "id": "B2lWwt",
-                      "name": "brandIcon",
-                      "width": 32,
-                      "height": 32,
-                      "fill": "$surface-inverse",
-                      "cornerRadius": "$radius-md",
-                      "justifyContent": "center",
-                      "alignItems": "center",
+                      "id": "fP5Zp",
+                      "name": "quantoWordmark",
+                      "width": 84.96,
+                      "height": 30.208,
+                      "layout": "none",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "zdhYD",
-                          "name": "brandIconI",
-                          "width": 18,
-                          "height": 18,
-                          "icon": "package",
-                          "library": "lucide",
-                          "fill": "$fg-inverse"
+                          "type": "path",
+                          "id": "QYUca",
+                          "x": 0,
+                          "y": 0,
+                          "name": "qPriceLine",
+                          "geometry": "M40 38c5 7 10 12 18 12l104 0",
+                          "viewBox": [
+                            0,
+                            0,
+                            180,
+                            64
+                          ],
+                          "fill": "#00000000",
+                          "width": 84.96,
+                          "height": 30.208,
+                          "stroke": "#3D5AF1",
+                          "strokeWidth": 2.36,
+                          "strokeLinecap": "round"
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "zajkd",
+                          "x": 7.552,
+                          "y": 6.608,
+                          "name": "qRing",
+                          "fill": "#00000000",
+                          "width": 14.16,
+                          "height": 14.16,
+                          "stroke": "#0F1A2B",
+                          "strokeWidth": 3.304
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "a8Hdo",
+                          "x": 76.93599999999999,
+                          "y": 21.24,
+                          "name": "qDot",
+                          "fill": "#3D5AF1",
+                          "width": 4.72,
+                          "height": 4.72
+                        },
+                        {
+                          "type": "text",
+                          "id": "mU3dX",
+                          "x": 24.072,
+                          "y": 3,
+                          "name": "qWord",
+                          "fill": "#0F1A2B",
+                          "content": "uanto",
+                          "fontFamily": "Inter",
+                          "fontSize": 18.88,
+                          "fontWeight": "700",
+                          "letterSpacing": -0.708
                         }
                       ]
-                    },
-                    {
-                      "type": "text",
-                      "id": "a8nqu",
-                      "name": "brandTitle",
-                      "fill": "$fg-primary",
-                      "content": "PackPrice",
-                      "fontFamily": "Inter",
-                      "fontSize": 16,
-                      "fontWeight": "700"
                     },
                     {
                       "type": "rectangle",
@@ -3929,36 +4025,68 @@
                   "children": [
                     {
                       "type": "frame",
-                      "id": "hnYyP",
-                      "name": "brandIcon",
-                      "width": 32,
-                      "height": 32,
-                      "fill": "$surface-inverse",
-                      "cornerRadius": "$radius-md",
-                      "justifyContent": "center",
-                      "alignItems": "center",
+                      "id": "ZpZQB",
+                      "name": "quantoWordmark",
+                      "width": 84.96,
+                      "height": 30.208,
+                      "layout": "none",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "P3kCCI",
-                          "name": "brandIconI",
-                          "width": 18,
-                          "height": 18,
-                          "icon": "package",
-                          "library": "lucide",
-                          "fill": "$fg-inverse"
+                          "type": "path",
+                          "id": "eCpTq",
+                          "x": 0,
+                          "y": 0,
+                          "name": "qPriceLine",
+                          "geometry": "M40 38c5 7 10 12 18 12l104 0",
+                          "viewBox": [
+                            0,
+                            0,
+                            180,
+                            64
+                          ],
+                          "fill": "#00000000",
+                          "width": 84.96,
+                          "height": 30.208,
+                          "stroke": "#3D5AF1",
+                          "strokeWidth": 2.36,
+                          "strokeLinecap": "round"
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "Z776z",
+                          "x": 7.552,
+                          "y": 6.608,
+                          "name": "qRing",
+                          "fill": "#00000000",
+                          "width": 14.16,
+                          "height": 14.16,
+                          "stroke": "#0F1A2B",
+                          "strokeWidth": 3.304
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "U6USDr",
+                          "x": 76.93599999999999,
+                          "y": 21.24,
+                          "name": "qDot",
+                          "fill": "#3D5AF1",
+                          "width": 4.72,
+                          "height": 4.72
+                        },
+                        {
+                          "type": "text",
+                          "id": "tL8eF",
+                          "x": 24.072,
+                          "y": 3,
+                          "name": "qWord",
+                          "fill": "#0F1A2B",
+                          "content": "uanto",
+                          "fontFamily": "Inter",
+                          "fontSize": 18.88,
+                          "fontWeight": "700",
+                          "letterSpacing": -0.708
                         }
                       ]
-                    },
-                    {
-                      "type": "text",
-                      "id": "Dq3Nt",
-                      "name": "brandTitle",
-                      "fill": "$fg-primary",
-                      "content": "PackPrice",
-                      "fontFamily": "Inter",
-                      "fontSize": 16,
-                      "fontWeight": "700"
                     },
                     {
                       "type": "rectangle",
@@ -7868,36 +7996,68 @@
                   "children": [
                     {
                       "type": "frame",
-                      "id": "a4yav",
-                      "name": "mBrandIcon",
-                      "width": 32,
-                      "height": 32,
-                      "fill": "$surface-inverse",
-                      "cornerRadius": "$radius-md",
-                      "justifyContent": "center",
-                      "alignItems": "center",
+                      "id": "UEoIz",
+                      "name": "quantoWordmark",
+                      "width": 84.96,
+                      "height": 30.208,
+                      "layout": "none",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "WyhTW",
-                          "name": "mBrandIconI",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "package",
-                          "library": "lucide",
-                          "fill": "$fg-inverse"
+                          "type": "path",
+                          "id": "aKACV",
+                          "x": 0,
+                          "y": 0,
+                          "name": "qPriceLine",
+                          "geometry": "M40 38c5 7 10 12 18 12l104 0",
+                          "viewBox": [
+                            0,
+                            0,
+                            180,
+                            64
+                          ],
+                          "fill": "#00000000",
+                          "width": 84.96,
+                          "height": 30.208,
+                          "stroke": "#3D5AF1",
+                          "strokeWidth": 2.36,
+                          "strokeLinecap": "round"
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "X5XnY",
+                          "x": 7.552,
+                          "y": 6.608,
+                          "name": "qRing",
+                          "fill": "#00000000",
+                          "width": 14.16,
+                          "height": 14.16,
+                          "stroke": "#0F1A2B",
+                          "strokeWidth": 3.304
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "FeXuD",
+                          "x": 76.93599999999999,
+                          "y": 21.24,
+                          "name": "qDot",
+                          "fill": "#3D5AF1",
+                          "width": 4.72,
+                          "height": 4.72
+                        },
+                        {
+                          "type": "text",
+                          "id": "i4gupg",
+                          "x": 24.072,
+                          "y": 3,
+                          "name": "qWord",
+                          "fill": "#0F1A2B",
+                          "content": "uanto",
+                          "fontFamily": "Inter",
+                          "fontSize": 18.88,
+                          "fontWeight": "700",
+                          "letterSpacing": -0.708
                         }
                       ]
-                    },
-                    {
-                      "type": "text",
-                      "id": "kTqgh",
-                      "name": "mBrandT",
-                      "fill": "$fg-primary",
-                      "content": "PackPrice",
-                      "fontFamily": "Inter",
-                      "fontSize": 16,
-                      "fontWeight": "700"
                     }
                   ]
                 },
