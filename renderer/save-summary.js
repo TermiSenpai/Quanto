@@ -22,9 +22,11 @@
 // required by main.js under Electron's Node 20, which cannot `require`
 // ESM). Chromium cannot `import` a CommonJS file, and lib/diff.js
 // cannot gain `export` without breaking main — so a thin, self-contained
-// re-statement of the two pure diff primitives is the zero-build,
-// zero-dep bridge. It is byte-for-byte equivalent to lib/diff.js's
-// `diffObjects` + `formatChangeLine` and covered by tests/save-summary.test.js.
+// re-statement of the pure diff primitive `diffObjects` is the zero-build,
+// zero-dep bridge. Groups carry the structured changes; the renderer
+// humanizes them (renderer/change-format.js), so no line formatter lives
+// here anymore. The drift-guard in tests/save-summary.test.js pins this
+// `diffObjects` against lib/diff.js (the audit source of truth in main).
 // ============================================================
 
 'use strict';
@@ -170,24 +172,4 @@ function deepEqual(a, b) {
   if (ak.length !== bk.length) return false;
   for (const k of ak) if (!deepEqual(a[k], b[k])) return false;
   return true;
-}
-
-/**
- * Renders one diff entry as a human Spanish line (matches lib/diff.js
- * `formatChangeLine`, and the audit modal's "+ / − / ~" convention).
- */
-function formatChangeLine(change) {
-  const { path, before, after, kind } = change;
-  if (kind === 'add') return `+ ${path}: ${stringify(after)}`;
-  if (kind === 'remove') return `- ${path}: ${stringify(before)}`;
-  return `~ ${path}: ${stringify(before)} → ${stringify(after)}`;
-}
-
-function stringify(value) {
-  if (value === undefined) return '∅';
-  if (value === null) return 'null';
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number') return String(value);
-  if (typeof value === 'boolean') return String(value);
-  return JSON.stringify(value);
 }
