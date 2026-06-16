@@ -1,12 +1,15 @@
 // ============================================================
-// PackPrice · Save-summary (pure, renderer)
+// Quanto · Save-summary (pure, renderer)
 // ============================================================
 // Turns an old/new catalog pair into a change summary GROUPED by
 // catalog entity, for the cloud "confirm save" modal (UI-UX §2.5) and,
 // per entity, the conflict modal (§2.3). Each group is
-//   { entityType, id, lines: string[] }
-// where `lines` are the same human "+ path: x" / "~ path: a → b" rows
-// the audit/diff modals already use.
+//   { entityType, id, kind, name, fieldChanges }
+// where `kind` is 'add' | 'remove' | 'edit', `name` is the entity's
+// display name (name → label → id), and `fieldChanges` is the array of
+// structured { path, before, after, kind } entries (empty for whole
+// add/remove). The humanizer (renderer/change-format.js) turns these
+// into friendly Spanish text — this module no longer pre-formats lines.
 //
 // Grouping mirrors lib/catalog-writer.js `diffEntities` (the cloud
 // writer's seam): the per-id entities pack / product / supplier / addon
@@ -52,7 +55,7 @@ const GLOBALS = ['parameters', 'tiers', 'company'];
  *
  * @param {object} oldCfg - the baseline catalog (e.g. the editor backup)
  * @param {object} newCfg - the edited catalog
- * @returns {{ entityType: string, id: string|null, lines: string[] }[]}
+ * @returns {{ entityType: string, id: string|null, kind: string, name: string|null, fieldChanges: object[] }[]}
  *   One group per changed/added/removed entity (per-id) or changed
  *   global, in a stable order; empty when nothing changed.
  */
@@ -61,37 +64,46 @@ export function buildSaveSummary(oldCfg, newCfg) {
   const next = newCfg || {};
   const out = [];
 
-  // Per-id entities: walk the union of ids and diff each sub-object.
   for (const [entityType, section] of PER_ID) {
     const oldColl = old[section] || {};
     const newColl = next[section] || {};
     const ids = new Set([...Object.keys(oldColl), ...Object.keys(newColl)]);
     for (const id of ids) {
-      const changes = diffObjects(oldColl[id], newColl[id]);
+      const before = oldColl[id];
+      const after = newColl[id];
+      const changes = diffObjects(before, after);
       if (changes.length === 0) continue;
-      out.push({ entityType, id, lines: changes.map(formatChangeLine) });
+      const added = before === undefined && after !== undefined;
+      const removed = before !== undefined && after === undefined;
+      const kind = added ? 'add' : removed ? 'remove' : 'edit';
+      const nameObj = (kind === 'remove') ? before : after;
+      const name = (nameObj && (nameObj.name || nameObj.label)) || id;
+      const fieldChanges = kind === 'edit' ? changes : [];
+      out.push({ entityType, id, kind, name, fieldChanges });
     }
   }
 
-  // Global singletons: one group if any field differs.
   for (const entityType of GLOBALS) {
     const changes = diffObjects(old[entityType], next[entityType]);
     if (changes.length === 0) continue;
-    out.push({ entityType, id: null, lines: changes.map(formatChangeLine) });
+    out.push({ entityType, id: null, kind: 'edit', name: null, fieldChanges: changes });
   }
 
   return out;
 }
 
 /**
- * Total number of change lines across every group — drives the
- * "Guardar N cambios" button label.
+ * Total change count for the "Guardar N cambios" button: each edited
+ * field counts once; a whole-entity add/remove counts as one.
  *
- * @param {{ lines: string[] }[]} summary
+ * @param {{ kind: string, fieldChanges: object[] }[]} summary
  * @returns {number}
  */
 export function totalChanges(summary) {
-  return (summary || []).reduce((n, g) => n + (g.lines ? g.lines.length : 0), 0);
+  return (summary || []).reduce((n, g) => {
+    if (g.kind === 'edit') return n + (g.fieldChanges ? g.fieldChanges.length : 0);
+    return n + 1; // add / remove
+  }, 0);
 }
 
 // ------------------------------------------------------------

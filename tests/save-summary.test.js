@@ -60,10 +60,10 @@ describe('buildSaveSummary', () => {
     const group = summary[0];
     expect(group.entityType).toBe('pack');
     expect(group.id).toBe('crew');
-    expect(group.lines.length).toBeGreaterThanOrEqual(1);
-    // The line names the changed field and the from → to values.
-    expect(group.lines.join('\n')).toMatch(/name/);
-    expect(group.lines.join('\n')).toMatch(/Pack Peña Pro/);
+    expect(group.kind).toBe('edit');
+    expect(group.name).toBe('Pack Peña Pro');
+    expect(group.fieldChanges.length).toBeGreaterThanOrEqual(1);
+    expect(group.fieldChanges.some(c => c.path === 'name' && c.after === 'Pack Peña Pro')).toBe(true);
   });
 
   test('a parameter change → one global "parameters" group (id null)', () => {
@@ -75,7 +75,7 @@ describe('buildSaveSummary', () => {
     expect(summary).toHaveLength(1);
     expect(summary[0].entityType).toBe('parameters');
     expect(summary[0].id).toBeNull();
-    expect(summary[0].lines.join('\n')).toMatch(/vat/);
+    expect(summary[0].fieldChanges.some(c => c.path === 'vat')).toBe(true);
   });
 
   test('an added product → one product group flagged as an addition', () => {
@@ -90,8 +90,9 @@ describe('buildSaveSummary', () => {
     const group = summary[0];
     expect(group.entityType).toBe('product');
     expect(group.id).toBe('hoodie');
-    // An addition shows the new entity (a "+ …" line).
-    expect(group.lines.some(l => l.startsWith('+'))).toBe(true);
+    expect(group.kind).toBe('add');
+    expect(group.name).toBe('Sudadera');
+    expect(group.fieldChanges).toEqual([]);
   });
 
   test('changes across several entities are grouped separately', () => {
@@ -104,7 +105,9 @@ describe('buildSaveSummary', () => {
     const summary = buildSaveSummary(oldCfg, newCfg);
     const keys = summary.map(g => `${g.entityType}:${g.id}`).sort();
     expect(keys).toEqual(['pack:crew', 'parameters:null', 'product:tshirt'].sort());
-    for (const g of summary) expect(g.lines.length).toBeGreaterThanOrEqual(1);
+    for (const g of summary) {
+      if (g.kind === 'edit') expect(g.fieldChanges.length).toBeGreaterThanOrEqual(1);
+    }
   });
 
   test('a removed addon → one addon group flagged as a removal', () => {
@@ -116,7 +119,8 @@ describe('buildSaveSummary', () => {
     expect(summary).toHaveLength(1);
     expect(summary[0].entityType).toBe('addon');
     expect(summary[0].id).toBe('name_print');
-    expect(summary[0].lines.some(l => l.startsWith('-'))).toBe(true);
+    expect(summary[0].kind).toBe('remove');
+    expect(summary[0].name).toBe('Nombre'); // addon label from the old object
   });
 
   test('totalChanges() helper counts the lines across all groups', () => {
@@ -125,8 +129,7 @@ describe('buildSaveSummary', () => {
     newCfg.packs.crew.name = 'X';
     newCfg.parameters.vat = 0.1;
     const summary = buildSaveSummary(oldCfg, newCfg);
-    const total = summary.reduce((n, g) => n + g.lines.length, 0);
-    expect(total).toBeGreaterThanOrEqual(2);
+    expect(totalChanges(summary)).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -182,7 +185,25 @@ describe('drift-guard: save-summary vs lib/diff source of truth', () => {
   }
 
   function summaryLines(oldCfg, newCfg) {
-    return buildSaveSummary(oldCfg, newCfg).flatMap(g => g.lines);
+    const groups = buildSaveSummary(oldCfg, newCfg);
+    const lines = [];
+    for (const g of groups) {
+      if (g.kind === 'add') {
+        // whole-entity add → lib emits one "+ : {obj}" line for the slice
+        const slice = sliceOf(newCfg, g.entityType, g.id);
+        lines.push(...diffLib.diffObjects(undefined, slice).map(diffLib.formatChangeLine));
+      } else if (g.kind === 'remove') {
+        const slice = sliceOf(oldCfg, g.entityType, g.id);
+        lines.push(...diffLib.diffObjects(slice, undefined).map(diffLib.formatChangeLine));
+      } else {
+        lines.push(...g.fieldChanges.map(diffLib.formatChangeLine));
+      }
+    }
+    return lines;
+  }
+  function sliceOf(cfg, entityType, id) {
+    const sec = { supplier: 'suppliers', product: 'products', addon: 'addons', pack: 'packs' }[entityType];
+    return sec ? (cfg[sec] || {})[id] : cfg[entityType];
   }
 
   // A multiset assertion: every line in A appears in B with the same
