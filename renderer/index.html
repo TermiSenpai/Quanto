@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';">
-  <title>PackPrice · Calculadora de packs</title>
+  <title>Quanto · Calculadora de packs</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -134,7 +134,7 @@
     <aside class="split__left">
       <div class="topbar__brand">
         <span class="topbar__brand-icon"><svg class="icon icon--lg"><use href="#i-pack"/></svg></span>
-        <span class="topbar__brand-title">PackPrice</span>
+        <span class="topbar__brand-title">Quanto</span>
       </div>
 
       <div class="split__hero">
@@ -149,7 +149,7 @@
           <div class="stat"><strong>3</strong><span>Modelos Roly</span></div>
           <div class="stat"><strong>4</strong><span>Tramos por volumen</span></div>
         </div>
-        <p class="split__foot-line text-mono" style="margin-top: 16px;">v3.0.0-beta</p>
+        <p class="split__foot-line text-mono" style="margin-top: 16px;" id="bv-version"></p>
       </div>
     </aside>
 
@@ -177,7 +177,7 @@
 
         <div class="alert alert-info">
           <svg class="icon"><use href="#i-info"/></svg>
-          <span>Si el archivo no existe, PackPrice puede crearlo con valores por defecto al continuar.</span>
+          <span>Si el archivo no existe, Quanto puede crearlo con valores por defecto al continuar.</span>
         </div>
 
         <div id="bv-error" class="alert alert-error hidden"></div>
@@ -201,7 +201,7 @@
     <aside class="split__left">
       <div class="topbar__brand">
         <span class="topbar__brand-icon"><svg class="icon icon--lg"><use href="#i-pack"/></svg></span>
-        <span class="topbar__brand-title">PackPrice</span>
+        <span class="topbar__brand-title">Quanto</span>
       </div>
 
       <div class="split__hero">
@@ -432,7 +432,7 @@
     <header class="topbar">
       <div class="topbar__brand">
         <span class="topbar__brand-icon"><svg class="icon"><use href="#i-pack"/></svg></span>
-        <span class="topbar__brand-title">PackPrice</span>
+        <span class="topbar__brand-title">Quanto</span>
         <span class="topbar__brand-sep" aria-hidden="true"></span>
         <span class="topbar__brand-tag">Calculadora de packs</span>
       </div>
@@ -763,7 +763,7 @@
         </div>
         <div class="modal__warn">
           <svg class="icon"><use href="#i-warn"/></svg>
-          <span>Los demás usuarios verán los cambios al pulsar «Recargar» en su PackPrice. Se hace backup automático antes de cada escritura.</span>
+          <span>Los demás usuarios verán los cambios al pulsar «Recargar» en su Quanto. Se hace backup automático antes de cada escritura.</span>
         </div>
 
         <div class="modal__body">
@@ -989,7 +989,7 @@
         <div class="stack">
           <div class="alert alert-info">
             <svg class="icon"><use href="#i-info"/></svg>
-            <span>Guardado en <code class="text-mono">%APPDATA%\packprice\settings.json</code>. No se sincroniza con el NAS.</span>
+            <span>Guardado en <code class="text-mono">%APPDATA%\Quanto\settings.json</code>. No se sincroniza con el NAS.</span>
           </div>
 
           <div class="field">
@@ -1146,7 +1146,7 @@
           <div id="aj-privacy-section">
             <div>
               <h3 class="h-card" style="margin-bottom: 6px;">Privacidad</h3>
-              <p class="text-secondary" style="font-size: 12px;">PackPrice solo se conecta a internet para dos cosas: comprobar si hay una versión nueva (GitHub) y, si lo permites, enviar informes de error. Nunca se envían tus precios, clientes ni catálogo.</p>
+              <p class="text-secondary" style="font-size: 12px;">Quanto solo se conecta a internet para dos cosas: comprobar si hay una versión nueva (GitHub) y, si lo permites, enviar informes de error. Nunca se envían tus precios, clientes ni catálogo.</p>
             </div>
 
             <div class="toggle-row">

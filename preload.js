@@ -70,6 +70,10 @@ contextBridge.exposeInMainWorld('packprice', {
   // opens the release page via openExternal.
   checkAppUpdate:          ()    => ipcRenderer.invoke('update:check'),
 
+  // --- App version (welcome-screen label) ---
+  // No network: the running version, so the UI never hardcodes it.
+  getAppVersion:           ()    => ipcRenderer.invoke('app:version'),
+
   // --- Audit log (admin config changes) ---
   listAuditEntries:   (data) => ipcRenderer.invoke('audit:list', data),
   previewConfigDiff:  (data) => ipcRenderer.invoke('audit:diff-preview', data),

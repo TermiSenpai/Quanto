@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Renderer (orchestration)
+// Quanto · Renderer (orchestration)
 // ============================================================
 // - Bootstrap and screen routing
 // - DOM events
@@ -176,6 +176,13 @@ let historyState = { view: 'audit', auditEntries: [], auditOffset: 0, auditDone:
 // ============================================================
 
 async function bootstrap() {
+  // Welcome-screen version label, pulled live from the app. It used to be
+  // hardcoded in the HTML and drifted to a stale value; fire-and-forget so
+  // a failure can never block boot.
+  window.packprice.getAppVersion()
+    .then((v) => { const e = el('bv-version'); if (e && v) e.textContent = 'v' + v; })
+    .catch(() => {});
+
   // Any boot IPC (readSettings, loadCatalog, readConfig) can reject —
   // network blip, a corrupt settings.json, an unhandled main error. We
   // never want a blank window (hard rule #4: show it, don't swallow):
@@ -220,7 +227,7 @@ function showBootErrorScreen(err) {
   hide('setup-wizard');
   show('pantalla-error');
 
-  el('error-titulo').textContent = 'No se pudo iniciar PackPrice';
+  el('error-titulo').textContent = 'No se pudo iniciar Quanto';
   el('error-detalle').textContent =
     (err && (err.message || String(err))) || 'Error desconocido al arrancar.';
   el('error-hint').textContent =

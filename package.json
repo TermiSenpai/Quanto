@@ -1,7 +1,7 @@
 {
-  "name": "packprice",
+  "name": "quanto",
   "version": "5.0.0-beta",
-  "description": "PackPrice - calculadora de packs (app de escritorio)",
+  "description": "Quanto - calculadora de packs (app de escritorio)",
   "main": "main.js",
   "author": "xkoistudio",
   "license": "Apache-2.0",
@@ -21,8 +21,8 @@
     "vitest": "^2.1.0"
   },
   "build": {
-    "appId": "com.packprice.calculadora",
-    "productName": "PackPrice",
+    "appId": "com.quanto.calculadora",
+    "productName": "Quanto",
     "directories": {
       "output": "dist"
     },
@@ -39,7 +39,7 @@
     "win": {
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
@@ -47,8 +47,16 @@
       ],
       "icon": "icon.ico"
     },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Quanto",
+      "artifactName": "Quanto-${version}-setup.${ext}"
+    },
     "portable": {
-      "artifactName": "PackPrice-${version}-preliminar.exe"
+      "artifactName": "Quanto-${version}-preliminar.exe"
     }
   },
   "dependencies": {

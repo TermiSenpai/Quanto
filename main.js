@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice - Electron main process
+// Quanto - Electron main process
 // ============================================================
 // Responsibilities:
 //   - Create and manage the window
@@ -73,11 +73,18 @@ const { initialThrottleState, nextThrottleState } = require('./lib/admin-throttl
 const { createD1Client } = require('./lib/d1-client');
 const { loadMigrations } = require('./lib/migration-loader');
 const { createCloudBootstrap } = require('./lib/cloud-bootstrap');
+const { migrateLegacyUserData } = require('./lib/userdata-migration');
 
 // --- Path configuration ---
 const SETTINGS_DIR = path.join(app.getPath('userData'));
 const SETTINGS_PATH = path.join(SETTINGS_DIR, 'settings.json');
 const LOG_DIR = path.join(SETTINGS_DIR, 'logs');
+
+// Legacy userData folder from before the Quanto rename. Electron derives
+// userData from the product name, so the rename moved it from
+// %APPDATA%\PackPrice to %APPDATA%\Quanto; we migrate it once on boot
+// (lib/userdata-migration.js) so no PC loses its settings/quotes/outbox.
+const LEGACY_USERDATA_DIR = path.join(app.getPath('appData'), 'PackPrice');
 
 // Default path where the app expects (and if needed creates) the
 // shared config.js on the NAS. It can be changed in "Settings" on
@@ -338,7 +345,7 @@ function createMainWindow() {
     height: 860,
     minWidth: 820,
     minHeight: 600,
-    title: 'PackPrice · Calculadora de packs',
+    title: 'Quanto · Calculadora de packs',
     backgroundColor: '#E8ECF1',
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'icon.png'),
@@ -1102,7 +1109,7 @@ ipcMain.handle('update:check', async () => {
       {
         headers: {
           'Accept': 'application/vnd.github+json',
-          'User-Agent': 'PackPrice-update-check'
+          'User-Agent': 'Quanto-update-check'
         },
         signal: controller.signal
       }
@@ -1129,6 +1136,12 @@ ipcMain.handle('update:check', async () => {
     clearTimeout(timeout);
   }
 });
+
+// --- App version (renderer welcome-screen label) ---
+// Lightweight, no network: the renderer reads the running version to show
+// it instead of a hardcoded string (which used to drift). Distinct from
+// update:check, which compares against the latest GitHub release.
+ipcMain.handle('app:version', () => app.getVersion());
 
 // --- Logs (electron-log) ---
 ipcMain.handle('logs:read-last', (event, lineLimit) => {
@@ -1160,7 +1173,7 @@ ipcMain.handle('diagnostics:export', async () => {
     const stamp = new Date().toISOString().slice(0, 10);
     const saveDialog = await dialog.showSaveDialog(mainWindow, {
       title: 'Exportar diagnóstico',
-      defaultPath: `packprice-diagnostico-${stamp}.json`,
+      defaultPath: `quanto-diagnostico-${stamp}.json`,
       filters: [{ name: 'JSON', extensions: ['json'] }]
     });
     if (saveDialog.canceled || !saveDialog.filePath) {
@@ -1354,7 +1367,7 @@ ipcMain.handle('pdf:export', async (event, payload) => {
     });
     // electron-builder strips temp dirs from app userData, so use the
     // OS temp folder. The file is deleted after PDF generation.
-    tmpHtmlPath = path.join(app.getPath('temp'), `packprice-quote-${Date.now()}.html`);
+    tmpHtmlPath = path.join(app.getPath('temp'), `quanto-quote-${Date.now()}.html`);
     fs.writeFileSync(tmpHtmlPath, html, 'utf-8');
 
     win = new BrowserWindow({
@@ -1481,7 +1494,30 @@ ipcMain.handle('pdf:save-template', async (event, payload) => {
 // ============================================================
 
 app.whenReady().then(() => {
+  // Carry over a pre-rename (PackPrice) userData folder BEFORE the logger
+  // opens a handle in the new logs dir — copying over an in-use log file
+  // would fail on Windows. We log the outcome right after configuring it.
+  let userDataMigrated = false;
+  let userDataMigrateError = null;
+  migrateLegacyUserData({
+    currentDir: SETTINGS_DIR,
+    legacyDir: LEGACY_USERDATA_DIR,
+    onMigrated: () => { userDataMigrated = true; },
+    onError: (err) => { userDataMigrateError = err; }
+  });
+
   configureLogger({ logDir: LOG_DIR });
+
+  if (userDataMigrated) {
+    logger.info('migrated legacy PackPrice userData → Quanto', {
+      from: LEGACY_USERDATA_DIR, to: SETTINGS_DIR
+    });
+  }
+  if (userDataMigrateError) {
+    logger.warn('legacy userData migration failed (non-blocking)', {
+      error: userDataMigrateError.message
+    });
+  }
 
   // Seed the path allow-list with the config_path persisted on this PC
   // (Item D). Default candidates are blessed at module load.
