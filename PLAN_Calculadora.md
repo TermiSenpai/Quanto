@@ -1,4 +1,4 @@
-# PackPrice · Plan completo (calculadora de packs)
+# Quanto · Plan completo (calculadora de packs)
 
 > Documento de referencia con todas las decisiones, parámetros, fórmulas, riesgos y arquitectura del proyecto. Generado al cierre de la sesión de diseño y entrega de V1 web + V2 Electron.
 
@@ -6,7 +6,7 @@
 
 ## 1. Contexto y objetivo
 
-**Cliente / proyecto**: empresa de personalización textil DTF en Guadalajara (España), más de 25 años en el sector. La calculadora interna se llama **PackPrice**.
+**Cliente / proyecto**: empresa de personalización textil DTF en Guadalajara (España), más de 25 años en el sector. La calculadora interna se llama **Quanto**.
 
 **Objetivo del proyecto**: dotar al taller de una calculadora interna para presupuestar rápidamente "packs de peña" (encargos típicos de grupos de amigos en verano) con varias modalidades, manteniendo márgenes sanos y permitiendo comunicar precios públicos consistentes con descuento por volumen.
 
@@ -288,7 +288,7 @@ packs app/
 En cada PC, además, Electron crea automáticamente:
 
 ```
-%APPDATA%\packprice\
+%APPDATA%\Quanto\
 └── settings.json             ← ruta del config + nombre del usuario
 ```
 
@@ -452,7 +452,7 @@ pnpm dev              # ejecutar en modo desarrollo (sin construir .exe)
 pnpm build:win        # generar .exe portable en dist/
 ```
 
-El `.exe` resultante: `dist/PackPrice-2.0.0-portable.exe`.
+El `.exe` resultante: `dist/Quanto-2.0.0-portable.exe`.
 
 ---
 

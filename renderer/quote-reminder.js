@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Startup quote reminder (pure, renderer)
+// Quanto · Startup quote reminder (pure, renderer)
 // ============================================================
 // The dismissible startup banner (UI-UX §2.7) nudges the workshop
 // about quotes that need attention: ones still waiting for an answer

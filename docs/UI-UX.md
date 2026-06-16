@@ -1,4 +1,4 @@
-# UI-UX — PackPrice
+# UI-UX — Quanto
 
 **Versión:** 1.0 · **Fecha:** 2026-06-12
 **Relacionados:** `docs/PRD.md`, `renderer/styles.css` (fuente de verdad de los

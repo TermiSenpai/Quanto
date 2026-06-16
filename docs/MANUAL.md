@@ -1,11 +1,11 @@
-# Manual de usuario — PackPrice
+# Manual de usuario — Quanto
 
-> PackPrice es la calculadora de precios de packs DTF. Esta guía está pensada
+> Quanto es la calculadora de precios de packs DTF. Esta guía está pensada
 > para quien usa la app a diario en el mostrador y para quien administra el
 > catálogo: no hace falta saber de informática. Sigue las secciones en orden
 > la primera vez; después, usa el índice para ir a lo que necesites.
 
-**Versión del manual:** para PackPrice 5.x · **Última revisión:** 2026-06-13
+**Versión del manual:** para Quanto 5.x · **Última revisión:** 2026-06-13
 
 > Las capturas de pantalla de este manual están **pendientes de generar** con
 > el catálogo de demostración (nunca con precios reales). Donde verás
@@ -34,29 +34,32 @@
 
 ## 1. Instalación
 
-PackPrice es un **único archivo `.exe`** para Windows. No tiene instalador: se
-descarga, se guarda donde quieras y se ejecuta con doble clic.
+Quanto se instala con un **instalador** para Windows. Es **por-usuario**: no pide
+permisos de administrador, se instala solo para tu cuenta y crea los accesos
+directos por ti.
 
-1. Entra en la página de **GitHub Releases** del proyecto y descarga el archivo
-   `PackPrice-<versión>-preliminar.exe` de la última versión.
-2. Guárdalo donde te resulte cómodo, por ejemplo en el Escritorio o en una
-   carpeta tipo `C:\Users\<tu usuario>\PackPrice\`. Puedes crear un acceso
-   directo en el Escritorio.
-3. Doble clic para abrir.
+1. Entra en la página de **GitHub Releases** del proyecto y descarga el
+   instalador `Quanto-<versión>-setup.exe` de la última versión.
+2. Haz **doble clic** en el instalador. Se instala sin preguntar (no pide
+   administrador) y crea un acceso directo en el **Escritorio** y en el **menú
+   inicio**. La app queda en `%LOCALAPPDATA%\Programs\Quanto\`.
+3. A partir de ahí, abre Quanto desde el acceso directo del Escritorio o del
+   menú inicio.
 
 ![Página de GitHub Releases con el .exe a descargar](images/manual-01-releases.png)
 <!-- TODO captura: página de Releases (datos demo) -->
 
 ### 1.1 El aviso de Windows SmartScreen
 
-La primera vez que ejecutes el `.exe`, Windows mostrará un aviso azul de
+La primera vez que ejecutes el **instalador**, Windows mostrará un aviso azul de
 **SmartScreen** parecido a este: «Windows protegió tu PC».
 
-> **Esto es normal y esperado.** El `.exe` de PackPrice **no está firmado con un
+> **Esto es normal y esperado.** El instalador de Quanto **no está firmado con un
 > certificado de pago** (decisión D3 del proyecto: para el uso actual no
 > compensa el coste de un certificado). Windows desconfía por defecto de
-> cualquier programa sin firma, aunque sea seguro. El aviso solo aparece la
-> primera vez.
+> cualquier programa sin firma, aunque sea seguro. Como el instalador es
+> **por-usuario**, no verás el aviso amarillo de control de cuentas (UAC); solo
+> este azul de SmartScreen, y solo la primera vez.
 
 Para ejecutarlo:
 
@@ -73,13 +76,13 @@ A partir de aquí la app arranca con normalidad y Windows ya no volverá a
 preguntar por ese archivo.
 
 > Si tu antivirus o las políticas de la empresa bloquean el ejecutable, pide a
-> quien administre los PCs que añada una excepción para `PackPrice-*.exe`.
+> quien administre los PCs que añada una excepción para `Quanto-*.exe`.
 
 ---
 
 ## 2. Primer arranque: Local o Nube
 
-La primera vez que abres PackPrice (o cuando aún no hay un origen de datos
+La primera vez que abres Quanto (o cuando aún no hay un origen de datos
 configurado), aparece el **asistente de primer arranque** con la pregunta:
 
 > **¿Dónde guardamos tus datos?**
@@ -99,7 +102,7 @@ Dos opciones, ambas válidas y **intercambiables más adelante** (ver §6):
 
 1. Pulsa **Local**.
 2. Elige la ruta del archivo de configuración (`config.js`):
-   - En **este PC**: por ejemplo `C:\PackPrice\config.js`.
+   - En **este PC**: por ejemplo `C:\Quanto\config.js`.
    - En el **NAS** (carpeta de red), para compartir con el resto del taller:
      por ejemplo `\\172.26.0.154\Paep\Packs\config.js` o `Z:\Packs\config.js`
      si la unidad está mapeada.
@@ -109,12 +112,12 @@ Dos opciones, ambas válidas y **intercambiables más adelante** (ver §6):
    «Mostrador-2»): es el autor que quedará registrado en el historial de
    cambios.
 
-Estos datos se guardan en `%APPDATA%\packprice\settings.json` de ese PC y no se
+Estos datos se guardan en `%APPDATA%\Quanto\settings.json` de ese PC y no se
 vuelven a pedir.
 
 ### 2.2 Opción Nube (Cloudflare D1)
 
-La nube de PackPrice usa **Cloudflare D1** dentro de **tu propia cuenta de
+La nube de Quanto usa **Cloudflare D1** dentro de **tu propia cuenta de
 Cloudflare**. No hay ningún servidor del desarrollador por medio: la app habla
 directamente con Cloudflare y **crea tu base de datos sola** la primera vez.
 Solo necesitas hacer una cosa a mano (una vez por empresa): generar una **clave
@@ -131,7 +134,7 @@ Cloudflare** en tu navegador y crea una cuenta gratuita (correo + contraseña).
    pre-rellenada** (permisos: solo Cloudflare D1).
 2. En esa página de Cloudflare, pulsa para crear el token y **cópialo**.
    Cloudflare solo te lo muestra una vez: cópialo antes de cerrar.
-3. Vuelve a PackPrice y **pega el token** en el campo. La app lo comprueba al
+3. Vuelve a Quanto y **pega el token** en el campo. La app lo comprueba al
    instante contra Cloudflare; si no es válido, te lo dice en lenguaje claro
    («Esa clave no funciona — vuelve a copiarla»).
 
@@ -154,7 +157,7 @@ equipo/trabajador** para la auditoría.
 <!-- TODO captura: paso 2 del flujo de nube -->
 
 > **El token vive solo en tu PC** (`settings.json`), nunca se envía al
-> desarrollador ni se guarda en la nube de PackPrice. En todos los PCs de tu
+> desarrollador ni se guarda en la nube de Quanto. En todos los PCs de tu
 > empresa se usa el **mismo token**.
 
 ---
@@ -214,7 +217,7 @@ bloquea**: es un recordatorio, no una tarea.
 
 ## 4. Editar el catálogo
 
-En PackPrice **todo lo que es dinero es dato**: precios, costes, márgenes,
+En Quanto **todo lo que es dinero es dato**: precios, costes, márgenes,
 productos, proveedores, extras (addons), packs y los textos del presupuesto
 (condiciones, notas) se editan desde la app, **sin tocar código**.
 
@@ -276,7 +279,7 @@ Dentro del editor tienes:
 
 ## 5. Copias de seguridad y restauración
 
-PackPrice protege tus datos en varias capas, según el modo.
+Quanto protege tus datos en varias capas, según el modo.
 
 ### 5.1 Snapshots dentro de la app (Local y Nube)
 
@@ -288,9 +291,9 @@ segundos, sin salir de la app.
 ### 5.2 En modo Nube: copias de Cloudflare
 
 - **Antes de cada actualización de esquema** (cuando instalas una versión nueva
-  de la app que necesita migrar la base de datos), PackPrice descarga
+  de la app que necesita migrar la base de datos), Quanto descarga
   **automáticamente** un volcado SQL completo a
-  `%APPDATA%\packprice\backups\pre-migration-<fecha>.sql`. Si la migración
+  `%APPDATA%\Quanto\backups\pre-migration-<fecha>.sql`. Si la migración
   fallara, la propia app ofrece un botón **«Restaurar copia de seguridad»** y no
   escribe nada más.
 - **Time Travel de Cloudflare**: D1 guarda el estado de tu base de datos de los
@@ -382,7 +385,7 @@ descargados) y muestra un **banner** bajo la barra superior:
 
 ## 8. Plantillas de presupuesto
 
-PackPrice trae **6 plantillas de PDF** integradas, seleccionables en
+Quanto trae **6 plantillas de PDF** integradas, seleccionables en
 **Ajustes → Plantilla de presupuesto**:
 
 **Clásica · Moderna · Compacta · Detallada · Corporativa · Formulario**.
@@ -446,7 +449,7 @@ Cada gráfico se puede **ver como tabla** para copiar los números.
 
 ## 10. Privacidad y conexiones a internet
 
-PackPrice está construida sobre un principio: **el desarrollador no ve los
+Quanto está construida sobre un principio: **el desarrollador no ve los
 datos de ningún cliente.** Tus precios, clientes, catálogo y presupuestos viven
 en **tu** almacenamiento (tu PC, tu NAS o tu cuenta de Cloudflare). El
 desarrollador solo entrega el software.
@@ -495,7 +498,7 @@ Está activado por defecto; el interruptor lo apaga.
 
 Como el desarrollador no ve tus datos, el soporte es «a ciegas». Para ayudar
 sin comprometer tu privacidad, **Ajustes → Privacidad → «Exportar
-diagnóstico»** genera un archivo (`packprice-diagnostico-<fecha>.json`) con:
+diagnóstico»** genera un archivo (`quanto-diagnostico-<fecha>.json`) con:
 
 - las **últimas líneas del log** de la app,
 - las **versiones** (app, esquema, Electron, SO),
@@ -514,16 +517,17 @@ genera y abre la carpeta donde lo guardó.
 
 ## 11. Actualizar la app
 
-PackPrice se distribuye por **GitHub Releases**. La actualización es manual y
+Quanto se distribuye por **GitHub Releases**. La actualización es manual y
 nunca se instala sola.
 
 - Al arrancar (o con el botón **«Buscar ahora»** en **Ajustes →
   Actualizaciones**), la app comprueba si hay una versión nueva. Si la hay,
   muestra «Versión X.Y disponible — [Descargar]», con enlace a la página de la
   release.
-- Para actualizar: **descarga el nuevo `.exe`** de Releases y **reemplaza** el
-  anterior. Tus ajustes (`settings.json`) y tus datos (config local o nube) se
-  mantienen intactos.
+- Para actualizar: **descarga el nuevo `Quanto-<versión>-setup.exe`** de Releases
+  y **ejecútalo**. Actualiza la instalación existente **en su sitio** (no hace
+  falta desinstalar). Tus ajustes (`settings.json`) y tus datos (config local o
+  nube) se mantienen intactos.
 - Si tu base de datos en la nube necesita migrarse, la app lo hace sola al
   arrancar la versión nueva, con copia de seguridad previa (ver §5.2). Las
   migraciones son **solo aditivas**: un PC con una versión más antigua sigue
@@ -564,7 +568,7 @@ Abre el editor → pestaña de **Versiones** → **«Restaurar esta versión»**
 el estado anterior (§4.3). En modo local, también tienes los backups fechados
 junto al `config.js` (§5.3).
 
-**Estoy montando PackPrice en otra empresa desde cero.**
+**Estoy montando Quanto en otra empresa desde cero.**
 Sigue el asistente de nube (§2.2): con un token nuevo, la app crea la base de
 datos `packprice` sola en esa cuenta de Cloudflare. Cada empresa tiene su
 cuenta, su base y su token: están **completamente aisladas** entre sí. El
@@ -578,7 +582,7 @@ selecciona la nueva ruta. Si el archivo no existe pero la carpeta es
 escribible, la app ofrece crearlo.
 
 **¿Dónde están mis ajustes y la caché?**
-En `%APPDATA%\packprice\` de cada PC: `settings.json` (incluye tu token, solo
+En `%APPDATA%\Quanto\` de cada PC: `settings.json` (incluye tu token, solo
 en local), la caché del catálogo y la cola de pendientes (outbox). Estos
 archivos **no se suben** a ningún sitio.
 
@@ -592,7 +596,7 @@ decides hacerlo, y nunca incluye tu token.
 
 ## 13. Licencia
 
-PackPrice se distribuye bajo la licencia **Apache-2.0**. Puedes usar y modificar
+Quanto se distribuye bajo la licencia **Apache-2.0**. Puedes usar y modificar
 la app libremente según los términos de esa licencia (el texto completo está en
 el archivo `LICENSE` del repositorio). El modelo de negocio es el **servicio**
 (instalación, soporte y evolución), no el cobro por la licencia.

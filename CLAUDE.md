@@ -1,4 +1,4 @@
-# CLAUDE.md — PackPrice
+# CLAUDE.md — Quanto
 
 The operating manual for working in this repo. Read this first. It is short on
 purpose: deep technical detail lives in **`ARCHITECTURE.md`**, and the agent/AI
@@ -33,7 +33,7 @@ customization packs — built for one workshop, becoming a **product for many
 companies, each owning and operating its own storage** (single PC, NAS, their
 Cloudflare account, or their private cloud). **The developer never sees any
 customer's data — he only ships software** (`docs/PRD.md` §1b). Each workshop
-PC runs a portable `.exe`; the original workshop (customer #1) shares one
+PC runs an installed `.exe` (per-user NSIS installer); the original workshop (customer #1) shares one
 `config.js` on its NAS (`\\172.26.0.154\Paep\Packs\`). No multi-tenant,
 no business-data telemetry (only opt-out error reports — see the debates
 below), **no server-side code at all**. The NAS file *is* the backend
@@ -55,9 +55,9 @@ Currently **beta** (`-preview`/`-beta` version suffixes) — not V1.
 | Runtime | Electron + Node (main) + Chromium (renderer) |
 | UI | HTML + CSS + vanilla JS — **no build step, no framework** |
 | Shared persistence | user's choice: flat `config.js` (PC/NAS) **or** Cloudflare D1 in the customer's account, via REST from main (v5) — interchangeable |
-| Local persistence | `settings.json` + catalog cache + outbox in `%APPDATA%\packprice\` |
+| Local persistence | `settings.json` + catalog cache + outbox in `%APPDATA%\Quanto\` |
 | Cloud (v5) | **no server code**: `lib/d1-client.js` (native `fetch`, main only) + bundled SQL migrations in `db/migrations/` — zero new dependencies |
-| Packaging | `electron-builder` portable Windows x64 |
+| Packaging | `electron-builder` NSIS installer (per-user) Windows x64 |
 | **UI language** | **Spanish** (users are Spanish-speaking) |
 | **Code language** | **English** — identifiers, comments, IPC channels, filenames |
 
@@ -90,7 +90,7 @@ dependencies. The default answer is **YAGNI**.
   services, background sync, multi-tenant DB) reopens the debate. Full
   design: `planes/v5-cloud-sync.md`, requirements `docs/PRD.md`.
 - **2026-06-12 — GitHub distribution.** The repo goes **public**; `main` is
-  production; each release publishes the portable `.exe` on GitHub Releases
+  production; each release publishes the release `.exe` on GitHub Releases
   and the app shows a non-blocking "new version" notice on startup
   (toggleable, plus a manual "check now" button in settings). Before
   the repo flips public: sweep for secrets, and the owner decides which docs
@@ -119,6 +119,32 @@ dependencies. The default answer is **YAGNI**.
   `icon.ico` (multi-size, embedded in the `.exe` via `build.win.icon`); favicon
   PNGs in `assets/brand/`. The wordmark is shipped **outlined to paths**
   (`quanto-wordmark.svg`) so it renders identically without Inter installed.
+  The product identity ships as Quanto: `package.json` `productName`/`appId`
+  (`com.quanto.calculadora`), the window title, the NSIS installer + shortcut,
+  and the diagnostics filename. Because Electron derives the `%APPDATA%` folder
+  from the product name, `lib/userdata-migration.js` copies a pre-rename
+  `%APPDATA%\PackPrice` folder into `%APPDATA%\Quanto` once on boot so no PC
+  loses its settings/quotes/outbox (tested, idempotent, copy-not-move). The
+  rename swept all prose, comments and docs to Quanto; **three technical
+  identifiers stay `packprice` for compatibility** and must not be renamed
+  without a migration: the `window.packprice` IPC bridge (renderer↔main), the
+  persisted config-format marker `window.PACKPRICE_CONFIG` (existing `config.js`
+  files assign it), and the Cloudflare D1 database name `packprice` (already
+  provisioned in customer accounts). The GitHub repo slug
+  (`xkoistudio/packprice`, `main.js`) is pending the owner's rename.
+- **2026-06-16 — Packaging: portable → NSIS installer.** The Windows target
+  moves from `portable` to a **per-user one-click NSIS installer**
+  (`build.nsis` in `package.json`). Motivation: the portable `.exe` is a
+  self-extractor that unpacks ~85 MB to `%TEMP%` and runs from there — the
+  dominant cause of slow startup (and AV-prone). The installer runs from a real
+  installed folder (`%LOCALAPPDATA%\Programs\`), so startup is fast and stable.
+  `perMachine: false` ⇒ no admin elevation ⇒ no UAC "unknown publisher" prompt.
+  This also unlocks `electron-updater` (it does not support `portable`). No new
+  runtime deps; `pnpm build:win-portable` stays as an escape hatch. The `.exe`
+  stays **unsigned** for now (productization debate); SmartScreen guidance is in
+  the user manual. Code-signing options (free self-signed trusted on the
+  workshop PCs; SignPath/Certum/Azure for public distribution) are noted in
+  `README-build.md`.
 
 > **Language migration:** much legacy code (`main.js`, `app.js`, `calculo.js`,
 > `admin.js`, `config-parser.js`) is Spanish for historical reasons and migrates
@@ -197,7 +223,7 @@ automatic `backups\` before every admin write.
 pnpm install          # if package.json changed
 pnpm dev          # iterate
 pnpm test             # vitest run
-pnpm build:win    # release: dist/PackPrice-<version>-*.exe
+pnpm build:win    # release: dist/Quanto-<version>-*.exe
 ```
 
 For any non-trivial change, follow the agent loop in `AGENTS.md` §2
@@ -213,7 +239,7 @@ For any non-trivial change, follow the agent loop in `AGENTS.md` §2
 - **Releases only:** devlog entry per `devlog/TEMPLATE.md` (screenshots +
   diagrams) published before distributing the `.exe`.
 
-**Smoke checklist:** first run (delete `%APPDATA%\packprice\`); crew pack T1
+**Smoke checklist:** first run (delete `%APPDATA%\Quanto\`); crew pack T1
 with/without hood; mixed pack with two quantities; admin conflict (edit config by
 hand while an admin editor is open).
 

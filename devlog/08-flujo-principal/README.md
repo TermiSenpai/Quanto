@@ -1,6 +1,6 @@
 # Capítulo 08 · Flujo principal
 
-> Tres pantallas, dos clics. Es el ciclo completo de PackPrice: elegir pack, configurar el pedido, ver el resultado. Todo lo demás (modo admin, ajustes, ayuda) son ramas. Este capítulo recorre cada pantalla con sus elecciones de UX y sus engranajes técnicos.
+> Tres pantallas, dos clics. Es el ciclo completo de Quanto: elegir pack, configurar el pedido, ver el resultado. Todo lo demás (modo admin, ajustes, ayuda) son ramas. Este capítulo recorre cada pantalla con sus elecciones de UX y sus engranajes técnicos.
 
 ---
 
@@ -57,7 +57,7 @@ Acciones al pie:
 
 ### Columna lateral · Preview en vivo
 
-Es el componente que distingue a PackPrice de una calculadora estática. **Mientras el usuario rellena el formulario**, la dark-card de la derecha **recalcula con cada `input` event** (debounce 50 ms) y muestra:
+Es el componente que distingue a Quanto de una calculadora estática. **Mientras el usuario rellena el formulario**, la dark-card de la derecha **recalcula con cada `input` event** (debounce 50 ms) y muestra:
 
 - Badge del tramo actual (T1, T2, T3, T4) en `accent-primary`.
 - Total grande en Geist Mono (48 px).
@@ -137,7 +137,7 @@ A la izquierda, link "← Editar pedido" / "← Cambiar pack" para retroceder un
 
 ## Estado entre pantallas
 
-PackPrice no usa router. La transición entre pantallas se hace mostrando/ocultando secciones del mismo `index.html` con la clase `.hidden`:
+Quanto no usa router. La transición entre pantallas se hace mostrando/ocultando secciones del mismo `index.html` con la clase `.hidden`:
 
 ```js
 function mostrarPantalla(id) {

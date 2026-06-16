@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Data-status indicator (pure state machine)
+// Quanto · Data-status indicator (pure state machine)
 // ============================================================
 // The v5 cloud read path can return data from three places: live
 // cloud, a local cache (offline) or a local config file. The topbar

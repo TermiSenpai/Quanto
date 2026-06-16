@@ -1,6 +1,6 @@
-# Contributing to PackPrice
+# Contributing to Quanto
 
-PackPrice is a small, internal desktop tool for one workshop (2–3 users). The bar
+Quanto is a small, internal desktop tool for one workshop (2–3 users). The bar
 is **low maintenance and high predictability**, not feature volume. Before
 contributing, read, in this order:
 
@@ -82,7 +82,7 @@ See [`README-build.md`](README-build.md). In short:
 1. Ensure `pnpm test` is green and the smoke checklist passes.
 2. Bump `package.json:version` (keep the `-beta`/`-preview` suffix until V1).
 3. Move `CHANGELOG.md` `[Unreleased]` into a dated version section.
-4. `pnpm build:win` → `dist/PackPrice-<version>-*.exe`.
+4. `pnpm build:win` → `dist/Quanto-<version>-*.exe`.
 5. Distribute the new `.exe` to **all** PCs before anyone opens admin mode after a
    schema migration (see `planes/migracion-codigo-ingles.md` §8).
 

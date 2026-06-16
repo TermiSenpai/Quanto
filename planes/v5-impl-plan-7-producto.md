@@ -74,7 +74,7 @@ fill gaps).
    not contents). NO token, NO catalog, NO quotes content. Tests: token never
    present; structure complete; missing log file tolerated.
 5. **IPC + preload:** `diagnostics:export` → main builds the diagnostics, writes
-   a `packprice-diagnostico-<fecha>.json` (or a small zip) to a user-chosen
+   a `quanto-diagnostico-<fecha>.json` (or a small zip) to a user-chosen
    folder (native dialog) and opens the folder. `error-reports:get`/`set`
    toggle. Preload: `exportDiagnostics`, `getErrorReportsEnabled`,
    `setErrorReportsEnabled`. No token to renderer.

@@ -1525,7 +1525,7 @@ Expected: PASS, all files. Fix any failure before continuing.
 
 - [ ] **Step 2: Full smoke per the repo checklist + this feature**
 
-Run: `pnpm dev` and walk the CLAUDE.md §8 smoke checklist (first run with `%APPDATA%\packprice\` deleted; crew pack T1 with/without hood; mixed pack two quantities; admin conflict). Then this feature's flow from Task 9 Step 8 across all four catalog tabs.
+Run: `pnpm dev` and walk the CLAUDE.md §8 smoke checklist (first run with `%APPDATA%\Quanto\` deleted; crew pack T1 with/without hood; mixed pack two quantities; admin conflict). Then this feature's flow from Task 9 Step 8 across all four catalog tabs.
 
 - [ ] **Step 3: Update docs**
 

@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Admin mode editor (v4 catalog builder)
+// Quanto · Admin mode editor (v4 catalog builder)
 // ============================================================
 // Pure render functions (return HTML strings) plus controlled
 // config mutations. No DOM, no IPC, no globals beyond an optional

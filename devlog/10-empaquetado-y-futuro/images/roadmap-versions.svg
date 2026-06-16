@@ -72,7 +72,7 @@
       <g transform="translate(0,104)">
         <rect width="320" height="40" rx="8" fill="#FFFFFF" stroke="#E4E9F2"/>
         <text x="14" y="26" fill="#3D7BD9">npm run build:win</text>
-        <text x="350" y="26" fill="#5A6478" font-family="-apple-system, Segoe UI, Inter, sans-serif">→ genera dist/PackPrice-2.0.0-preview-preliminar.exe</text>
+        <text x="350" y="26" fill="#5A6478" font-family="-apple-system, Segoe UI, Inter, sans-serif">→ genera dist/Quanto-2.0.0-preview-preliminar.exe</text>
       </g>
     </g>
   </g>

@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · History UI (renderer)
+// Quanto · History UI (renderer)
 // ============================================================
 // Pure rendering helpers for the quote-history modal. All IO
 // goes through window.packprice; this module never touches the

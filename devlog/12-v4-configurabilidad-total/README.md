@@ -1,6 +1,6 @@
 # Capítulo 12 · Configurabilidad total (esquema y motor v4)
 
-> Hasta el capítulo 11, PackPrice era una calculadora con cinco packs cerrados, tres modelos Roly cableados y cuatro funciones de cálculo escritas a mano. Funcionaba, pero cualquier cambio del catálogo —un producto nuevo, otro proveedor, un pack distinto— era un cambio de **código**, no de **datos**. Este capítulo rompe ese techo: en v4 el taller define todo el catálogo desde el modo admin. Para llegar ahí hubo que generalizar el esquema, unificar el motor de cálculo, arreglar tres bugs de dinero que llevaban vivos desde la Excel, endurecer la seguridad y, de paso, migrar el tooling a pnpm.
+> Hasta el capítulo 11, Quanto era una calculadora con cinco packs cerrados, tres modelos Roly cableados y cuatro funciones de cálculo escritas a mano. Funcionaba, pero cualquier cambio del catálogo —un producto nuevo, otro proveedor, un pack distinto— era un cambio de **código**, no de **datos**. Este capítulo rompe ese techo: en v4 el taller define todo el catálogo desde el modo admin. Para llegar ahí hubo que generalizar el esquema, unificar el motor de cálculo, arreglar tres bugs de dinero que llevaban vivos desde la Excel, endurecer la seguridad y, de paso, migrar el tooling a pnpm.
 
 ---
 

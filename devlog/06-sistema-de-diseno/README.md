@@ -1,6 +1,6 @@
 # Capítulo 06 · Sistema de diseño
 
-> Una app interna no necesita marca, pero sí coherencia. PackPrice usa una paleta gris azulada de modo claro, dos tipografías especializadas (cuerpo + datos), once tokens semánticos y nueve componentes reutilizables. Todo en CSS plano, sin Tailwind, sin librería de componentes. Este capítulo desglosa cada decisión.
+> Una app interna no necesita marca, pero sí coherencia. Quanto usa una paleta gris azulada de modo claro, dos tipografías especializadas (cuerpo + datos), once tokens semánticos y nueve componentes reutilizables. Todo en CSS plano, sin Tailwind, sin librería de componentes. Este capítulo desglosa cada decisión.
 
 ![Paleta de tokens y especimen tipográfico](images/palette.svg)
 
@@ -8,7 +8,7 @@
 
 ## Por qué un design system para tres pantallas
 
-La pregunta es justa: PackPrice tiene cinco pantallas (bienvenida, selección, datos, resultado, modales). ¿Por qué armar tokens y componentes?
+La pregunta es justa: Quanto tiene cinco pantallas (bienvenida, selección, datos, resultado, modales). ¿Por qué armar tokens y componentes?
 
 Por dos razones que compensan el coste:
 
@@ -72,7 +72,7 @@ Dos familias, distintas para distintos usos:
 - **Inter** (Regular/600/700) — cuerpo, títulos, labels. Sans humanista con métricas optimizadas para pantallas. Legible a 12 px, perfecta a 14-16 px.
 - **Geist Mono** (Regular/500/700) — datos numéricos. Precios, totales, tramos, IVA. Monoespaciada, glifos de número de ancho fijo (alineación visual perfecta en columnas), peso visual claramente diferenciado del cuerpo.
 
-**Por qué dos fuentes y no una sola**: PackPrice es una app de números. El precio grande del hero (48-80 px) es el dato que el usuario lee primero. Tenerlo en monoespaciada hace que cuando cambia de "311,40 €" a "319,40 €" el cambio sea visualmente obvio: ningún glifo se desplaza horizontalmente. Con sans variable, los anchos cambiarían y el ojo perdería referencia.
+**Por qué dos fuentes y no una sola**: Quanto es una app de números. El precio grande del hero (48-80 px) es el dato que el usuario lee primero. Tenerlo en monoespaciada hace que cuando cambia de "311,40 €" a "319,40 €" el cambio sea visualmente obvio: ningún glifo se desplaza horizontalmente. Con sans variable, los anchos cambiarían y el ojo perdería referencia.
 
 **Empaquetado** vs. system fallback — la app empaqueta Inter y Geist Mono como `.woff2` en `renderer/fonts/` con `@font-face`. Suma ~150 KB al `.exe`. Sin conexión a internet, sin Google Fonts, todo offline. La diferencia visual con `system-ui + ui-monospace` es notable, sobre todo en los números.
 
@@ -82,7 +82,7 @@ Dos familias, distintas para distintos usos:
 
 ![Botones, badges y la PackCard en sus dos estados](images/components.svg)
 
-PackPrice define exactamente **nueve componentes reutilizables** mapeados desde el archivo Pencil. Cada uno tiene una clase CSS y se compone con HTML semántico:
+Quanto define exactamente **nueve componentes reutilizables** mapeados desde el archivo Pencil. Cada uno tiene una clase CSS y se compone con HTML semántico:
 
 | Componente | Clase | Propósito |
 |---|---|---|
@@ -165,7 +165,7 @@ El espaciado sigue una escala de 4 (4, 8, 12, 16, 24, 32, 48, 64). No hay tokens
 
 ## Animaciones: las justas
 
-PackPrice no usa Framer Motion ni librerías de animación. Solo:
+Quanto no usa Framer Motion ni librerías de animación. Solo:
 
 ```css
 transition: background-color 0.15s, border-color 0.15s, transform 0.05s;
@@ -177,7 +177,7 @@ Hover states de botones y cards. Sin más. Las animaciones largas en una calcula
 
 ## Responsive
 
-PackPrice se diseñó **desktop-first** porque ese es su contexto real. Breakpoints:
+Quanto se diseñó **desktop-first** porque ese es su contexto real. Breakpoints:
 
 | Breakpoint | Ancho | Comportamiento |
 |---|---|---|

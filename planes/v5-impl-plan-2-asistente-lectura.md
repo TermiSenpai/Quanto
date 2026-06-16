@@ -95,7 +95,7 @@ modify `preload.js`.
      si la base quedó vacía de catálogo → `seedCatalog` con la semilla de
      `buildDefaultConfig()`; guarda settings (`data_source: 'cloud'`, ids,
      token) y devuelve `{ ok, databaseId, seeded }`. Backup pre-migración a
-     `%APPDATA%/packprice/backups/pre-migration-<ISO>.sql`.
+     `%APPDATA%/Quanto/backups/pre-migration-<ISO>.sql`.
    - `catalog:load` → flujo de arranque cloud: intento red (timeout 5 s con
      `Promise.race`) → `loadEntities` → `assemble` → `validateConfigSchema`
      → `writeCache` → `{ ok, config, source: 'cloud', catalogVersion, fetchedAt }`.

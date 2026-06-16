@@ -1,11 +1,11 @@
 name: Feature request
-description: Propose a change. Note that PackPrice optimizes for YAGNI.
+description: Propose a change. Note that Quanto optimizes for YAGNI.
 labels: [enhancement]
 body:
   - type: markdown
     attributes:
       value: |
-        PackPrice is deliberately small (CLAUDE.md). Most "new data" (packs,
+        Quanto is deliberately small (CLAUDE.md). Most "new data" (packs,
         models, prices) is a `config.js` change, **not** code. Changes that add
         dependencies, frameworks, or new architecture need a debate first.
   - type: textarea

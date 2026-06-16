@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Save-summary (pure, renderer)
+// Quanto · Save-summary (pure, renderer)
 // ============================================================
 // Turns an old/new catalog pair into a change summary GROUPED by
 // catalog entity, for the cloud "confirm save" modal (UI-UX §2.5) and,

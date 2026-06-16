@@ -1,6 +1,6 @@
 # Capítulo 11 · Tier-1 profesionalidad real
 
-> Hasta el capítulo 10, PackPrice calculaba bien y empaquetaba bien. Pero un bug del taller seguía siendo invisible (logs en stderr perdidos en el `.exe`), un cambio de IVA no dejaba huella (¿quién lo subió y cuándo?), y un presupuesto se evaporaba al cerrar la app. Este capítulo cierra esos huecos con seis entregas concretas, todas alineadas con CLAUDE.md, y abre la primera grieta deliberada en una de sus reglas: a partir de aquí, el código nuevo se escribe en inglés.
+> Hasta el capítulo 10, Quanto calculaba bien y empaquetaba bien. Pero un bug del taller seguía siendo invisible (logs en stderr perdidos en el `.exe`), un cambio de IVA no dejaba huella (¿quién lo subió y cuándo?), y un presupuesto se evaporaba al cerrar la app. Este capítulo cierra esos huecos con seis entregas concretas, todas alineadas con CLAUDE.md, y abre la primera grieta deliberada en una de sus reglas: a partir de aquí, el código nuevo se escribe en inglés.
 
 ![Resumen visual del Tier-1: validación, logs, auditoría con diff, historial, PDF](images/tier-1-overview.svg)
 
@@ -105,7 +105,7 @@ CLAUDE.md §8.5 ya bendecía `electron-log` como la única dependencia que merec
 
 `lib/logger.js` es un wrapper fino:
 
-- Sink en `%APPDATA%\packprice\logs\main.log`.
+- Sink en `%APPDATA%\Quanto\logs\main.log`.
 - Rotación por tamaño: 5 MB por archivo, 3 archivos archivados.
 - Formato estable: `[ISO timestamp] [level] mensaje {ctx-json}`.
 - API simple: `logger.info('quote saved', { id, total })`.
@@ -308,7 +308,7 @@ UX: el botón **"Exportar PDF"** está disponible tras un cálculo y en cada fil
 | Antes | Después |
 | --- | --- |
 | Un IVA borrado a mano produce `NaN` en pantalla | El admin ve "Falta `parametros.iva`" antes de cargar |
-| `console.error` se pierde en el `.exe` | `%APPDATA%\packprice\logs\main.log` con rotación |
+| `console.error` se pierde en el `.exe` | `%APPDATA%\Quanto\logs\main.log` con rotación |
 | Cambio de IVA = arqueología contra los backups | `audit.log` JSONL con quién, cuándo, qué |
 | Tipo erróneo en admin = pérdida silenciosa | Modal "vas a cambiar 21 → 23, ¿confirmas?" |
 | El cálculo se evapora al cerrar | `PP-2026-0042` guardado en `presupuestos.json`, reabrible |

@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice - Default configuration
+// Quanto - Default configuration
 // ============================================================
 // Initial values used to seed config.js on the NAS on first boot.
 //
@@ -42,8 +42,8 @@ const PARAMETERS = {
   roly_shipping_eur_bundle: 5.90,
   garments_per_bundle:      40,
   dtf_eur_meter:            1.25,
-  dtf_meters_two_sides:     0.40,
-  dtf_meters_one_side:      0.20,
+  dtf_meters_two_sides:     0.60,
+  dtf_meters_one_side:      0.30,
   pressing_eur_side:        0.30,
   minutes_two_sides_base:   7,
   minutes_one_side_base:    5,

@@ -1,11 +1,11 @@
-# PRD — PackPrice
+# PRD — Quanto
 
 **Versión:** 1.0 · **Fecha:** 2026-06-12 · **Estado:** aprobado
 **Documentos relacionados:** `PLAN_Calculadora.md` (modelo de negocio),
 `docs/UI-UX.md` (diseño), `planes/v5-cloud-sync.md` (plan técnico v5),
 `ARCHITECTURE.md` (arquitectura).
 
-> Este PRD define **qué** hace PackPrice y **por qué**. El *cómo* vive en
+> Este PRD define **qué** hace Quanto y **por qué**. El *cómo* vive en
 > `ARCHITECTURE.md` y en los planes. Si producto y código divergen, se corrige
 > uno de los dos — nunca se deja un hueco silencioso.
 
@@ -13,7 +13,7 @@
 
 ## 1. Visión
 
-PackPrice es la calculadora de precios de packs DTF de un taller textil de
+Quanto es la calculadora de precios de packs DTF de un taller textil de
 Guadalajara (+25 años en el sector). Sustituyó a una Excel con errores por una
 app de escritorio que da **precios correctos, consistentes entre trabajadores y
 modificables sin tocar código**. La v5 deja elegir dónde viven los datos —

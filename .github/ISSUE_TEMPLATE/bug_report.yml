@@ -50,5 +50,5 @@ body:
     id: logs
     attributes:
       label: Logs (optional)
-      description: Relevant lines from the in-app log viewer or %APPDATA%\packprice\logs\.
+      description: Relevant lines from the in-app log viewer or %APPDATA%\Quanto\logs\.
       render: text

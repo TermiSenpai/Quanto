@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Calculation logic (pure)
+// Quanto · Calculation logic (pure)
 // ============================================================
 // Pure functions: given (cfg, options) they return the result.
 // They never touch the DOM, the filesystem, or globals, which is

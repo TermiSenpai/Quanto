@@ -1,4 +1,4 @@
--- 0001_init.sql — initial PackPrice v5 schema.
+-- 0001_init.sql — initial Quanto v5 schema.
 --
 -- Never edit this file after release — schema changes are new numbered
 -- migration files, additive only.

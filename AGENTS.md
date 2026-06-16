@@ -1,4 +1,4 @@
-# AGENTS.md — Working on PackPrice with AI agents
+# AGENTS.md — Working on Quanto with AI agents
 
 How to drive work on this repository with Claude Code (and any coding agent).
 `CLAUDE.md` is the operating manual (what the project is, the rules).

@@ -2,7 +2,7 @@
 
 > **Resumen ejecutivo:** la v5 deja **elegir dónde viven los datos** —archivo
 > local/NAS o Cloudflare D1 en la cuenta de cada empresa, sin servidor del
-> desarrollador— y convierte PackPrice en un **producto vendible**: asistente de
+> desarrollador— y convierte Quanto en un **producto vendible**: asistente de
 > primer arranque, edición sin contraseña con auditoría y vuelta atrás,
 > presupuestos con cliente + estados + estadísticas, 6 plantillas de PDF y
 > telemetría de errores opt-out. Al abrir la app, el usuario ve un indicador de
@@ -15,7 +15,7 @@
 
 ## Contexto
 
-Hasta la v4, PackPrice era una calculadora excelente para **un** taller con
+Hasta la v4, Quanto era una calculadora excelente para **un** taller con
 **un** `config.js` en su NAS. La v5 responde a tres necesidades que el v4 no
 cubría (`docs/PRD.md` §3.2, R6–R20):
 

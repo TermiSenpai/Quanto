@@ -40,7 +40,7 @@ PC empresa (Electron .exe)                       Cloudflare (cuenta DEL CLIENTE)
 │   ├─ adapter file  (actual)    │  solo main   │   free tier)             │
 │   └─ adapter d1    (nuevo)     │              └──────────────────────────┘
 │ lib/d1-client.js (REST)        │
-│ caché %APPDATA%\packprice\cache│
+│ caché %APPDATA%\Quanto\cache│
 └────────────────────────────────┘
 ```
 
@@ -182,7 +182,7 @@ logged, lazy) aplicado a D1. La pregunta clave: *un cliente actualiza el
        1. CANDADO   UPDATE catalog_meta SET migrating_since=? WHERE migrating_since IS NULL
                     (si falla: otro PC migra ahora mismo → esperar y releer)
        2. BACKUP    POST /export → dump SQL completo descargado a
-                    %APPDATA%\packprice\backups\pre-migration-<fecha>.sql
+                    %APPDATA%\Quanto\backups\pre-migration-<fecha>.sql
                     (+ Time Travel de Cloudflare como red de 30 días, gratis)
        3. MIGRAR    aplicar las migraciones pendientes en orden, registrando
                     cada una en schema_migrations
@@ -210,7 +210,7 @@ Las reglas que hacen esto seguro (disciplinas de §9.1):
 
 Sin cambios respecto a lo ya diseñado:
 
-- **Caché:** `%APPDATA%\packprice\cache\catalog.json` (entidades +
+- **Caché:** `%APPDATA%\Quanto\cache\catalog.json` (entidades +
   `catalog_version` + `fetched_at`), escritura atómica. Arranque: intento red
   (timeout 5 s) → si falla, caché en solo lectura con banner; sin caché ni
   red → pantalla de error con salida a modo local. Jamás datos inventados.

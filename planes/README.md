@@ -1,4 +1,4 @@
-# Planes de evolución de PackPrice
+# Planes de evolución de Quanto
 
 Tres planes organizados por nivel de fricción contra los principios de CLAUDE.md.
 

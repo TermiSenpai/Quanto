@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Admin extras (audit log, logs viewer, diff preview)
+// Quanto · Admin extras (audit log, logs viewer, diff preview)
 // ============================================================
 // New functionality bolted onto the existing Spanish admin module.
 // Written in English per CLAUDE.md §2; user-facing strings stay in

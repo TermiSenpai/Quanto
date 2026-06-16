@@ -1,6 +1,6 @@
 # Security Policy
 
-PackPrice is an **internal desktop tool** for one workshop on a trusted LAN
+Quanto is an **internal desktop tool** for one workshop on a trusted LAN
 (2–3 users, no public internet, no telemetry, no backend). This policy is sized to
 that reality, not to a public SaaS.
 

@@ -271,7 +271,7 @@ git commit -m "feat(cloud): D1 client database discovery, query and exec"
 `planes/v5-cloud-sync.md` §3 con las convenciones transversales aplicadas):
 
 ```sql
--- 0001_init.sql — esquema inicial PackPrice v5 (aditivo desde aquí; jamás editar este archivo después de publicado)
+-- 0001_init.sql — esquema inicial Quanto v5 (aditivo desde aquí; jamás editar este archivo después de publicado)
 
 CREATE TABLE IF NOT EXISTS parameters (
   key TEXT PRIMARY KEY, value TEXT NOT NULL, type TEXT NOT NULL CHECK (type IN ('number','string','boolean')));

@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Custom dropdown (renderer)
+// Quanto · Custom dropdown (renderer)
 // ============================================================
 // Progressive enhancement over the native <select>: the native element
 // stays in the DOM as the source of truth (kept, just visually hidden)

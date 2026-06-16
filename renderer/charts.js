@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · SVG chart helpers (pure, renderer)
+// Quanto · SVG chart helpers (pure, renderer)
 // ============================================================
 // Hand-rolled, dependency-free SVG charting for the Statistics screen
 // (UI-UX §2.7). CLAUDE.md rule 9 forbids chart libraries — three simple

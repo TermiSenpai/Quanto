@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to PackPrice are documented here.
+All notable changes to Quanto are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/). The app is in **beta**, so

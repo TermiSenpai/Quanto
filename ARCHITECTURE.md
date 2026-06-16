@@ -1,6 +1,6 @@
-# ARCHITECTURE.md — PackPrice
+# ARCHITECTURE.md — Quanto
 
-The technical reference for PackPrice: how the system is structured, the design
+The technical reference for Quanto: how the system is structured, the design
 patterns it commits to, the invariants that must never break, and how it is
 allowed to grow. `CLAUDE.md` is the short operating manual and points here for
 depth. `AGENTS.md` describes *how to work* on this code with Claude Code.
@@ -14,7 +14,7 @@ depth. `AGENTS.md` describes *how to work* on this code with Claude Code.
 
 ## 1. System context
 
-PackPrice is an **Electron desktop app** that prices DTF (Direct-to-Film)
+Quanto is an **Electron desktop app** that prices DTF (Direct-to-Film)
 textile customization packs. Each workshop PC runs a portable `.exe`; all PCs
 share one `config.js` on the company NAS.
 

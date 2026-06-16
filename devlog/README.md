@@ -1,8 +1,8 @@
-# PackPrice · Devlog
+# Quanto · Devlog
 
-> Crónica completa de cómo se diseñó y se construyó **PackPrice**, una calculadora de precios de packs DTF para un taller de personalización textil de Guadalajara con más de 25 años en el sector. Una app de escritorio Electron, vanilla JavaScript, sin frameworks, sin servidor, sin nube. Construida con un objetivo de calendario muy concreto: que el taller pueda presupuestar bien la temporada de peñas que se acerca. Pensada para ampliarse después con más versatilidad para cliente y usuario.
+> Crónica completa de cómo se diseñó y se construyó **Quanto**, una calculadora de precios de packs DTF para un taller de personalización textil de Guadalajara con más de 25 años en el sector. Una app de escritorio Electron, vanilla JavaScript, sin frameworks, sin servidor, sin nube. Construida con un objetivo de calendario muy concreto: que el taller pueda presupuestar bien la temporada de peñas que se acerca. Pensada para ampliarse después con más versatilidad para cliente y usuario.
 
-![Portada del devlog de PackPrice](images/00-cover.svg)
+![Portada del devlog de Quanto](images/00-cover.svg)
 
 ---
 
@@ -10,7 +10,7 @@
 
 Casi todo el software se documenta en pasado y en seco: un README con cuatro comandos, un changelog y, si hay suerte, una página de arquitectura. El proceso —las decisiones que se tomaron, las que se descartaron, los caminos que parecían buenos y no lo eran— se evapora.
 
-Este devlog hace lo contrario. Cada capítulo es una parada del recorrido: contexto, problema, opciones, decisión y consecuencias. Si en seis meses alguien tiene que tocar PackPrice, no debería preguntarse *por qué se hizo así*. La respuesta está aquí.
+Este devlog hace lo contrario. Cada capítulo es una parada del recorrido: contexto, problema, opciones, decisión y consecuencias. Si en seis meses alguien tiene que tocar Quanto, no debería preguntarse *por qué se hizo así*. La respuesta está aquí.
 
 También hace algo más útil para un equipo pequeño: **bloquea decisiones**. Una vez documentadas, debatirlas otra vez tiene un coste que se nota. Es la mejor forma que conozco de proteger una base de código pequeña de la entropía.
 

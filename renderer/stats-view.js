@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Statistics view mapping (pure, renderer)
+// Quanto · Statistics view mapping (pure, renderer)
 // ============================================================
 // The Statistics screen (UI-UX §2.7) gets a fully-computed `stats`
 // object from main (lib/stats.js aggregates; the renderer only paints).

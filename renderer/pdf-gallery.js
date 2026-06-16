@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · PDF template gallery view-model (pure)
+// Quanto · PDF template gallery view-model (pure)
 // ============================================================
 // Maps the template list (built-ins + custom) plus the current
 // company selection into the small view-model the settings gallery

@@ -1,6 +1,6 @@
 # Capítulo 09 · Modo admin con detección de conflictos
 
-> El config compartido es de todos y de nadie. Cuando dos usuarios editan parámetros a la vez, alguien gana, alguien pierde. PackPrice nunca pierde silenciosamente: detecta el conflicto, hace backup automático y deja al usuario decidir. Este capítulo explica cómo.
+> El config compartido es de todos y de nadie. Cuando dos usuarios editan parámetros a la vez, alguien gana, alguien pierde. Quanto nunca pierde silenciosamente: detecta el conflicto, hace backup automático y deja al usuario decidir. Este capítulo explica cómo.
 
 ![Modal admin con sidebar vertical, banner de aviso y formulario de parámetros](images/admin-modal.svg)
 
@@ -25,7 +25,7 @@ Dos personas, un archivo. Si Alberto abre el modo admin para subir el IVA al 21,
 - Si Alberto guarda primero, Fede sobrescribe sin enterarse.
 - Si Fede guarda primero, Alberto sobrescribe sin enterarse.
 
-En ambos casos, el último cambio pisa al penúltimo. El que pierde **no sabe que ha perdido**. Eso es lo que PackPrice impide.
+En ambos casos, el último cambio pisa al penúltimo. El que pierde **no sabe que ha perdido**. Eso es lo que Quanto impide.
 
 ---
 
@@ -93,7 +93,7 @@ Tres razones:
 
 1. **Se imita el patrón de Windows**. El usuario reconoce el patrón de `MessageBox` y entiende que es una decisión que el sistema necesita.
 2. **Bloquea sin ambigüedad**. Un modal HTML puede tener bugs (foco perdido, click fuera, escape). El diálogo nativo es atómico.
-3. **No requiere CSS adicional**. Es responsabilidad del SO; PackPrice no lo estiliza, no lo internacionaliza, no lo testea.
+3. **No requiere CSS adicional**. Es responsabilidad del SO; Quanto no lo estiliza, no lo internacionaliza, no lo testea.
 
 ---
 
@@ -166,7 +166,7 @@ En todos esos casos, el diálogo aparece. **Es comportamiento esperado**: el usu
 
 ---
 
-## Lo que PackPrice no implementa
+## Lo que Quanto no implementa
 
 A propósito, **no hay**:
 
@@ -185,7 +185,7 @@ A propósito, **no hay**:
 - **Backup no es bloqueante**: si falla, se loguea y la escritura continúa.
 - **Sin purga automática de backups**. Operador la hace cada trimestre.
 - **Clave admin en texto plano**. Es protección anti-clic-accidental, no seguridad real. Documentado.
-- **Sin edición colaborativa real-time**. PackPrice es individual con detección a posteriori.
+- **Sin edición colaborativa real-time**. Quanto es individual con detección a posteriori.
 
 ---
 
