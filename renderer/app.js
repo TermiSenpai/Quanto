@@ -2829,11 +2829,7 @@ async function saveConfigToNas() {
   if (r.ok) {
     adminConfigInfoAtOpen = r.info;
     CFG_BACKUP = deepClone(CFG);
-    await window.packprice.showInfo({
-      titulo: 'Guardado',
-      mensaje: 'Cambios guardados correctamente en el NAS',
-      detalle: r.backupPath ? `Backup creado en:\n${r.backupPath}` : ''
-    });
+    await showSavedModal({ backupPath: r.backupPath });
     initApp();
     updateAdminFooter();
     return;
@@ -2848,6 +2844,43 @@ async function saveConfigToNas() {
     titulo: 'Error al guardar',
     mensaje: 'No se pudo guardar el archivo',
     detalle: r.error || 'Error desconocido'
+  });
+}
+
+/**
+ * In-app «Guardado» confirmation (replaces the native success dialog).
+ * Shows «Cambios guardados correctamente» plus, if present, the backup
+ * path. Resolves when the user dismisses it (Aceptar / X / Esc / overlay).
+ */
+function showSavedModal({ message, backupPath } = {}) {
+  el('saved-subtitle').textContent = message || 'Cambios guardados correctamente';
+  el('saved-body').innerHTML = backupPath
+    ? `<p class="saved-path__label">Backup creado en:</p>
+       <p class="saved-path__value text-mono">${escAttr(backupPath)}</p>`
+    : '';
+
+  show('saved-overlay');
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      hide('saved-overlay');
+      btnOk.removeEventListener('click', onClose);
+      btnClose.removeEventListener('click', onClose);
+      overlay.removeEventListener('click', onOverlayClick);
+      document.removeEventListener('keydown', onKey);
+    };
+    const onClose = () => { cleanup(); resolve(); };
+    const onOverlayClick = (e) => { if (e.target.id === 'saved-overlay') onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+
+    const btnOk = el('btn-saved-aceptar');
+    const btnClose = el('btn-cerrar-saved');
+    const overlay = el('saved-overlay');
+
+    btnOk.addEventListener('click', onClose);
+    btnClose.addEventListener('click', onClose);
+    overlay.addEventListener('click', onOverlayClick);
+    document.addEventListener('keydown', onKey);
   });
 }
 

@@ -848,6 +848,35 @@
     </div>
   </div>
 
+  <!-- ================== MODAL: GUARDADO CORRECTO ================== -->
+  <!-- In-app success confirmation after an admin save. Replaces the
+       native «Guardado» dialog; single «Aceptar» exit. -->
+  <div id="saved-overlay" class="overlay hidden">
+    <div class="modal modal--sm" role="dialog" aria-labelledby="saved-title">
+      <header class="modal__head">
+        <div class="modal__head-title">
+          <span class="modal__head-icon modal__head-icon--ok"><svg class="icon icon--lg"><use href="#i-check"/></svg></span>
+          <div class="modal__head-text">
+            <h2 id="saved-title">Guardado</h2>
+            <p id="saved-subtitle">Cambios guardados correctamente</p>
+          </div>
+        </div>
+        <button id="btn-cerrar-saved" class="modal__close" type="button" aria-label="Cerrar">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div id="saved-body"></div>
+      </div>
+      <footer class="modal__foot">
+        <span class="modal__foot-left"></span>
+        <div class="modal__foot-right">
+          <button id="btn-saved-aceptar" class="btn btn-primary" type="button">Aceptar</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
   <!-- ================== MODAL: CONFLICTO POR ENTIDAD (CLOUD) ================== -->
   <!-- v5 (UI-UX §2.3): per-entity save conflict. Same modal style as the
        admin diff; shows the server value vs yours and three exits. -->
