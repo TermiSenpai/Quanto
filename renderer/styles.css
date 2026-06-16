@@ -45,6 +45,11 @@
   --accent-soft:           #E4EEFC;
   --accent-text-on-soft:   #1F4FA3;
 
+  /* Marca (Quanto) — logotipo e identidad; assets en assets/brand/ */
+  --brand-400:  #6C82FF;
+  --brand-500:  #3D5AF1;
+  --brand-600:  #2E44C8;
+
   /* Estado */
   --success:      #1FA86A;
   --success-soft: #E1F5EB;

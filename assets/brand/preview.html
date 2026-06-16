@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Quanto — brand preview</title>
+<style>
+  :root{ --brand:#3D5AF1; --ink:#0F1A2B; --surf:#F1F4F8; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Inter",-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--surf);color:var(--ink)}
+  .wrap{max-width:980px;margin:0 auto;padding:40px 28px}
+  h1{font-size:20px;margin:0 0 4px}
+  p.sub{color:#5A6478;margin:0 0 28px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .card{border:1px solid #E4E9F2;border-radius:16px;padding:24px;background:#fff;display:flex;flex-direction:column;align-items:center;gap:14px}
+  .card.dark{background:#0F1A2B;border-color:#1A2740;color:#fff}
+  .label{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#8E97AB}
+  .card.dark .label{color:#A6B0C2}
+  .row{display:flex;align-items:center;gap:18px;flex-wrap:wrap;justify-content:center}
+  .sizes{display:flex;align-items:flex-end;gap:18px}
+  .sizes figure{margin:0;text-align:center;font-size:11px;color:#8E97AB}
+  .swatches{display:flex;gap:0;border-radius:12px;overflow:hidden;border:1px solid #E4E9F2}
+  .sw{width:120px;height:72px;display:flex;align-items:flex-end;padding:8px;font:600 11px/1.2 "Inter",sans-serif}
+  img{display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Quanto — propuesta de marca</h1>
+  <p class="sub">Símbolo (#1 tramos) + wordmark (#6 ligadura) + color de marca nuevo.</p>
+
+  <div class="grid">
+    <div class="card">
+      <span class="label">App icon · light</span>
+      <img src="quanto-icon.svg" width="120" height="120" alt="">
+    </div>
+    <div class="card dark">
+      <span class="label">App icon · dark</span>
+      <img src="quanto-icon.svg" width="120" height="120" alt="">
+    </div>
+
+    <div class="card">
+      <span class="label">Icon variante "trend"</span>
+      <img src="quanto-icon-trend.svg" width="120" height="120" alt="">
+    </div>
+    <div class="card">
+      <span class="label">Tamaños reales (favicon / taskbar)</span>
+      <div class="sizes">
+        <figure><img src="quanto-icon.svg" width="64" height="64" alt=""><br>64</figure>
+        <figure><img src="quanto-icon.svg" width="32" height="32" alt=""><br>32</figure>
+        <figure><img src="quanto-icon.svg" width="16" height="16" alt=""><br>16</figure>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="label">Wordmark · light</span>
+      <img src="quanto-wordmark.svg" width="290" alt="">
+    </div>
+    <div class="card dark">
+      <span class="label">Símbolo mono</span>
+      <div class="row" style="color:#6C82FF">
+        <img src="quanto-symbol-mono.svg" width="72" height="72" alt="">
+        <img src="quanto-symbol-mono.svg" width="40" height="40" alt="">
+        <img src="quanto-symbol-mono.svg" width="24" height="24" alt="">
+      </div>
+    </div>
+
+    <div class="card" style="grid-column:1 / -1">
+      <span class="label">Color de marca · Quanto Indigo</span>
+      <div class="swatches">
+        <div class="sw" style="background:#6C82FF;color:#fff">#6C82FF<br>brand-400</div>
+        <div class="sw" style="background:#3D5AF1;color:#fff">#3D5AF1<br>brand-500</div>
+        <div class="sw" style="background:#2E44C8;color:#fff">#2E44C8<br>brand-600</div>
+        <div class="sw" style="background:#0F1A2B;color:#fff">#0F1A2B<br>ink</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -108,6 +108,17 @@ dependencies. The default answer is **YAGNI**.
   templates use a **tiny in-house template engine** (QWeb-style HTML+CSS
   directives, no library); custom templates are shared data, sanitized on
   load (no scripts, no external resources).
+- **2026-06-16 — Brand identity (Quanto).** Renamed **PackPrice → Quanto**
+  (Spanish *cuánto* + *cuanto*/quantum — it answers *how much*, by *quantity
+  tier*). Logo system lives in `assets/brand/`: a symbol of four ascending tiers
+  (T1–T4, rising opacity) and a wordmark whose **Q tail flows into the "price
+  line"** underline. Brand color **Quanto Indigo** — `--brand-500 #3D5AF1`
+  (`-400 #6C82FF`, `-600 #2E44C8`), tokens in `renderer/styles.css`; chosen to
+  sit between the UI accent blue and the pack violet so the app stays unified.
+  App icon ships as root `icon.png` (the in-app window icon, `main.js`) and
+  `icon.ico` (multi-size, embedded in the `.exe` via `build.win.icon`); favicon
+  PNGs in `assets/brand/`. The wordmark is shipped **outlined to paths**
+  (`quanto-wordmark.svg`) so it renders identically without Inter installed.
 
 > **Language migration:** much legacy code (`main.js`, `app.js`, `calculo.js`,
 > `admin.js`, `config-parser.js`) is Spanish for historical reasons and migrates

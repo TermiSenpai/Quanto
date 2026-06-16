@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Quanto · horizontal wordmark (concept #6). Custom Q ring (ink) whose tail flows into the underline "price line" (brand indigo) ending in a node.
+     NOTE: "uanto" is set in Inter (bundled in-app). For distribution, convert <text> to outlines so it renders identically everywhere. -->
+<svg width="180" height="64" viewBox="0 0 180 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quanto">
+  <!-- Q ring -->
+  <circle cx="31" cy="29" r="15" stroke="#0F1A2B" stroke-width="7" fill="none"/>
+  <!-- tail -> underline "price line" + node, in brand indigo -->
+  <path d="M40 38 C 45 45, 50 50, 58 50 L 162 50" stroke="#3D5AF1" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <circle cx="168" cy="50" r="5" fill="#3D5AF1"/>
+  <!-- the rest of the word -->
+  <text x="51" y="42" font-family="Inter, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="40" font-weight="700" letter-spacing="-1.5" fill="#0F1A2B">uanto</text>
+</svg>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Quanto · app icon (concept #1: tiers/quanta). Gradient squircle + 4 ascending bars (T1–T4). -->
+<svg width="512" height="512" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quanto">
+  <defs>
+    <linearGradient id="quantoBrand" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6C82FF"/>
+      <stop offset="1" stop-color="#2E44C8"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#quantoBrand)"/>
+  <!-- ascending tiers; opacity rises with the tier to read as "more quantity / higher price" -->
+  <g fill="#FFFFFF">
+    <rect x="16" y="34" width="5" height="11" rx="2.5" opacity="0.50"/>
+    <rect x="25" y="28" width="5" height="17" rx="2.5" opacity="0.68"/>
+    <rect x="34" y="22" width="5" height="23" rx="2.5" opacity="0.84"/>
+    <rect x="43" y="16" width="5" height="29" rx="2.5" opacity="1"/>
+  </g>
+</svg>

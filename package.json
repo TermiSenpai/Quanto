@@ -45,7 +45,7 @@
           ]
         }
       ],
-      "icon": "icon.png"
+      "icon": "icon.ico"
     },
     "portable": {
       "artifactName": "PackPrice-${version}-preliminar.exe"

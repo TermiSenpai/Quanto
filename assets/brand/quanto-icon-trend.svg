@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Quanto · app icon variant: tiers + trend line with node (the curve subtly nods to a "Q"). For splash / marketing, larger sizes. -->
+<svg width="512" height="512" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quanto">
+  <defs>
+    <linearGradient id="quantoBrand2" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6C82FF"/>
+      <stop offset="1" stop-color="#2E44C8"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#quantoBrand2)"/>
+  <g fill="#FFFFFF">
+    <rect x="16" y="34" width="5" height="11" rx="2.5" opacity="0.45"/>
+    <rect x="25" y="28" width="5" height="17" rx="2.5" opacity="0.58"/>
+    <rect x="34" y="22" width="5" height="23" rx="2.5" opacity="0.72"/>
+    <rect x="43" y="16" width="5" height="29" rx="2.5" opacity="0.86"/>
+  </g>
+  <!-- trend line touching each bar top, ending in a node -->
+  <path d="M18.5 32 Q 27.5 25 36.5 19 T 45.5 13" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" fill="none" opacity="0.95"/>
+  <circle cx="45.5" cy="13" r="3.4" fill="#FFFFFF"/>
+</svg>
