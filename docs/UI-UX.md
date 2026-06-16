@@ -134,8 +134,8 @@ una entidad no coincide, modal (no nativo, mismo estilo que el modal admin):
 
 > **Conflicto en «Pack Peña».** Otro equipo lo modificó mientras editabas.
 >
-> *(diff de campos: valor del servidor vs el tuyo, reusa el render de diff del
-> admin actual)*
+> *(comparación de campos en lenguaje claro — valor del servidor vs el tuyo —
+> con el mismo humanizador del §2.5b)*
 >
 > `[Cargar versión del servidor]` `[Sobrescribir con la mía]` `[Cancelar]`
 
@@ -192,14 +192,32 @@ En v5 desaparece la puerta de contraseña: el editor de catálogo (el antiguo
 «modo admin») se abre directamente desde la topbar para cualquier trabajador.
 Lo que sustituye a la contraseña:
 
-- **Confirmación al guardar:** modal con el resumen de cambios (diff de
-  entidades, reusa el preview actual) y el autor que quedará registrado.
+- **Confirmación al guardar:** modal con el resumen de cambios **en lenguaje
+  claro** (ver §2.5b) y el autor que quedará registrado.
   `[Guardar N cambios]` `[Cancelar]`. Guardar sin pasar por aquí es imposible.
 - **Autor visible:** el nombre de equipo/trabajador (de ajustes locales) se
   muestra en la cabecera del editor — «Editando como *Mostrador-2*».
 - **Historial a mano:** pestaña de auditoría (quién, cuándo, qué) y lista de
   versiones con botón «Restaurar esta versión», que también pide confirmación
   y queda auditado.
+
+### 2.5b Resumen de cambios legible (no técnico)
+
+Todo lo que muestra cambios del catálogo —confirmación al guardar (modo archivo
+y nube), modal de conflicto (§2.3) y auditoría/historial— usa un **humanizador**
+común (`renderer/change-format.js`). Nunca se ve JSON crudo ni rutas con puntos.
+
+- **Agrupado por entidad**, con badge e identidad: `NUEVO · Proveedor «Valento»`,
+  `EDITADO · Producto «Camiseta»`, `ELIMINADO · Pack «Peña»` (verde / ámbar /
+  rojo). El nombre sale de `name`/`label`, con el id como respaldo.
+- **Alta/baja** de una entidad entera → solo la línea de resumen (sin volcar
+  todos los campos).
+- **Edición** → una fila por campo, en lenguaje claro y con el valor formateado:
+  `Margen objetivo: 35 % → 40 %`, `Precio base (prov. 1): 3,50 € → 3,80 €`,
+  `Componentes libres: Sí`. Unidades automáticas (€, %, Sí/No, «texto»,
+  `(vacío)`); etiquetas de parámetros reutilizadas del editor.
+- Si un campo no está en el diccionario, se muestra una etiqueta legible
+  (nunca la ruta cruda).
 
 ### 2.6 Ajustes locales (ampliación)
 
