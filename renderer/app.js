@@ -49,6 +49,7 @@ import {
 import { deriveDataStatus, formatFreshness, planRefreshTrigger } from './data-status.js';
 import { buildGalleryModel } from './pdf-gallery.js';
 import { buildSaveSummary, totalChanges } from './save-summary.js';
+import { renderChangeGroup, renderEntityValues } from './change-format.js';
 import { computeReminder } from './quote-reminder.js';
 import {
   barChartH, barChartV, groupedBars, lineChart, histogram
@@ -3040,34 +3041,15 @@ function showSaveConfirm(summary) {
   });
 }
 
-/** Renders the grouped save summary (entity → its change lines). */
+/** Renders the grouped save summary (entity → its humanized changes). */
 function renderSaveSummary(summary) {
   const n = totalChanges(summary);
-  const groups = summary.map((g) => `
-    <div class="conflict-entity">
-      <div class="conflict-entity__title">${escAttr(entityLabel(g.entityType, g.id))}</div>
-      <ul class="audit-changes audit-changes--preview">
-        ${g.lines.map(renderSummaryLine).join('')}
-      </ul>
-    </div>
-  `).join('');
+  const groups = summary.map(renderChangeGroup).join('');
   return `
     <p>Vas a guardar <strong>${n}</strong> cambio${n === 1 ? '' : 's'} como
        <strong>${escAttr(cloudAuthorName())}</strong>:</p>
     ${groups}
   `;
-}
-
-/**
- * Renders one summary line ("+ path: x" / "- …" / "~ a → b") into the
- * same row styling the audit modal uses, classed by its sign.
- */
-function renderSummaryLine(line) {
-  const sign = line.charAt(0);
-  const kind = sign === '+' ? 'add' : sign === '-' ? 'remove' : 'change';
-  return `<li class="audit-change audit-change--${kind}">
-    <code class="audit-change__path">${escAttr(line)}</code>
-  </li>`;
 }
 
 /**
@@ -3234,11 +3216,11 @@ function renderConflictBody(conflict) {
       <div class="conflict-cols">
         <div>
           <div class="conflict-col__head">Versión del servidor</div>
-          <ul class="audit-changes">${renderValueRows(serverRow)}</ul>
+          <ul class="audit-changes">${renderEntityValues(entityType, serverRow)}</ul>
         </div>
         <div>
           <div class="conflict-col__head">La tuya</div>
-          <ul class="audit-changes">${renderValueRows(mine)}</ul>
+          <ul class="audit-changes">${renderEntityValues(entityType, mine)}</ul>
         </div>
       </div>
     </div>
@@ -3252,20 +3234,6 @@ function mineEntitySlice(entityType, id) {
     return (CFG[sections[entityType]] || {})[id];
   }
   return CFG[entityType];
-}
-
-/** Renders a flat object as code rows (key: value) for the conflict cols. */
-function renderValueRows(value) {
-  if (value === null || value === undefined) {
-    return '<li class="audit-change"><span class="muted">(sin datos)</span></li>';
-  }
-  if (typeof value !== 'object') {
-    return `<li class="audit-change"><code class="audit-change__path">${escAttr(String(value))}</code></li>`;
-  }
-  return Object.entries(value).map(([k, v]) => {
-    const text = typeof v === 'object' ? JSON.stringify(v) : String(v);
-    return `<li class="audit-change"><code class="audit-change__path">${escAttr(k)}: ${escAttr(text)}</code></li>`;
-  }).join('');
 }
 
 // ============================================================
