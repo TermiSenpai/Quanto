@@ -1,5 +1,5 @@
 // ============================================================
-// Quanto · Change humanizer (pure, renderer)
+// PackPrice · Change humanizer (pure, renderer)
 // ============================================================
 // Turns structured diff entries ({path, before, after, kind}) into
 // friendly Spanish text and grouped HTML for every place that shows
