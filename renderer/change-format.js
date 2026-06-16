@@ -195,3 +195,48 @@ function prettyRel(rel) {
   });
   return segs.join(' · ') || 'Campo';
 }
+
+// ------------------------------------------------------------
+// Value formatting
+// ------------------------------------------------------------
+
+const PERCENT_KEYS = new Set(['target_margin', 'default_target_margin', 'vat', 'waste_pct']);
+
+function lastBase(rel) {
+  const segs = relSegments(rel);
+  return baseName(segs[segs.length - 1] || rel || '');
+}
+
+function isEuroField(entityType, rel) {
+  if (rel.startsWith('prices.') || rel.startsWith('bundle_prices.')) return true;
+  const seg = lastBase(rel);
+  if (seg === 'price' || seg === 'cost' || seg === 'extra_cost_3xl') return true;
+  if (seg.includes('eur')) return true; // labor_eur_hour, surcharge_4xl_eur, dtf_eur_meter, …
+  return false;
+}
+
+function commaDecimals(n, decimals) {
+  return Number(n).toFixed(decimals).replace('.', ',');
+}
+
+/** Friendly Spanish rendering of a value, unit-aware by field. */
+export function formatValue(entityType, rel, value) {
+  if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+  if (value === null || value === undefined || value === '') return '(vacío)';
+
+  const seg = lastBase(rel);
+  if (entityType === 'pack' && seg === 'pricing_mode') {
+    return value === 'bundle' ? 'Por unidad' : value === 'components' ? 'Por componentes' : `«${value}»`;
+  }
+  if (typeof value === 'number') {
+    if (PERCENT_KEYS.has(seg)) {
+      const pct = value * 100;
+      const txt = Number.isInteger(pct) ? String(pct) : commaDecimals(pct, 2);
+      return `${txt} %`;
+    }
+    if (isEuroField(entityType, rel)) return `${commaDecimals(value, 2)} €`;
+    return String(value).replace('.', ',');
+  }
+  if (typeof value === 'string') return `«${value}»`;
+  return '(varios datos)'; // object/array leaf — never JSON
+}

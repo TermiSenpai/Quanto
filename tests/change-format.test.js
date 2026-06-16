@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import {
-  parsePath, entityTypeLabel, entityName, kindBadge, fieldLabel
+  parsePath, entityTypeLabel, entityName, kindBadge, fieldLabel, formatValue
 } from '../renderer/change-format.js';
 
 describe('parsePath', () => {
@@ -93,5 +93,36 @@ describe('fieldLabel', () => {
     const out = fieldLabel('product', 'mystery_field');
     expect(out).not.toContain('.');
     expect(out.length).toBeGreaterThan(0);
+  });
+});
+
+describe('formatValue', () => {
+  test('euro fields', () => {
+    expect(formatValue('product', 'suppliers[0].price', 3.5)).toBe('3,50 €');
+    expect(formatValue('product', 'prices.two_sides.T1', 12)).toBe('12,00 €');
+    expect(formatValue('addon', 'price', 2)).toBe('2,00 €');
+    expect(formatValue('parameters', 'labor_eur_hour', 15)).toBe('15,00 €');
+  });
+  test('percent fields', () => {
+    expect(formatValue('product', 'target_margin', 0.35)).toBe('35 %');
+    expect(formatValue('parameters', 'vat', 0.21)).toBe('21 %');
+    expect(formatValue('parameters', 'waste_pct', 0.1)).toBe('10 %');
+  });
+  test('booleans', () => {
+    expect(formatValue('product', 'suppliers[0].is_default', true)).toBe('Sí');
+    expect(formatValue('pack', 'free_components', false)).toBe('No');
+  });
+  test('pricing_mode mapping', () => {
+    expect(formatValue('pack', 'pricing_mode', 'bundle')).toBe('Por unidad');
+    expect(formatValue('pack', 'pricing_mode', 'components')).toBe('Por componentes');
+  });
+  test('text, empty, null, number', () => {
+    expect(formatValue('supplier', 'name', 'Valento')).toBe('«Valento»');
+    expect(formatValue('supplier', 'web', '')).toBe('(vacío)');
+    expect(formatValue('supplier', 'notes', null)).toBe('(vacío)');
+    expect(formatValue('pack', 'min_total', 12)).toBe('12');
+  });
+  test('object value never shows JSON', () => {
+    expect(formatValue('supplier', '', { name: 'x' })).toBe('(varios datos)');
   });
 });
