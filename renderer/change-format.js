@@ -306,3 +306,54 @@ function entitySlice(cfg, entityType, id) {
   if (id && sections[entityType]) return (cfg[sections[entityType]] || {})[id];
   return cfg[entityType];
 }
+
+// ------------------------------------------------------------
+// HTML renderers (pure: no DOM access, return strings)
+// ------------------------------------------------------------
+
+/** Local HTML escape (renderer module stays self-contained). */
+export function escHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** One change group → HTML block (badge + entity + name + rows/summary). */
+export function renderChangeGroup(group) {
+  const badge = kindBadge(group.kind);
+  const type = entityTypeLabel(group.entityType);
+  const name = group.name ? ` · ${escHtml(group.name)}` : '';
+  let body;
+  if (group.kind === 'edit') {
+    body = `<ul class="change-rows">` +
+      group.fieldChanges.map(c => `<li class="change-row">${escHtml(humanizeChange(c, group.entityType))}</li>`).join('') +
+      `</ul>`;
+  } else {
+    // add/remove: summary line only (name already in the header).
+    body = '';
+  }
+  return `
+    <div class="change-group change-group--${badge.cls}">
+      <div class="change-group__head">
+        <span class="change-badge change-badge--${badge.cls}">${badge.label}</span>
+        <span class="change-group__entity">${escHtml(type)}${name}</span>
+      </div>
+      ${body}
+    </div>
+  `;
+}
+
+/** Friendly key:value rows for one entity slice (conflict columns). */
+export function renderEntityValues(entityType, value) {
+  if (value === null || value === undefined) {
+    return '<li class="change-row change-row--muted">(sin datos)</li>';
+  }
+  if (typeof value !== 'object') {
+    return `<li class="change-row">${escHtml(String(value))}</li>`;
+  }
+  return Object.entries(value).map(([k, v]) => {
+    const label = fieldLabel(entityType, k);
+    const val = (v && typeof v === 'object') ? '(varios datos)' : formatValue(entityType, k, v);
+    return `<li class="change-row">${escHtml(label)}: ${escHtml(val)}</li>`;
+  }).join('');
+}

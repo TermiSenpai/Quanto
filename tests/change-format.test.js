@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import {
   parsePath, entityTypeLabel, entityName, kindBadge, fieldLabel, formatValue,
-  humanizeChange, groupChanges
+  humanizeChange, groupChanges, renderChangeGroup, renderEntityValues, escHtml
 } from '../renderer/change-format.js';
 
 describe('parsePath', () => {
@@ -174,5 +174,47 @@ describe('groupChanges', () => {
       { path: 'products.P1', before: { name: 'Camiseta' }, after: undefined, kind: 'remove' }
     ]);
     expect(groups[0]).toMatchObject({ entityType: 'product', id: 'P1', kind: 'remove', name: 'Camiseta' });
+  });
+});
+
+describe('renderChangeGroup', () => {
+  test('edit group renders badge, name and humanized rows, no JSON/paths', () => {
+    const html = renderChangeGroup({
+      entityType: 'product', id: 'BEAGLE', kind: 'edit', name: 'Camiseta',
+      fieldChanges: [{ path: 'target_margin', before: 0.35, after: 0.4, kind: 'change' }]
+    });
+    expect(html).toContain('Editado');
+    expect(html).toContain('Producto');
+    expect(html).toContain('Camiseta');
+    expect(html).toContain('Margen objetivo');
+    expect(html).toContain('35 %');
+    expect(html).toContain('40 %');
+    expect(html).not.toContain('target_margin');
+    expect(html).not.toContain('{');
+  });
+  test('add group renders only the summary line', () => {
+    const html = renderChangeGroup({ entityType: 'supplier', id: 'S1', kind: 'add', name: 'Valento', fieldChanges: [] });
+    expect(html).toContain('Nuevo');
+    expect(html).toContain('Proveedor');
+    expect(html).toContain('Valento');
+    expect(html).not.toContain('{');
+  });
+  test('escapes malicious names', () => {
+    const html = renderChangeGroup({ entityType: 'supplier', id: 'S1', kind: 'add', name: '<img>', fieldChanges: [] });
+    expect(html).not.toContain('<img>');
+    expect(html).toContain('&lt;img&gt;');
+  });
+});
+
+describe('renderEntityValues', () => {
+  test('renders friendly key:value rows (conflict columns), no JSON', () => {
+    const html = renderEntityValues('supplier', { name: 'Valento', web: '' });
+    expect(html).toContain('Nombre');
+    expect(html).toContain('Valento');
+    expect(html).toContain('Web');
+    expect(html).not.toContain('{');
+  });
+  test('null slice → muted no-data row', () => {
+    expect(renderEntityValues('supplier', null)).toContain('sin datos');
   });
 });
