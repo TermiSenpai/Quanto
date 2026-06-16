@@ -59,6 +59,17 @@ const PARAMETER_GROUPS = [
   ]}
 ];
 
+// Flat key → label map derived from PARAMETER_GROUPS, exported so the
+// change humanizer can reuse the same Spanish parameter labels.
+const PARAMETER_LABELS = Object.fromEntries(
+  PARAMETER_GROUPS.flatMap(g => g.items.map(it => [it.key, it.label]))
+);
+
+/** Spanish label for a calculation parameter key (or the key itself). */
+export function parameterLabel(key) {
+  return PARAMETER_LABELS[key] || key;
+}
+
 // The two price-table faces every product/bundle exposes.
 const PRICE_FACES = [['two_sides', '2 caras', 2], ['one_side', '1 cara', 1]];
 

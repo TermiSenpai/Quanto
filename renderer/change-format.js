@@ -13,6 +13,8 @@
 
 'use strict';
 
+import { parameterLabel } from './admin.js';
+
 // cfg section name → singular entity type used across the UI.
 const SECTION_TO_TYPE = {
   suppliers: 'supplier',
@@ -84,4 +86,112 @@ export function kindBadge(kind) {
   if (kind === 'add') return { label: 'Nuevo', cls: 'add' };
   if (kind === 'remove') return { label: 'Eliminado', cls: 'remove' };
   return { label: 'Editado', cls: 'change' };
+}
+
+// ------------------------------------------------------------
+// Field label helpers
+// ------------------------------------------------------------
+
+// Ordinal helpers for indexed paths: "suppliers[0]" → "Proveedor 1".
+function relSegments(rel) {
+  // Split "suppliers[0].price" → ['suppliers[0]', 'price'].
+  return String(rel || '').split('.').filter(Boolean);
+}
+function indexOf(segment) {
+  const m = /\[(\d+)\]/.exec(segment);
+  return m ? Number(m[1]) : null;
+}
+function baseName(segment) {
+  return segment.replace(/\[\d+\]/g, '');
+}
+
+const TIER_LABEL = { id: 'Id', label: 'Etiqueta', from: 'Desde', to: 'Hasta' };
+const SUPPLIER_SUB = { supplier: 'Proveedor', ref: 'Referencia', price: 'Precio base', min_order: 'Pedido mínimo', is_default: 'Por defecto' };
+const FACE_LABEL = { two_sides: '2 caras', one_side: '1 cara' };
+
+const SIMPLE_LABELS = {
+  supplier: { name: 'Nombre', web: 'Web', notes: 'Notas' },
+  product: { name: 'Nombre', category: 'Categoría', extra_cost_3xl: 'Coste extra 3XL', target_margin: 'Margen objetivo' },
+  pack: {
+    name: 'Nombre', description: 'Descripción', icon: 'Icono', min_total: 'Mínimo total (uds)',
+    target_margin: 'Margen objetivo', pricing_mode: 'Modo de precio', free_components: 'Componentes libres'
+  },
+  addon: { label: 'Etiqueta', price: 'Precio (€/ud)', cost: 'Coste interno (€/ud)', vat_included: 'IVA incluido', applies_to: 'Aplica a' },
+  company: { name: 'Nombre' }
+};
+
+/** Human label for an entity-relative field path. Never returns a dotted path. */
+export function fieldLabel(entityType, rel) {
+  const r = String(rel || '');
+
+  // Parameters: reuse the admin dictionary.
+  if (entityType === 'parameters') return parameterLabel(r);
+
+  // Tiers: "[i].field".
+  if (entityType === 'tiers') {
+    const segs = relSegments(r);
+    const i = indexOf(segs[0] || '');
+    const field = baseName(segs[1] || segs[0] || '');
+    const tierPart = i !== null ? `Tramo ${i + 1}` : 'Tramo';
+    return segs.length > 1 ? `${tierPart} · ${TIER_LABEL[field] || prettySegment(field)}` : tierPart;
+  }
+
+  // Product price table: "prices.two_sides.T1".
+  if (entityType === 'product' && r.startsWith('prices.')) {
+    const [, face, tier] = r.split('.');
+    return `PVP · ${FACE_LABEL[face] || face} · Tramo ${tier}`;
+  }
+  // Product supplier sub-rows: "suppliers[0].price".
+  if (entityType === 'product' && r.startsWith('suppliers')) {
+    const segs = relSegments(r);
+    const i = indexOf(segs[0]);
+    const sub = baseName(segs[1] || '');
+    return `Proveedor ${i !== null ? i + 1 : ''}`.trim() + (sub ? ` · ${SUPPLIER_SUB[sub] || prettySegment(sub)}` : '');
+  }
+
+  // Pack bundle price table: "bundle_prices.<combo>.T1".
+  if (entityType === 'pack' && r.startsWith('bundle_prices.')) {
+    const [, combo, tier] = r.split('.');
+    return `PVP · ${combo || '(base)'} · Tramo ${tier}`;
+  }
+  // Pack options/components arrays.
+  if (entityType === 'pack' && (r.startsWith('options') || r.startsWith('components'))) {
+    const segs = relSegments(r);
+    const head = segs[0].startsWith('options') ? 'Opción' : 'Componente';
+    const i = indexOf(segs[0]);
+    let out = i !== null ? `${head} ${i + 1}` : head;
+    // optional nested values[j] for options
+    let rest = segs.slice(1);
+    if (rest[0] && rest[0].startsWith('values')) {
+      const j = indexOf(rest[0]);
+      out += j !== null ? ` · Valor ${j + 1}` : ' · Valor';
+      rest = rest.slice(1);
+    }
+    const field = baseName(rest[0] || '');
+    const fieldLabels = { label: 'Etiqueta', sides: 'Caras', id: 'Id', product: 'Producto', qty_per_pack: 'Uds por pack' };
+    return field ? `${out} · ${fieldLabels[field] || prettySegment(field)}` : out;
+  }
+
+  // Simple per-entity fields.
+  const simple = SIMPLE_LABELS[entityType];
+  if (simple) {
+    const seg = baseName(relSegments(r)[0] || r);
+    if (simple[seg]) return simple[seg];
+  }
+
+  // Fallback: never a dotted path — humanize the last meaningful segment.
+  return prettyRel(r);
+}
+
+function prettySegment(seg) {
+  const s = baseName(String(seg || '')).replace(/_/g, ' ').trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Campo';
+}
+function prettyRel(rel) {
+  const segs = relSegments(rel).map(s => {
+    const i = indexOf(s);
+    const base = prettySegment(s);
+    return i !== null ? `${base} ${i + 1}` : base;
+  });
+  return segs.join(' · ') || 'Campo';
 }
