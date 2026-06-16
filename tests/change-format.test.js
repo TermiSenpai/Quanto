@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import {
-  parsePath, entityTypeLabel, entityName, kindBadge, fieldLabel, formatValue
+  parsePath, entityTypeLabel, entityName, kindBadge, fieldLabel, formatValue,
+  humanizeChange, groupChanges
 } from '../renderer/change-format.js';
 
 describe('parsePath', () => {
@@ -124,5 +125,54 @@ describe('formatValue', () => {
   });
   test('object value never shows JSON', () => {
     expect(formatValue('supplier', '', { name: 'x' })).toBe('(varios datos)');
+  });
+});
+
+describe('humanizeChange', () => {
+  test('change with explicit entityType (relative path)', () => {
+    expect(humanizeChange({ path: 'name', before: 'A', after: 'B', kind: 'change' }, 'supplier'))
+      .toBe('Nombre: «A» → «B»');
+  });
+  test('add field', () => {
+    expect(humanizeChange({ path: 'price', after: 2, kind: 'add' }, 'addon'))
+      .toBe('Precio (€/ud): 2,00 €');
+  });
+  test('remove field', () => {
+    expect(humanizeChange({ path: 'web', before: 'x.com', kind: 'remove' }, 'supplier'))
+      .toBe('Web: se quita («x.com»)');
+  });
+  test('derives entityType from a full path when not given', () => {
+    expect(humanizeChange({ path: 'parameters.vat', before: 0.21, after: 0.1, kind: 'change' }))
+      .toBe('IVA aplicado: 21 % → 10 %');
+  });
+});
+
+describe('groupChanges', () => {
+  test('groups flat full-path changes by entity, detects edit', () => {
+    const groups = groupChanges([
+      { path: 'suppliers.S1.name', before: 'A', after: 'B', kind: 'change' },
+      { path: 'suppliers.S1.web', before: '', after: 'b.com', kind: 'add' },
+      { path: 'parameters.vat', before: 0.21, after: 0.1, kind: 'change' }
+    ]);
+    const s = groups.find(g => g.id === 'S1');
+    expect(s.entityType).toBe('supplier');
+    expect(s.kind).toBe('edit');
+    expect(s.fieldChanges).toHaveLength(2);
+    const p = groups.find(g => g.entityType === 'parameters');
+    expect(p.id).toBeNull();
+    expect(p.kind).toBe('edit');
+  });
+  test('whole-entity add → kind add, no field rows, name from object', () => {
+    const groups = groupChanges([
+      { path: 'suppliers.S2', before: undefined, after: { name: 'Valento' }, kind: 'add' }
+    ]);
+    expect(groups[0]).toMatchObject({ entityType: 'supplier', id: 'S2', kind: 'add', name: 'Valento' });
+    expect(groups[0].fieldChanges).toEqual([]);
+  });
+  test('whole-entity remove → kind remove, name from old object', () => {
+    const groups = groupChanges([
+      { path: 'products.P1', before: { name: 'Camiseta' }, after: undefined, kind: 'remove' }
+    ]);
+    expect(groups[0]).toMatchObject({ entityType: 'product', id: 'P1', kind: 'remove', name: 'Camiseta' });
   });
 });

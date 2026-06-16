@@ -1,5 +1,5 @@
 // ============================================================
-// PackPrice · Change humanizer (pure, renderer)
+// Quanto · Change humanizer (pure, renderer)
 // ============================================================
 // Turns structured diff entries ({path, before, after, kind}) into
 // friendly Spanish text and grouped HTML for every place that shows
@@ -239,4 +239,70 @@ export function formatValue(entityType, rel, value) {
   }
   if (typeof value === 'string') return `«${value}»`;
   return '(varios datos)'; // object/array leaf — never JSON
+}
+
+// ------------------------------------------------------------
+// Change humanizer and grouper
+// ------------------------------------------------------------
+
+/**
+ * One friendly line for a single field change. If `entityType` is given,
+ * `change.path` is treated as entity-relative; otherwise it is parsed
+ * from a full path.
+ */
+export function humanizeChange(change, entityType) {
+  let type = entityType;
+  let rel = change.path;
+  if (!type) {
+    const p = parsePath(change.path);
+    type = p.entityType;
+    rel = p.rel;
+  }
+  const label = fieldLabel(type, rel);
+  if (change.kind === 'add') return `${label}: ${formatValue(type, rel, change.after)}`;
+  if (change.kind === 'remove') return `${label}: se quita (${formatValue(type, rel, change.before)})`;
+  return `${label}: ${formatValue(type, rel, change.before)} → ${formatValue(type, rel, change.after)}`;
+}
+
+/**
+ * Groups a FLAT list of full-path changes by entity, detecting whether
+ * the whole entity was added/removed (a single change whose rel is '')
+ * vs edited. `cfg` (optional) resolves nicer entity names.
+ * @returns {{entityType,id,name,kind,fieldChanges}[]}
+ */
+export function groupChanges(flatChanges, cfg) {
+  const order = [];
+  const map = new Map();
+  for (const ch of flatChanges || []) {
+    const { entityType, id, rel } = parsePath(ch.path);
+    const key = `${entityType}:${id}`;
+    if (!map.has(key)) {
+      map.set(key, { entityType, id, kind: 'edit', name: '', fieldChanges: [] });
+      order.push(key);
+    }
+    const g = map.get(key);
+    if (rel === '') {
+      // Whole-entity add/remove: summary line only.
+      g.kind = ch.kind === 'add' ? 'add' : 'remove';
+      const obj = ch.kind === 'add' ? ch.after : ch.before;
+      g.name = entityName(entityType, obj, id);
+    } else {
+      g.fieldChanges.push({ path: rel, before: ch.before, after: ch.after, kind: ch.kind });
+    }
+  }
+  // Resolve names for edit groups (and any add/remove without a name yet).
+  for (const key of order) {
+    const g = map.get(key);
+    if (!g.name) {
+      const obj = cfg && entitySlice(cfg, g.entityType, g.id);
+      g.name = entityName(g.entityType, obj, g.id);
+    }
+  }
+  return order.map(k => map.get(k));
+}
+
+function entitySlice(cfg, entityType, id) {
+  const sections = { supplier: 'suppliers', product: 'products', addon: 'addons', pack: 'packs' };
+  if (id && sections[entityType]) return (cfg[sections[entityType]] || {})[id];
+  return cfg[entityType];
 }
