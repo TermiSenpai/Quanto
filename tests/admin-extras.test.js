@@ -14,7 +14,9 @@ import { describe, test, expect } from 'vitest';
 import {
   renderCloudAuditList,
   renderSnapshotsList,
-  formatSnapshotLabel
+  formatSnapshotLabel,
+  renderDiffPreview,
+  renderAuditTab
 } from '../renderer/admin-extras.js';
 
 describe('formatSnapshotLabel', () => {
@@ -39,6 +41,7 @@ describe('renderCloudAuditList', () => {
   });
 
   test('renders user, Spanish action + entity label, and diff change rows', () => {
+    // Cloud diffs carry ENTITY-RELATIVE paths; entityType drives the labels.
     const html = renderCloudAuditList([
       {
         id: 2,
@@ -47,15 +50,35 @@ describe('renderCloudAuditList', () => {
         entityType: 'pack',
         entityId: 'crew',
         action: 'update',
-        diff: [{ path: 'packs.crew.name', before: 'A', after: 'B', kind: 'change' }],
+        diff: [{ path: 'name', before: 'A', after: 'B', kind: 'change' }],
         catalogVersion: 8
       }
     ]);
     expect(html).toContain('Mostrador-2');
     expect(html).toContain('editó');
     expect(html).toContain('Pack «crew»');
-    expect(html).toContain('packs.crew.name');
+    // Friendly humanized row (no raw dotted path).
+    expect(html).toContain('Nombre');
+    expect(html).toContain('«A»');
+    expect(html).toContain('«B»');
     expect(html).toContain('v8');
+  });
+
+  test('humanizes diff rows with the entry entityType', () => {
+    const html = renderCloudAuditList([
+      {
+        user: 'ana',
+        ts: '2026-06-16T10:00:00Z',
+        action: 'update',
+        entityType: 'supplier',
+        entityId: 'S1',
+        diff: [{ path: 'name', before: 'A', after: 'B', kind: 'change' }]
+      }
+    ]);
+    expect(html).toContain('Nombre');
+    expect(html).toContain('«A»');
+    expect(html).toContain('«B»');
+    expect(html).not.toContain('path');
   });
 
   test('GUARD: a malformed (raw string) diff renders verbatim, never crashes', () => {
@@ -109,5 +132,55 @@ describe('renderSnapshotsList', () => {
     expect(html).toContain('Restaurar esta versión');
     // Version label appears for the row.
     expect(html).toContain('v5 ·');
+  });
+});
+
+describe('renderDiffPreview', () => {
+  test('empty changes shows a Spanish hint', () => {
+    expect(renderDiffPreview([])).toContain('No hay cambios pendientes');
+  });
+
+  test('humanizes a whole-entity add (no JSON, no path)', () => {
+    const html = renderDiffPreview([
+      { path: 'suppliers.SUPPLIER_1', before: undefined, after: { name: 'Valento', web: '', notes: '' }, kind: 'add' }
+    ]);
+    expect(html).toContain('Nuevo');
+    expect(html).toContain('Proveedor');
+    expect(html).toContain('Valento');
+    expect(html).not.toContain('{');
+    expect(html).not.toContain('suppliers.SUPPLIER_1');
+  });
+
+  test('humanizes a field change (friendly label + formatted values)', () => {
+    const html = renderDiffPreview([
+      { path: 'products.BEAGLE.target_margin', before: 0.35, after: 0.4, kind: 'change' }
+    ]);
+    expect(html).toContain('Margen objetivo');
+    expect(html).toContain('35 %');
+    expect(html).toContain('40 %');
+    expect(html).not.toContain('target_margin');
+  });
+});
+
+describe('renderAuditTab', () => {
+  test('empty entries shows a Spanish hint', () => {
+    expect(renderAuditTab([])).toContain('No hay entradas de auditoría');
+  });
+
+  test('humanizes file-audit change rows from the full path', () => {
+    // File audit changes carry FULL paths; entityType is derived from them.
+    const html = renderAuditTab([
+      {
+        user: 'Mostrador-1',
+        ts: '2026-06-13T09:05:00.000Z',
+        app_version: '5.0.0',
+        changes: [{ path: 'packs.crew.name', before: 'A', after: 'B', kind: 'change' }]
+      }
+    ]);
+    expect(html).toContain('Mostrador-1');
+    expect(html).toContain('Nombre');
+    expect(html).toContain('«A»');
+    expect(html).toContain('«B»');
+    expect(html).not.toContain('packs.crew.name');
   });
 });

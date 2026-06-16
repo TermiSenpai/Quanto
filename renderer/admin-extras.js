@@ -10,6 +10,8 @@
 // to call them.
 // ============================================================
 
+import { humanizeChange, groupChanges, renderChangeGroup } from './change-format.js';
+
 // ------------------------------------------------------------
 // HTML escaping (kept local to avoid coupling to format.js)
 // ------------------------------------------------------------
@@ -17,13 +19,6 @@ function esc(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-function formatScalar(value) {
-  if (value === undefined || value === null) return '<em class="muted">∅</em>';
-  if (typeof value === 'string') return esc(JSON.stringify(value));
-  if (typeof value === 'number' || typeof value === 'boolean') return esc(value);
-  return esc(JSON.stringify(value));
 }
 
 function formatTimestamp(iso) {
@@ -68,8 +63,10 @@ export function renderAuditTab(entries) {
     const changes = Array.isArray(entry.changes) ? entry.changes : [];
     const changesHtml = changes.length === 0
       ? '<p class="hint">Sin cambios registrados.</p>'
+      // File audit carries FULL paths; pass no entityType so humanizeChange
+      // parses it. Wrap to avoid .map passing the index as the 2nd arg.
       : '<ul class="audit-changes">' +
-        changes.map(renderChangeRow).join('') +
+        changes.map(c => renderChangeRow(c)).join('') +
         '</ul>';
     html += `
       <article class="audit-entry">
@@ -87,30 +84,12 @@ export function renderAuditTab(entries) {
   return html;
 }
 
-function renderChangeRow(change) {
+// One friendly change row. `humanizeChange` derives the entity type
+// from the full path when `entityType` is omitted (file audit), and
+// uses the passed type for cloud rows (which carry relative paths).
+function renderChangeRow(change, entityType) {
   const kindClass = `audit-change--${esc(change.kind || 'change')}`;
-  const sign = change.kind === 'add' ? '+' : change.kind === 'remove' ? '−' : '~';
-  if (change.kind === 'add') {
-    return `<li class="audit-change ${kindClass}">
-      <span class="audit-change__sign">${sign}</span>
-      <code class="audit-change__path">${esc(change.path)}</code>
-      <span class="audit-change__after">${formatScalar(change.after)}</span>
-    </li>`;
-  }
-  if (change.kind === 'remove') {
-    return `<li class="audit-change ${kindClass}">
-      <span class="audit-change__sign">${sign}</span>
-      <code class="audit-change__path">${esc(change.path)}</code>
-      <span class="audit-change__before">${formatScalar(change.before)}</span>
-    </li>`;
-  }
-  return `<li class="audit-change ${kindClass}">
-    <span class="audit-change__sign">${sign}</span>
-    <code class="audit-change__path">${esc(change.path)}</code>
-    <span class="audit-change__before">${formatScalar(change.before)}</span>
-    <span class="audit-change__arrow">→</span>
-    <span class="audit-change__after">${formatScalar(change.after)}</span>
-  </li>`;
+  return `<li class="audit-change ${kindClass}">${esc(humanizeChange(change, entityType))}</li>`;
 }
 
 // ============================================================
@@ -158,10 +137,10 @@ function auditEntityLabel(entityType, entityId) {
  * @param {(Array|string|null)} diff
  * @returns {string} HTML for the entry body
  */
-function renderCloudDiff(diff) {
+function renderCloudDiff(diff, entityType) {
   if (Array.isArray(diff)) {
     if (diff.length === 0) return '<p class="hint">Sin cambios registrados.</p>';
-    return '<ul class="audit-changes">' + diff.map(renderChangeRow).join('') + '</ul>';
+    return '<ul class="audit-changes">' + diff.map(c => renderChangeRow(c, entityType)).join('') + '</ul>';
   }
   // Malformed (raw string) or missing: show it verbatim, do not throw.
   if (typeof diff === 'string' && diff.length > 0) {
@@ -195,7 +174,7 @@ export function renderCloudAuditList(entries) {
           <span class="audit-entry__ts">${esc(formatTimestamp(entry.ts))}</span>
           ${Number.isFinite(entry.catalogVersion) ? `<span class="audit-entry__ver">v${esc(entry.catalogVersion)}</span>` : ''}
         </header>
-        <div class="audit-entry__body">${renderCloudDiff(entry.diff)}</div>
+        <div class="audit-entry__body">${renderCloudDiff(entry.diff, entry.entityType)}</div>
       </article>
     `;
   }
@@ -263,10 +242,11 @@ export function renderDiffPreview(changes) {
   if (!changes || changes.length === 0) {
     return '<p class="hint">No hay cambios pendientes que guardar.</p>';
   }
-  const lines = changes.map(renderChangeRow).join('');
+  const groups = groupChanges(changes);
+  const n = changes.length;
   return `
-    <p>Vas a guardar <strong>${changes.length}</strong> cambio${changes.length === 1 ? '' : 's'} en el config:</p>
-    <ul class="audit-changes audit-changes--preview">${lines}</ul>
+    <p>Vas a guardar <strong>${n}</strong> cambio${n === 1 ? '' : 's'}:</p>
+    ${groups.map(renderChangeGroup).join('')}
   `;
 }
 
