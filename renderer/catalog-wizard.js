@@ -46,8 +46,7 @@ let editingId = null;  // current entity id in editor view
 let onDone = null;     // async (cfg) => void  (persist + boot app)
 
 export async function startCatalogWizard({ mode, userName, done }) {
-  cfg = await window.packprice.getEmptyConfig({ modificadoPor: userName });
-  if (cfg && cfg.company) cfg.company.name = '';
+  cfg = await window.packprice.getEmptyConfig({ modifiedBy: userName });
   stepIndex = 0; view = 'list'; editingId = null; onDone = done;
   el('catalog-wizard').dataset.mode = mode;
   bindNav();
