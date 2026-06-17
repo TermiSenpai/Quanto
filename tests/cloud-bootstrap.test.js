@@ -81,7 +81,7 @@ function makeBootstrap(client, overrides = {}) {
     cachePath,
     backupDir,
     userDataDir: tmpDir,
-    buildDefaultConfig,
+    schemaVersion: '4.0.0',
     appVersion: '5.0.0-test',
     now: NOW,
     timeoutMs: 5000,
@@ -407,25 +407,39 @@ describe('provision', () => {
   const PAYLOAD = { token: 'tok-secret', accountId: 'acc-1', user: 'Alberto' };
   const fullEntities = disassemble(buildDefaultConfig());
 
-  test('fresh account: creates the packprice base, migrates without backup, seeds', async () => {
+  test('fresh account: creates the packprice base, migrates without backup, does NOT seed', async () => {
     const { client, state } = provisionWorld();
     const { bootstrap, created } = makeBootstrap(client);
     const res = await bootstrap.provision(PAYLOAD);
 
-    expect(res).toEqual({ ok: true, databaseId: 'db-new', seeded: true });
+    expect(res).toEqual({ ok: true, databaseId: 'db-new', seeded: false });
     expect(created).toEqual([{ token: 'tok-secret', accountId: 'acc-1' }]);
     expect(state.createdDbName).toBe('packprice');
     expect(client.databaseId).toBe('db-new');
     // Migration applied and recorded.
     expect(state.executed).toContain(MIGRATIONS[0].sql);
     expect(state.ledger).toEqual(['0001_init']);
-    // Empty fresh base: no export, no backup file, but the seed ran.
+    // Empty fresh base: no export, no backup file, and no seed — the
+    // catalog arrives later via seedInitial() (first-run wizard).
     expect(state.exported).toBe(false);
     expect(fs.existsSync(backupDir)).toBe(false);
-    expect(state.seedInserts.length).toBeGreaterThan(0);
+    expect(state.seedInserts).toEqual([]);
     // Lock released at the end.
     expect(state.releaseCalls).toBe(1);
     expect(state.migratingSince).toBeNull();
+  });
+
+  test('seedInitial seeds the catalog from the provided config', async () => {
+    const { client, state } = provisionWorld();
+    const { bootstrap } = makeBootstrap(client);
+    const r = await bootstrap.seedInitial(SETTINGS, {
+      config: buildDefaultConfig(), // a complete v4 catalog
+      user: 'Tester'
+    });
+    expect(r.ok).toBe(true);
+    expect(r.seeded).toBe(true);
+    // The seed actually wrote rows into the fresh base.
+    expect(state.seedInserts.length).toBeGreaterThan(0);
   });
 
   test('existing populated base: backs up BEFORE migrating, verifies, does not reseed', async () => {
