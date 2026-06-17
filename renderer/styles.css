@@ -2156,6 +2156,106 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
   background: var(--border-subtle);
 }
 
+/* ----------------------------------------------------------
+   First-run catalog wizard (renderer/catalog-wizard.js)
+   Lives in #catalog-wizard.pantalla; reuses .wizard-steps from
+   the cloud wizard above but renders TEXT step labels, so the
+   #id-scoped rules below override the round numbered dots into a
+   row of labeled pill chips. Visual language mirrors the card
+   surfaces / tokens used across the app (no new tokens).
+   ---------------------------------------------------------- */
+#catalog-wizard {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 24px;
+}
+#catalog-wizard .wizard-shell {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  background: var(--surface-secondary, #FFFFFF);
+  border: 1px solid var(--border-subtle, #E4E9F2);
+  border-radius: var(--radius-lg, 16px);
+  box-shadow: var(--shadow-card);
+  padding: 32px;
+}
+#catalog-wizard .wizard-head { margin-bottom: 4px; }
+#catalog-wizard .wizard-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--fg-primary, #0F1A2B);
+  letter-spacing: -0.01em;
+}
+#catalog-wizard .wizard-subtitle {
+  color: var(--fg-secondary, #5A6478);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 6px 0 0;
+}
+
+/* Stepper: row of labeled pill chips (overrides the cloud round dots). */
+#catalog-wizard .wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 20px 0 0;
+}
+#catalog-wizard .wizard-steps__dot {
+  /* Reset the round 28px dot from the cloud wizard back to a text chip. */
+  width: auto;
+  height: auto;
+  border-radius: var(--radius-pill, 9999px);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  background: var(--surface-tertiary, #F7F9FC);
+  color: var(--fg-secondary, #5A6478);
+  border: 1px solid var(--border-subtle, #E4E9F2);
+}
+#catalog-wizard .wizard-steps__dot.is-current {
+  background: var(--brand-500, #3D5AF1);
+  color: var(--fg-inverse, #FFFFFF);
+  border-color: var(--brand-500, #3D5AF1);
+}
+#catalog-wizard .wizard-steps__dot.is-done {
+  background: var(--brand-400, #6C82FF);
+  color: var(--fg-inverse, #FFFFFF);
+  border-color: var(--brand-400, #6C82FF);
+}
+
+#catalog-wizard .wizard-body { margin: 24px 0; }
+
+#catalog-wizard .wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-subtle, #E4E9F2);
+}
+
+/* Company step: simple stacked, full-width fields. The bare <input>
+   already inherits the app's base input look (border/padding/radius/
+   focus ring); we only force full width + consistent spacing. */
+#catalog-wizard .wizard-company .field {
+  display: block;
+  margin-bottom: 16px;
+}
+#catalog-wizard .wizard-company .field span {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-secondary, #5A6478);
+  margin-bottom: 6px;
+}
+#catalog-wizard .wizard-company .field input {
+  width: 100%;
+}
+
 .cloud-step { display: flex; flex-direction: column; gap: 20px; }
 
 .cloud-progress {
