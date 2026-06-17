@@ -399,6 +399,33 @@
     </main>
   </section>
 
+  <!-- ================== PANTALLA: ASISTENTE DE CATÁLOGO ================== -->
+  <!-- First-run CATALOG wizard: build the whole catalog from blank.
+       Shown after storage (local/cloud) is ready, before the app.
+       Hidden via the `hidden` class (the repo's show()/hide() convention).
+       Ids are load-bearing for renderer/catalog-wizard.js (Task 7). -->
+  <section id="catalog-wizard" class="pantalla hidden">
+    <div class="wizard-shell">
+      <header class="wizard-head">
+        <h1 class="wizard-title">Configura tu catálogo</h1>
+        <p class="wizard-subtitle">Introduce tus costes y tu catálogo. Nada viene rellenado: todo parte de tu negocio.</p>
+        <ol id="catwiz-steps" class="wizard-steps" aria-label="Pasos"></ol>
+      </header>
+
+      <!-- The current step's editor renders here (reuses the admin editor). -->
+      <div id="catwiz-body" class="wizard-body"></div>
+
+      <!-- Per-step blocking errors. -->
+      <p id="catwiz-error" class="alert alert-error hidden"></p>
+
+      <footer class="wizard-nav">
+        <button id="btn-catwiz-back" class="btn btn-secondary" type="button">Atrás</button>
+        <button id="btn-catwiz-next" class="btn btn-primary" type="button">Siguiente</button>
+        <button id="btn-catwiz-finish" class="btn btn-primary hidden" type="button">Crear catálogo</button>
+      </footer>
+    </div>
+  </section>
+
   <!-- ================== PANTALLA: ERROR DE CARGA ================== -->
   <section id="pantalla-error" class="pantalla pantalla-centro hidden">
     <div class="error-card">
