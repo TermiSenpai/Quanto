@@ -60,6 +60,7 @@ import {
   specialSizeBars, rangeForPeriod
 } from './stats-view.js';
 import { enhanceDropdowns } from './dropdown.js';
+import { startCatalogWizard } from './catalog-wizard.js';
 
 // ============================================================
 // Module state
@@ -348,8 +349,8 @@ async function startWizardLocal() {
   btn.textContent = 'Comprobando ruta…';
   try {
     // The field holds a folder; resolve it to <folder>/config.js in main
-    // (the renderer has no path module). The file is reused if present,
-    // created with defaults if not (handled by ensureConfigFileReady).
+    // (the renderer has no path module). The file is reused if present;
+    // an empty folder triggers the first-run catalog wizard (below).
     const resolved = await window.packprice.folderConfigPath(folder);
     if (!resolved || !resolved.ruta) {
       el('wiz-local-error').textContent = 'No se pudo resolver la carpeta seleccionada.';
@@ -358,11 +359,11 @@ async function startWizardLocal() {
     }
     const filePath = resolved.ruta;
 
-    const ok = await ensureConfigFileReady(name, filePath, (msg) => {
+    const res = await ensureConfigFileReady(name, filePath, (msg) => {
       el('wiz-local-error').textContent = msg;
       show('wiz-local-error');
     });
-    if (!ok) return;
+    if (!res.ready && !res.needsWizard) return;
 
     // Persist file mode explicitly (data_source: 'file') so a later
     // boot never re-shows the wizard.
@@ -373,6 +374,24 @@ async function startWizardLocal() {
       show('wiz-local-error');
       return;
     }
+
+    if (res.needsWizard) {
+      // Empty folder: build the catalog from blank, then create config.js.
+      await startCatalogWizard({
+        mode: 'file',
+        userName: name,
+        done: async (builtCfg) => {
+          const created = await window.packprice.createConfig({
+            ruta: filePath, config: builtCfg, modificadoPor: name
+          });
+          if (!created.ok) throw new Error(created.error || 'No se pudo crear el archivo.');
+          hide('catalog-wizard');
+          await loadConfigAndShowApp();
+        }
+      });
+      return;
+    }
+
     hide('setup-wizard');
     await loadConfigAndShowApp();
   } finally {
@@ -382,38 +401,27 @@ async function startWizardLocal() {
 }
 
 /**
- * Shared file-mode setup helper: ensures the config exists (offering to
- * create it with defaults) or is readable, reporting plain errors via
- * `onError`. Returns true when the path is ready to use.
+ * Shared file-mode setup helper: a MISSING-but-writable path signals the
+ * first-run catalog wizard (the caller launches it and persists the built
+ * config); an existing path is checked readable. Plain errors via `onError`.
+ * @returns { ready, needsWizard? } — ready:false + needsWizard:true means
+ *          "run the wizard"; ready:false alone means a reported failure.
  */
 async function ensureConfigFileReady(name, filePath, onError) {
   const exist = await window.packprice.configExists(filePath);
   if (!exist.existe) {
     if (!exist.escribible) {
       onError('No se puede crear el archivo en esa ruta. Comprueba que el NAS está accesible y tienes permisos de escritura.');
-      return false;
+      return { ready: false };
     }
-    const option = await window.packprice.confirm({
-      titulo: 'Archivo no encontrado',
-      mensaje: '¿Crear config.js con los valores por defecto?',
-      detalle: `No se encontró un archivo de configuración en:\n${filePath}\n\nSe creará uno nuevo con los valores por defecto del plan.`,
-      botones: ['Crear con valores por defecto', 'Cancelar'],
-      defaultId: 0
-    });
-    if (option !== 0) return false;
-    const created = await window.packprice.createDefaultConfig({ ruta: filePath, modificadoPor: name });
-    if (!created.ok) {
-      onError(`No se pudo crear el archivo: ${created.error}`);
-      return false;
-    }
-    return true;
+    return { ready: false, needsWizard: true };
   }
   const r = await window.packprice.readConfig(filePath);
   if (!r.ok) {
     onError(`No se pudo leer el archivo: ${r.error}`);
-    return false;
+    return { ready: false };
   }
-  return true;
+  return { ready: true };
 }
 
 // --- Cloud branch -------------------------------------------------
@@ -583,13 +591,25 @@ async function cloudProvision(accountIdArg) {
     return;
   }
 
-  msg.textContent = r.seeded ? 'Base creada — conectando…' : 'Encontrada — conectando…';
+  msg.textContent = 'Base lista — configura tu catálogo…';
 
   // main has already persisted data_source: 'cloud' + the connection.
-  // Re-read settings so SETTINGS reflects cloud mode, then boot.
+  // Re-read settings so SETTINGS reflects cloud mode. provisionInFlight was
+  // cleared in the finally above, so the wizard's UI is not stranded.
   SETTINGS = await window.packprice.readSettings();
-  hide('setup-wizard');
-  await loadCloudAndShowApp();
+
+  // Provision only created an EMPTY, migrated DB. Build the catalog from
+  // blank in the wizard, then seed it into the cloud before booting.
+  await startCatalogWizard({
+    mode: 'cloud',
+    userName: (wizardCloud && wizardCloud.userName) || (SETTINGS && SETTINGS.user_name) || '',
+    done: async (builtCfg) => {
+      const seeded = await window.packprice.seedInitialCatalog({ config: builtCfg });
+      if (!seeded.ok) throw new Error(seeded.error || 'No se pudo crear el catálogo en la nube.');
+      hide('catalog-wizard');
+      await loadCloudAndShowApp();
+    }
+  });
 }
 
 /** Plain-language message for a failed provision (never an HTTP code). */
@@ -708,29 +728,24 @@ async function showErrorScreen(detail) {
     } else {
       btnCreate.classList.add('hidden');
     }
+    // No default catalog any more: this recovery path launches the same
+    // first-run wizard, then writes the catalog the user builds from blank.
+    btnCreate.textContent = 'Configurar catálogo';
     btnCreate.onclick = async () => {
-      const option = await window.packprice.confirm({
-        titulo: 'Crear config por defecto',
-        mensaje: '¿Crear config.js con los valores por defecto?',
-        detalle: `Ruta: ${SETTINGS.config_path}`,
-        botones: ['Crear', 'Cancelar'],
-        defaultId: 0
+      await startCatalogWizard({
+        mode: 'file',
+        userName: SETTINGS.user_name,
+        done: async (builtCfg) => {
+          const created = await window.packprice.createConfig({
+            ruta: SETTINGS.config_path,
+            config: builtCfg,
+            modificadoPor: SETTINGS.user_name
+          });
+          if (!created.ok) throw new Error(created.error || 'No se pudo crear el archivo.');
+          hide('catalog-wizard');
+          await loadConfigAndShowApp();
+        }
       });
-      if (option !== 0) return;
-
-      const created = await window.packprice.createDefaultConfig({
-        ruta: SETTINGS.config_path,
-        modificadoPor: SETTINGS.user_name
-      });
-      if (!created.ok) {
-        await window.packprice.showError({
-          titulo: 'Error',
-          mensaje: 'No se pudo crear el archivo',
-          detalle: created.error
-        });
-        return;
-      }
-      await loadConfigAndShowApp();
     };
   }
 
@@ -4699,12 +4714,32 @@ async function saveSettings() {
   const filePath = resolved.ruta;
 
   if (filePath !== SETTINGS.config_path) {
-    // Same contract as the wizard: reuse an existing config.js, or offer
-    // to create one with defaults if the folder doesn't have it yet.
-    const ok = await ensureConfigFileReady(name, filePath, (msg) => {
+    // Same contract as the wizard: reuse an existing config.js, or build a
+    // fresh catalog through the first-run wizard if the folder has none.
+    const res = await ensureConfigFileReady(name, filePath, (msg) => {
       window.packprice.showError({ titulo: 'No se pudo usar la carpeta', mensaje: msg });
     });
-    if (!ok) return;
+    if (!res.ready && !res.needsWizard) return;
+
+    if (res.needsWizard) {
+      // Empty folder: persist the new name/path, then build the catalog.
+      await window.packprice.writeSettings({ user_name: name, config_path: filePath });
+      SETTINGS = await window.packprice.readSettings();
+      closeSettings();
+      await startCatalogWizard({
+        mode: 'file',
+        userName: name,
+        done: async (builtCfg) => {
+          const created = await window.packprice.createConfig({
+            ruta: filePath, config: builtCfg, modificadoPor: name
+          });
+          if (!created.ok) throw new Error(created.error || 'No se pudo crear el archivo.');
+          hide('catalog-wizard');
+          await loadConfigAndShowApp();
+        }
+      });
+      return;
+    }
   }
 
   // Toggles -> localStorage
