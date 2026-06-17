@@ -583,6 +583,23 @@ ipcMain.handle('cloud:provision', async (event, payload) => {
   return result;
 });
 
+ipcMain.handle('catalog:seed-initial', async (event, payload) => {
+  const settings = readSettings();
+  const rendererCfg = (payload && payload.config) || null;
+  if (!rendererCfg) return { ok: false, error: 'Falta el catálogo a sembrar.' };
+  try {
+    // Re-attach the placeholder password + validate before seeding, same
+    // guard the file path uses. disassemble() (inside seedInitial) drops the
+    // admin section for the cloud tables.
+    const full = injectAdminPassword(rendererCfg, ADMIN_PASSWORD_PLACEHOLDER);
+    full.version = SCHEMA_VERSION;
+    validateConfigSchema(full);
+    return await cloudBootstrap.seedInitial(settings, { config: full, user: cloudAuthor(settings) });
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('catalog:load', () => cloudBootstrap.loadCatalog(readSettings()));
 
 ipcMain.handle('catalog:check-version', () => cloudBootstrap.checkVersion(readSettings()));

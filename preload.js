@@ -133,6 +133,9 @@ contextBridge.exposeInMainWorld('packprice', {
   // configs returned carry no token and no admin section.
   testCloudToken:      (data) => ipcRenderer.invoke('cloud:test-token', data),
   provisionCloud:      (data) => ipcRenderer.invoke('cloud:provision', data),
+  // Seed the freshly-provisioned (empty) D1 with the wizard-built catalog.
+  // The config is renderer-shaped; main validates it before seeding.
+  seedInitialCatalog:  (data) => ipcRenderer.invoke('catalog:seed-initial', data),
   loadCatalog:         ()     => ipcRenderer.invoke('catalog:load'),
   checkCatalogVersion: ()     => ipcRenderer.invoke('catalog:check-version'),
   refreshCatalog:      ()     => ipcRenderer.invoke('catalog:refresh'),
