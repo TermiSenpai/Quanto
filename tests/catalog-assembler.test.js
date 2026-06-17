@@ -7,7 +7,7 @@
 // ============================================================
 import { describe, test, expect } from 'vitest';
 import { disassemble, assemble } from '../lib/catalog-assembler.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { buildFullConfigV4 as buildDefaultConfig } from './fixtures/config-v4-full.js';
 import { collectConfigErrors, validateConfigSchema } from '../lib/config-schema.js';
 
 describe('disassemble', () => {

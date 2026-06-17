@@ -42,13 +42,15 @@
 
 > **Nota (esquema v4)**: a partir de v4 todos estos parámetros, los productos, los proveedores, los packs y los complementos son **editables desde el modo admin**. El antiguo "Buffer 3XL" fijo de 0,40 €/pack desaparece; el coste 3XL pasa a ser un coste real por prenda configurable en cada producto (`extra_cost_3xl`). Ver §2.4 y §15 (historial v4).
 
+> **Nota (primer arranque, sin semilla)**: ya **no existe ningún catálogo por defecto**. En una instalación nueva (modo archivo sin `config.js` o nube con D1 recién creada y vacía) un **asistente guiado** recoge todo el catálogo desde cero — costes, tramos, proveedores, productos, packs, complementos y empresa, con cada campo en blanco. **Todos los valores de esta tabla los teclea el usuario en el asistente** (incluido el DTF por cara: 0,30/0,60 ya no se siembra). El asistente solo persiste cuando el config cumple los mínimos del esquema. Los números de esta tabla son los del cliente nº 1 a modo de referencia, no una semilla. Ver §11 (V5) y el diseño en `docs/superpowers/specs/2026-06-16-first-run-catalog-wizard-design.md`.
+
 **Sobre el IVA**: el IVA soportado en compras (Roly, DTF, envío) NO se incluye como coste al calcular el margen. Se deduce trimestralmente en el Modelo 303 contra el IVA repercutido. Lo que sí afecta es la tesorería entre que pagas Roly con IVA y cobras al cliente con IVA repercutido.
 
 ### 2.2. Productos y proveedores
 
 En v4 cada **producto** (garment) tiene una `category`, un coste 3XL propio (`extra_cost_3xl`), un margen objetivo, su propia tabla de PVP (caras × tramo) y una lista de **proveedores** (`suppliers`), de los cuales exactamente uno es el predeterminado (`is_default`). El precio del proveedor predeterminado es el que alimenta el coste. Los proveedores se registran aparte en la sección `suppliers` (Roly y, en el futuro, otros).
 
-Productos sembrados por defecto (proveedor predeterminado: Roly):
+Productos de referencia del cliente nº 1 (proveedor predeterminado: Roly) — son un ejemplo del modelo, no una semilla; en una instalación nueva los teclea el usuario en el asistente:
 
 | Producto | Categoría | Ref. Roly    | Precio   | Coste 3XL | Uso                  |
 | -------- | --------- | ------------ | -------- | --------- | -------------------- |
@@ -95,7 +97,7 @@ Los extras opcionales (nombre, manga corta, manga larga, …) se configuran en l
 
 ## 3. Packs comerciales
 
-Packs sembrados por defecto. Mínimo 10 unidades en todos. Pedidos por debajo de 10 quedan **fuera de la app**, fuera de la oferta peña, y se cotizan como "mini-grupo" manualmente con precios más altos para compensar el coste fijo de gestión.
+Packs de referencia del cliente nº 1 (no una semilla por defecto: en una instalación nueva los crea el usuario en el asistente de primer arranque). Mínimo 10 unidades en todos. Pedidos por debajo de 10 quedan **fuera de la app**, fuera de la oferta peña, y se cotizan como "mini-grupo" manualmente con precios más altos para compensar el coste fijo de gestión.
 
 > **Modelo de packs en v4**: cada pack declara un `pricing_mode`. Los packs **`bundle`** (como el Pack Peña) se venden como unidad con su propia tabla `bundle_prices` indexada por combinación de opciones × tramo; el input es el número de packs. Los packs **`components`** (camisetas, sudaderas, mixto, personalizado) facturan cada componente al PVP de su producto; el input es la cantidad por componente y el tramo se calcula sobre la suma. Las opciones (caras, capucha, …) se declaran en la config; el pack personalizado usa `free_components` para añadir líneas libres. Un solo motor genérico (`calculatePack`) cubre todos los casos; ya no hay calculadoras codificadas por tipo de pack. Todos los packs son **editables desde el modo admin** en v4.
 
@@ -476,7 +478,8 @@ El `.exe` resultante: `dist/Quanto-2.0.0-portable.exe`.
 3. Sesión 2 (cont.) — Implementación V2 Electron. Filesystem real, settings local en `%APPDATA%`, detección de conflictos por hash, backups automáticos, diálogos nativos.
 4. Tier-1 — Profesionalidad real: validación de esquema, logs (`electron-log`), auditoría con diff, historial de presupuestos, exportación PDF. Inicio de la migración del código a inglés.
 5. **Esquema y motor v4 — Configurabilidad total.** El catálogo entero pasa a ser editable desde el admin: nuevas secciones `suppliers`, `products` (sustituye `roly_models`, con tabla de precios propia, multi-proveedor y `extra_cost_3xl`) y `addons` (sustituye los `extra_*_eur` fijos). Las cuatro calculadoras codificadas se unifican en un solo `calculatePack` dirigido por `pricing_mode` (`bundle`/`components`) y opciones declaradas. El buffer 3XL fijo desaparece (coste 3XL real por producto, MAX sobre el pedido, no facturado). PVP recomendado (coste + margen objetivo + redondeo a `x,95`). Correcciones: guard de tramo nulo, `margen %` sobre la base neta, tallas grandes acotadas al pedido. Migración v3→v4 idempotente (`lib/migrations.js`). Endurecimiento de seguridad (lista blanca de rutas IPC, validación de payloads, límite de intentos admin, escrituras atómicas). Migración del tooling a **pnpm**.
-6. Pendiente — Pruebas locales con `pnpm dev`, validación de comportamiento, ajuste fino de PVP de packs nuevos, distribución del `.exe` al segundo PC.
+6. **Primer arranque desde cero (sin semilla).** Se elimina el catálogo por defecto (`buildDefaultConfig` sale del producto). `config.default.js` exporta solo la versión de esquema y `buildEmptyConfig` (forma válida, colecciones vacías y `parameters` en blanco). En modo archivo (sin `config.js`) y en nube (D1 recién creada y vacía) un **asistente guiado** (`renderer/catalog-wizard.js`) recoge todo el catálogo paso a paso — Costes → Tramos → Proveedores → Productos → Packs → Complementos → Empresa — con cada campo en blanco y validación de mínimos por paso (`renderer/wizard-validation.js`), reutilizando los formularios del editor admin. El config se ensambla en memoria y solo se persiste al pasar `validateConfigSchema` (archivo: `config:create` atómico + backup; nube: provisión sin seed + `catalog:seed-initial`). El antiguo catálogo del cliente nº 1 se conserva como fixture de tests (`tests/fixtures/config-v4-full.js`). Sin botón de "cargar ejemplo". Diseño: `docs/superpowers/specs/2026-06-16-first-run-catalog-wizard-design.md`.
+7. Pendiente — Pruebas locales con `pnpm dev`, validación de comportamiento, ajuste fino de PVP de packs nuevos, distribución del `.exe` al segundo PC.
 
 ---
 

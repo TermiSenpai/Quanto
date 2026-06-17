@@ -13,7 +13,7 @@ import {
   seedCatalog
 } from '../lib/cloud-catalog.js';
 import { disassemble } from '../lib/catalog-assembler.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { buildFullConfigV4 as buildDefaultConfig } from './fixtures/config-v4-full.js';
 
 const META_ROW = {
   id: 1, catalog_version: 7, schema_version: 1, min_app_version: '5.0.0',

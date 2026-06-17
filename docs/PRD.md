@@ -40,8 +40,8 @@ Consecuencias que obligan a todo lo demás:
    **configuración** (catálogo, parámetros), nunca ramas de código por
    cliente. Es la extensión natural del v4 "el catálogo es dato".
 4. **El taller de Guadalajara pasa a ser el cliente nº 1** — no el centro del
-   producto. Sus números viven en *sus* datos, no en el código ni en la
-   semilla (R16).
+   producto. Sus números viven en *sus* datos, no en el código: no hay semilla
+   por defecto, el catálogo se construye desde cero con el asistente (R21).
 5. **Transparencia total de red.** Fuera del almacén del cliente, la app solo
    habla con: (a) GitHub Releases para comprobar versión (R15, desactivable) y
    (b) el servicio de informes de error (R19, desactivable, **jamás contiene
@@ -86,11 +86,12 @@ Todos son perfiles técnicos básicos. UI en **español**; sin formación previa
 | R13b | **Estado del presupuesto** | Cualquier trabajador marca pendiente / aceptado / rechazado desde el historial. Al abrir la app, recordatorio discreto: presupuestos sin estado con más de 7 días y los que caducan esta semana |
 | R14 | **Pantalla de estadísticas** | Gráficos (SVG propio, sin librerías) sobre los datos de todos los PCs: packs más presupuestados, conversión, tramos, evolución temporal, margen real vs objetivo, productos/addons más usados, desviación sobre el PVP recomendado y frecuencia de tallas especiales |
 | R15 | **Distribución y actualización por GitHub** | Repo público; `main` es producción: cada release publica el `.exe` en GitHub Releases. La app comprueba al arrancar (si hay red) si existe versión nueva y lo avisa con enlace de descarga — sin auto-instalación; comprobación desactivable en ajustes |
-| R16 | **Semilla neutra de demo** | `config.default.js` deja de contener el catálogo real del taller: la semilla es un catálogo de demostración genérico y claramente marcado («datos de ejemplo — edítalos»). **Antes de quitarlo, el catálogo real se archiva** (copia fechada en el NAS del taller, fuera del repo) para no perder los datos — además de que ya viven en su `config.js` de producción y sus backups |
+| R16 | **Semilla neutra de demo** *(sustituido por R21, 2026-06-16)* | Resuelto de forma más fuerte: ya no hay semilla **de ningún tipo** — ni real ni demo. `config.default.js` no contiene catálogo (solo versión de esquema + `buildEmptyConfig`); el catálogo se construye desde cero con el asistente (R21). Se mantiene el principio de archivar el catálogo real del taller fuera del repo (queda como fixture de tests, `tests/fixtures/config-v4-full.js`, además de su `config.js` de producción y backups) |
 | R17 | **Soporte a ciegas** | Manual de usuario (instalación, copias de seguridad, restauración, token, problemas frecuentes) + botón «Exportar diagnóstico» en ajustes: zip con logs, versión de app y esquema, SO y settings **sin token** — el cliente decide si lo comparte |
 | R18 | **Paridad de backends garantizada** | La misma batería de tests de contrato corre contra el adaptador `file` y el `d1`: ambas rutas dan idénticas garantías (conflictos, versiones, auditoría). Un bug que solo existe en un backend es un bug de la suite |
 | R19 | **Informes de error en tiempo real** | Los errores no controlados del main process se envían automáticamente a un servicio de errores (protocolo Sentry-compatible, sin SDK — `fetch` propio): el desarrollador se entera **antes** que el cliente. Contenido estricto: stack trace, código de error, versión de app y esquema, SO — **nunca precios, clientes ni catálogo**. Desactivable en ajustes y declarado en el manual |
 | R20 | **Plantillas de presupuesto PDF** | 6 plantillas integradas (Clásica, Moderna, Compacta, Detallada, Corporativa, Formulario) seleccionables en ajustes con vista previa. Las que usan color exponen un **color de marca configurable por la empresa** (dato en `company`, con derivados oscuro/suave calculados). Motor de plantillas propio estilo QWeb (HTML+CSS con directivas declarativas, sin librerías). Usuarios con conocimientos pueden crear plantillas personalizadas, que se guardan en el almacén compartido de la empresa (todos sus PCs imprimen igual); se sanean al cargar (sin scripts ni recursos externos) |
+| R21 | **Onboarding del catálogo desde cero (sin semilla)** | Una instalación nueva **no parte de ningún catálogo por defecto** (sustituye a R16): un **asistente guiado** construye el catálogo en blanco, en **modo archivo y nube por igual**. Pasos en orden — Costes, Tramos, Proveedores, Productos, Packs, Complementos (opcional), Empresa (opcional) —, cada campo vacío y obligatorio; el DTF por cara y todos los costes los teclea el usuario, no se siembran. Bloqueo de avance por mínimo de paso; el config se ensambla en memoria y solo se persiste al pasar `validateConfigSchema`. Sin botón de «cargar ejemplo» |
 
 ### 3.3 Fuera de alcance (decidido, no olvidado)
 
@@ -135,7 +136,7 @@ para que no se pierdan:
 
 | # | Tarea de release | Detalle |
 |---|---|---|
-| R16 | **Semilla demo neutra** (tarea del propietario, no de código) | `config.default.js` contiene hoy el catálogo real del taller (cliente nº 1) y es a la vez el fixture que fija los importes exactos de `tests/calculo.test.js` y otros. Neutralizarlo es una **tarea de release**, no un cambio de la v5: (1) el propietario **archiva antes** el `config.js`/catálogo real a `\\NAS\…\archivo\` (paso de operaciones, principio rector §1b); (2) se sustituye `config.default.js` por un catálogo demo genérico marcado «datos de ejemplo — edítalos»; (3) se re-fijan los importes de los tests al nuevo seed (PR propio y acotado). Está atada a **D4** (qué números se publican), aún pendiente. **No se toca el seed en la v5.** Plan: `planes/v5-impl-plan-7-producto.md` §0 |
+| R16 | **Semilla demo neutra** — *resuelto en código por R21 (2026-06-16), ya no es tarea del propietario* | Se eliminó el catálogo por defecto por completo: `config.default.js` ya no contiene catálogo (solo versión de esquema + `buildEmptyConfig`), así que **no queda catálogo real que neutralizar para publicar**. El catálogo del cliente nº 1 se movió al fixture de tests `tests/fixtures/config-v4-full.js` (`buildFullConfigV4`), que sigue fijando los importes exactos de `tests/calculo.test.js`. Una instalación nueva construye el catálogo desde cero con el asistente (R21). Queda solo el paso de operaciones de archivar el `config.js` real del taller fuera del repo (principio rector §1b). Independiente ya de **D4** en lo tocante al seed |
 | — | **`GITHUB_REPO` real** | El check de versión (R15) usa la constante `GITHUB_REPO` de `main.js` (hoy `'xkoistudio/packprice'`, **placeholder**). Antes de publicar la primera release, el propietario confirma el `owner/repo` real del repositorio público y, si difiere, lo ajusta. El DSN de informes de error (R19) es del desarrollador y ya está fijado |
 | — | **Titular del copyright en `LICENSE`** | `LICENSE` (Apache-2.0) en la raíz; confirmar la línea de copyright (`© xkoistudio`) con el propietario antes de abrir el repo |
 
@@ -197,6 +198,16 @@ para que no se pierdan:
   tiempo real** (R19) como excepción declarada y desactivable a la regla de
   no-telemetría — nunca datos de negocio; plantillas PDF (R20) con motor
   propio estilo QWeb y plantillas personalizadas como dato compartido.
+- **2026-06-16** — **Onboarding del catálogo desde cero (R21, enmienda R16).**
+  Se elimina la semilla por defecto: `config.default.js` deja de contener
+  catálogo (solo versión de esquema + `buildEmptyConfig`). Una instalación
+  nueva — modo archivo (sin `config.js`) o nube (D1 recién aprovisionada y
+  vacía) — construye el catálogo en blanco con un asistente guiado de 7 pasos
+  (`renderer/catalog-wizard.js`), que reutiliza los formularios del editor admin
+  y solo persiste al pasar `validateConfigSchema`. El antiguo catálogo del
+  cliente nº 1 pasa a ser fixture de tests. R16 (semilla demo neutra) queda
+  resuelto de forma más fuerte y deja de ser tarea de release del propietario.
+  Diseño: `docs/superpowers/specs/2026-06-16-first-run-catalog-wizard-design.md`.
 - **2026-06-13** — **Cierre de la v5 (`5.0.0-beta`).** Implementados R6–R20
   (almacenamiento local/nube sin servidor, asistente, sin gate de admin,
   auditoría + rollback, presupuestos con cliente + estados + recordatorio,

@@ -27,7 +27,11 @@ contextBridge.exposeInMainWorld('packprice', {
 
   // --- Config existence / creation ---
   configExists:        (path)  => ipcRenderer.invoke('config:exists', path),
-  createDefaultConfig: (data)  => ipcRenderer.invoke('config:create-default', data),
+  // Empty schema-shaped scaffold for the first-run wizard (renderer-shaped:
+  // has_password, no raw password). The renderer fills it step by step.
+  getEmptyConfig:      ()      => ipcRenderer.invoke('config:empty'),
+  // Persist a wizard-built config to a NEW file (validated + atomic + dir-made).
+  createConfig:        (data)  => ipcRenderer.invoke('config:create', data),
 
   // --- Read/write the config on the NAS ---
   readConfig:        (path)  => ipcRenderer.invoke('config:read', path),
@@ -129,6 +133,9 @@ contextBridge.exposeInMainWorld('packprice', {
   // configs returned carry no token and no admin section.
   testCloudToken:      (data) => ipcRenderer.invoke('cloud:test-token', data),
   provisionCloud:      (data) => ipcRenderer.invoke('cloud:provision', data),
+  // Seed the freshly-provisioned (empty) D1 with the wizard-built catalog.
+  // The config is renderer-shaped; main validates it before seeding.
+  seedInitialCatalog:  (data) => ipcRenderer.invoke('catalog:seed-initial', data),
   loadCatalog:         ()     => ipcRenderer.invoke('catalog:load'),
   checkCatalogVersion: ()     => ipcRenderer.invoke('catalog:check-version'),
   refreshCatalog:      ()     => ipcRenderer.invoke('catalog:refresh'),

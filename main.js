@@ -28,7 +28,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const { buildDefaultConfig } = require('./config.default');
+const { SCHEMA_VERSION, ADMIN_PASSWORD_PLACEHOLDER, buildEmptyConfig } = require('./config.default');
 const {
   validateConfigShape,
   stripAdminPassword,
@@ -112,7 +112,7 @@ const cloudBootstrap = createCloudBootstrap({
   // The offline quote outbox lives under <userData>/cache/ (next to the
   // catalog cache); the bootstrap drains it on every successful sync.
   userDataDir: SETTINGS_DIR,
-  buildDefaultConfig,
+  schemaVersion: SCHEMA_VERSION,
   appVersion: app.getVersion(),
   // Dropped cloud errors (cache fallback, lock-release throws) are
   // logged here so they are never silently swallowed (hard rule §4).
@@ -183,36 +183,13 @@ function isPathWritable(filePath) {
  * Returns a candidate path WITHOUT touching the filesystem. It is
  * only a suggestion to show on the welcome screen. Real existence
  * and writability are checked when the user clicks "Start" (in
- * `config:exists` and `config:create-default`).
+ * `config:exists`).
  *
  * We do not `fs.existsSync` here because on unreachable UNC paths
  * Windows can take tens of seconds, which would block the app boot.
  */
 function suggestCandidatePath() {
   return CONFIG_PATH_CANDIDATES[0];
-}
-
-/**
- * Creates the config.js file with default (v3) values at the given
- * path. Does not overwrite if it already exists.
- *
- * @param {string} filePath
- * @param {object} [meta] - { modified_by }
- * @returns {object} { creado: boolean, config, ruta, motivo? }
- */
-function createDefaultConfigFile(filePath, meta = {}) {
-  if (fs.existsSync(filePath)) {
-    return { creado: false, motivo: 'ya_existe', ruta: filePath };
-  }
-
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  const config = buildDefaultConfig(meta);
-  writeConfigAtomic(filePath, config);
-  return { creado: true, config, ruta: filePath };
 }
 
 /**
@@ -399,10 +376,10 @@ function mergeWithCurrentPassword(filePath, configFromRenderer) {
     const onDisk = migrateConfig(readConfigFromFile(filePath));
     currentPassword = (onDisk.admin && onDisk.admin.password) || null;
   } catch (_) {
-    // New or unreadable file: fall back to the default. We don't
-    // silence by habit; it's the only recovery that doesn't break
-    // the in-progress admin edit.
-    currentPassword = buildDefaultConfig().admin.password;
+    // No prior file / unreadable: there is no default config anymore. The
+    // admin gate is removed; fall back to the dead placeholder the schema
+    // still requires.
+    currentPassword = ADMIN_PASSWORD_PLACEHOLDER;
   }
   return injectAdminPassword(migrateConfig(configFromRenderer), currentPassword);
 }
@@ -470,22 +447,40 @@ ipcMain.handle('config:exists', (event, ruta) => {
   }
 });
 
-// --- Create config with defaults ---
+// --- Empty scaffold for the first-run wizard (renderer-shaped) ---
+ipcMain.handle('config:empty', (event, payload) => {
+  const modifiedBy = (payload && (payload.modificadoPor ?? payload.modifiedBy)) || undefined;
+  // stripAdminPassword swaps the raw password for has_password=true, the
+  // shape the renderer/admin editor expects.
+  return stripAdminPassword(buildEmptyConfig({ modified_by: modifiedBy }));
+});
 
-ipcMain.handle('config:create-default', (event, payload) => {
+// --- Create a NEW config file from the wizard-built config ---
+ipcMain.handle('config:create', (event, payload) => {
   const filePath = payload.ruta ?? payload.path;
   const modifiedBy = payload.modificadoPor ?? payload.modifiedBy;
+  const rendererCfg = payload.config;
   try {
-    const r = createDefaultConfigFile(filePath, { modified_by: modifiedBy });
-    if (!r.creado) {
-      return { ok: false, motivo: r.motivo, error: 'El archivo ya existe en esa ruta' };
+    if (fs.existsSync(filePath)) {
+      return { ok: false, motivo: 'ya_existe', error: 'El archivo ya existe en esa ruta' };
     }
+    // Re-attach the (dead) admin password the schema still requires, stamp
+    // author/version, validate, then write atomically (creating the dir).
+    const full = injectAdminPassword(rendererCfg, ADMIN_PASSWORD_PLACEHOLDER);
+    full.version = SCHEMA_VERSION;
+    full.updated_at = new Date().toLocaleString('es-ES');
+    full.modified_by = modifiedBy || 'sistema (alta)';
+    validateConfigSchema(full); // throws a Spanish Error on any problem
+
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    writeConfigAtomic(filePath, full);
+
     // Only after a successful create do we bless the path, so the
-    // follow-up read of that same file is allowed. A failed create
-    // never widens the allow-list.
-    rememberBlessedConfigPath(r.ruta);
-    const info = getFileInfo(r.ruta);
-    return { ok: true, config: stripAdminPassword(r.config), info, ruta: r.ruta };
+    // follow-up read of that same file is allowed.
+    rememberBlessedConfigPath(filePath);
+    const info = getFileInfo(filePath);
+    return { ok: true, ruta: filePath, info, config: stripAdminPassword(full) };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -539,7 +534,7 @@ ipcMain.handle('dialog:select-config-folder', async () => {
 // a path that already points at a .js file is returned unchanged (so the
 // settings field can carry the saved config.js path untouched), while a
 // folder gets config.js appended. Pure path join; blessing happens later
-// via `config:exists`/`config:create-default` when the user commits.
+// via `config:exists` when the user commits.
 ipcMain.handle('config:folder-config-path', (event, carpeta) => {
   const s = typeof carpeta === 'string' ? carpeta.trim() : '';
   if (s === '') return { error: 'Carpeta no válida' };
@@ -586,6 +581,23 @@ ipcMain.handle('cloud:provision', async (event, payload) => {
     logger.error('cloud:provision failed', { code: result.code, error: result.error });
   }
   return result;
+});
+
+ipcMain.handle('catalog:seed-initial', async (event, payload) => {
+  const settings = readSettings();
+  const rendererCfg = (payload && payload.config) || null;
+  if (!rendererCfg) return { ok: false, error: 'Falta el catálogo a sembrar.' };
+  try {
+    // Re-attach the placeholder password + validate before seeding, same
+    // guard the file path uses. disassemble() (inside seedInitial) drops the
+    // admin section for the cloud tables.
+    const full = injectAdminPassword(rendererCfg, ADMIN_PASSWORD_PLACEHOLDER);
+    full.version = SCHEMA_VERSION;
+    validateConfigSchema(full);
+    return await cloudBootstrap.seedInitial(settings, { config: full, user: cloudAuthor(settings) });
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('catalog:load', () => cloudBootstrap.loadCatalog(readSettings()));

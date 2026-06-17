@@ -10,7 +10,7 @@
 
 import { describe, test, expect } from 'vitest';
 import { computeStats, isoWeek } from '../lib/stats.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { buildFullConfigV4 as buildDefaultConfig } from './fixtures/config-v4-full.js';
 
 const cfg = (() => { const c = buildDefaultConfig(); delete c.admin; return c; })();
 

@@ -21,7 +21,7 @@ import { buildSaveSummary, totalChanges } from '../renderer/save-summary.js';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const diffLib = require('../lib/diff.js');
-const { buildDefaultConfig } = require('../config.default.js');
+const { buildFullConfigV4: buildDefaultConfig } = require('./fixtures/config-v4-full.js');
 
 // Minimal but realistic v4-shaped catalog. Only the fields the summary
 // reads matter; the helper deep-compares whole entity sub-objects.

@@ -14,7 +14,7 @@ import {
   injectAdminPassword,
   serializeConfig
 } from '../lib/config-parser.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { buildFullConfigV4 as buildDefaultConfig } from './fixtures/config-v4-full.js';
 
 describe('extractJsonFromConfig — happy path', () => {
   test('round-trip: serialize → extract returns the same object', () => {
