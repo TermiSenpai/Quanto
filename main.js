@@ -447,6 +447,45 @@ ipcMain.handle('config:exists', (event, ruta) => {
   }
 });
 
+// --- Empty scaffold for the first-run wizard (renderer-shaped) ---
+ipcMain.handle('config:empty', (event, payload) => {
+  const modifiedBy = (payload && (payload.modificadoPor ?? payload.modifiedBy)) || undefined;
+  // stripAdminPassword swaps the raw password for has_password=true, the
+  // shape the renderer/admin editor expects.
+  return stripAdminPassword(buildEmptyConfig({ modified_by: modifiedBy }));
+});
+
+// --- Create a NEW config file from the wizard-built config ---
+ipcMain.handle('config:create', (event, payload) => {
+  const filePath = payload.ruta ?? payload.path;
+  const modifiedBy = payload.modificadoPor ?? payload.modifiedBy;
+  const rendererCfg = payload.config;
+  try {
+    if (fs.existsSync(filePath)) {
+      return { ok: false, motivo: 'ya_existe', error: 'El archivo ya existe en esa ruta' };
+    }
+    // Re-attach the (dead) admin password the schema still requires, stamp
+    // author/version, validate, then write atomically (creating the dir).
+    const full = injectAdminPassword(rendererCfg, ADMIN_PASSWORD_PLACEHOLDER);
+    full.version = SCHEMA_VERSION;
+    full.updated_at = new Date().toLocaleString('es-ES');
+    full.modified_by = modifiedBy || 'sistema (alta)';
+    validateConfigSchema(full); // throws a Spanish Error on any problem
+
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    writeConfigAtomic(filePath, full);
+
+    // Only after a successful create do we bless the path, so the
+    // follow-up read of that same file is allowed.
+    rememberBlessedConfigPath(filePath);
+    const info = getFileInfo(filePath);
+    return { ok: true, ruta: filePath, info, config: stripAdminPassword(full) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // --- Config file selection dialog ---
 
 ipcMain.handle('dialog:select-config', async () => {

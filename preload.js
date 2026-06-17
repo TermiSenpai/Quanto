@@ -27,7 +27,11 @@ contextBridge.exposeInMainWorld('packprice', {
 
   // --- Config existence / creation ---
   configExists:        (path)  => ipcRenderer.invoke('config:exists', path),
-  createDefaultConfig: (data)  => ipcRenderer.invoke('config:create-default', data),
+  // Empty schema-shaped scaffold for the first-run wizard (renderer-shaped:
+  // has_password, no raw password). The renderer fills it step by step.
+  getEmptyConfig:      ()      => ipcRenderer.invoke('config:empty'),
+  // Persist a wizard-built config to a NEW file (validated + atomic + dir-made).
+  createConfig:        (data)  => ipcRenderer.invoke('config:create', data),
 
   // --- Read/write the config on the NAS ---
   readConfig:        (path)  => ipcRenderer.invoke('config:read', path),
