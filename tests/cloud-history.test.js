@@ -18,7 +18,7 @@ import {
   restoreSnapshot
 } from '../lib/cloud-history.js';
 import { disassemble } from '../lib/catalog-assembler.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { buildFullConfigV4 as buildDefaultConfig } from './fixtures/config-v4-full.js';
 
 const NOW = () => '2026-06-13T12:00:00.000Z';
 

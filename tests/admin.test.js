@@ -31,7 +31,7 @@ import {
   renderAddonsList,
   renderAddonEditor
 } from '../renderer/admin.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { buildFullConfigV4 as buildDefaultConfig } from './fixtures/config-v4-full.js';
 import { collectConfigErrors } from '../lib/config-schema.js';
 
 function freshCfg() {

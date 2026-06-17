@@ -19,7 +19,7 @@ import {
   createBackup
 } from '../lib/config-store.js';
 import { serializeConfig, extractJsonFromConfig } from '../lib/config-parser.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { buildFullConfigV4 as buildDefaultConfig } from './fixtures/config-v4-full.js';
 import { buildV2Config } from './fixtures/config-v2.js';
 import { buildV3Config } from './fixtures/config-v3.js';
 

@@ -16,7 +16,7 @@ import os from 'node:os';
 import { createCloudBootstrap } from '../lib/cloud-bootstrap.js';
 import { readCache, writeCache } from '../lib/catalog-cache.js';
 import { disassemble } from '../lib/catalog-assembler.js';
-import { buildDefaultConfig } from '../config.default.js';
+import { buildFullConfigV4 as buildDefaultConfig } from './fixtures/config-v4-full.js';
 import { D1ClientError } from '../lib/d1-client.js';
 
 const NOW = () => '2026-06-12T10:00:00.000Z';
