@@ -130,8 +130,8 @@ dependencies. The default answer is **YAGNI**.
   without a migration: the `window.packprice` IPC bridge (renderer↔main), the
   persisted config-format marker `window.PACKPRICE_CONFIG` (existing `config.js`
   files assign it), and the Cloudflare D1 database name `packprice` (already
-  provisioned in customer accounts). The GitHub repo slug
-  (`xkoistudio/packprice`, `main.js`) is pending the owner's rename.
+  provisioned in customer accounts). The GitHub repo was renamed to
+  `xkoistudio/Quanto` (2026-06-17); `main.js` `GITHUB_REPO` points at it.
 - **2026-06-16 — Packaging: portable → NSIS installer.** The Windows target
   moves from `portable` to a **per-user one-click NSIS installer**
   (`build.nsis` in `package.json`). Motivation: the portable `.exe` is a
@@ -145,6 +145,25 @@ dependencies. The default answer is **YAGNI**.
   the user manual. Code-signing options (free self-signed trusted on the
   workshop PCs; SignPath/Certum/Azure for public distribution) are noted in
   `README-build.md`.
+- **2026-06-16 — First run builds the catalog from blank (amends the
+  "neutral demo catalog" decision).** There is no default seed anymore.
+  `buildDefaultConfig()` and the seeded business constants are removed;
+  `config.default.js` exports `SCHEMA_VERSION`, `PARAMETER_KEYS`,
+  `DEFAULT_TARGET_MARGIN` (still used by `lib/migrations.js`),
+  `ADMIN_PASSWORD_PLACEHOLDER` and `buildEmptyConfig()` (a schema-shaped,
+  empty, business-number-free
+  scaffold). On first run — file mode (no `config.js` at the chosen path)
+  or cloud mode (freshly provisioned, empty D1) — a dedicated wizard
+  (`renderer/catalog-wizard.js`) walks the user through Costes → Tramos →
+  Proveedores → Productos → Packs → Complementos → Empresa, every field
+  blank and required, reusing the admin editor's render/mutation functions.
+  The config is held in memory and only persisted once it meets the schema
+  minimums (`renderer/wizard-validation.js`): file → `config:create`
+  (validated, atomic, backup); cloud → provision (no seed) then
+  `catalog:seed-initial`. The old default catalog moves to a test fixture
+  (`tests/fixtures/config-v4-full.js`). The demo catalog and any
+  "load example" path are dropped. The admin-password placeholder stays as
+  dead schema-compat (gate already removed).
 
 > **Language migration:** much legacy code (`main.js`, `app.js`, `calculo.js`,
 > `admin.js`, `config-parser.js`) is Spanish for historical reasons and migrates
@@ -175,8 +194,9 @@ Full rationale in `ARCHITECTURE.md` §7 and `AGENTS.md` §1.
 
 ## 4. Design principles (the short version)
 
-- **Business data outside code** (`ARCHITECTURE.md` §6). `config.default.js` only
-  seeds a missing `config.js`; after that the code never reads it again.
+- **Business data outside code** (`ARCHITECTURE.md` §6). `config.default.js`
+  carries no catalog: it exports the schema version and an empty scaffold
+  (`buildEmptyConfig`) that the first-run wizard fills; there is no default seed.
 - **Strict main/renderer separation** — Ports & Adapters at the preload boundary
   (`ARCHITECTURE.md` §2, §4.2).
 - **Pure functions for all pricing** — `(cfg, input) → result`, no DOM, testable
@@ -192,12 +212,13 @@ Full rationale in `ARCHITECTURE.md` §7 and `AGENTS.md` §1.
 ```
 main.js            ← main process: IPC + filesystem
 preload.js         ← the port: window.packprice.* whitelist
-config.default.js  ← default config seed (bootstrap only; canonical v4 shape)
+config.default.js  ← schema version + empty scaffold (buildEmptyConfig); no catalog seed
 lib/               ← pure, testable modules (English): config-schema, diff,
                      audit, history, pdf-template, logger, config-parser,
                      config-store, migrations, path-guard
 renderer/          ← UI + pure calc: index.html, app.js, calculo.js, admin.js,
-                     admin-extras.js, history.js, format.js, styles.css
+                     admin-extras.js, history.js, format.js, styles.css,
+                     catalog-wizard.js, wizard-validation.js (first-run wizard)
 tests/             ← Vitest (English), one file per module
 ```
 Full map and layering rules in `ARCHITECTURE.md` §3.

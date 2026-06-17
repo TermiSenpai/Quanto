@@ -87,7 +87,7 @@ adapters that talk to the outside world (filesystem, OS dialogs).
 packs app/
 ├── main.js                 ← main process: IPC handlers + filesystem orchestration
 ├── preload.js              ← the port: window.packprice.* whitelist
-├── config.default.js       ← default config seed (ONLY used to bootstrap a missing config.js)
+├── config.default.js       ← schema version + empty scaffold (buildEmptyConfig); NO catalog seed
 │
 ├── lib/                    ← pure, testable, framework-free modules (CommonJS, English)
 │   ├── config-parser.js    ← extract/serialize the JSON block of config.js (legacy ES identifiers)
@@ -107,6 +107,8 @@ packs app/
 │   ├── calculo.js          ← PURE v4 pricing: calculatePack + helpers (EN identifiers)
 │   ├── admin.js            ← admin editor / catalog builder (data-cfg-path driven, EN)
 │   ├── admin-extras.js     ← audit log rendering                      (EN)
+│   ├── catalog-wizard.js   ← first-run wizard chrome (reuses admin render/mutation) (EN)
+│   ├── wizard-validation.js ← pure per-step minimum gating (WIZARD_STEPS, wizardReady) (EN)
 │   ├── history.js          ← quote history UI                         (EN)
 │   ├── format.js           ← DOM/format helpers                       (legacy ES)
 │   └── styles.css          ← design tokens in :root, BEM-lite classes
@@ -299,7 +301,10 @@ and render as before.
 
 ```
 read settings (%APPDATA%) → resolve config path
-  → read config from NAS → migrate → validate schema → strip admin password
+  → if no config.js at the path (or freshly-provisioned empty D1):
+        run the first-run catalog wizard (§6 "First-run bootstrap"),
+        which builds the catalog from blank and persists it
+  → read config from NAS/D1 → migrate → validate schema → strip admin password
   → hand CFG to renderer → render welcome or main screen
 ```
 
@@ -311,15 +316,56 @@ Every number a business human might want to change — PVP per tier, margins, co
 parameters, admin password, company details — lives in `config.js` on the NAS,
 **not in code**. A price change is a *data* change, never a deploy.
 
-- `config.default.js` is used **only** to seed a missing `config.js` on first run.
-  Once `config.js` exists, the code never looks at `config.default.js` again.
+- `config.default.js` carries **no catalog**. It exports `SCHEMA_VERSION`
+  (the v4 tag stamped into new configs), `PARAMETER_KEYS`, `DEFAULT_TARGET_MARGIN`
+  (consumed by `lib/migrations.js`) and `buildEmptyConfig(meta)` — a
+  schema-shaped but **empty** config (null parameters; empty
+  suppliers/products/tiers/packs/addons; neutral company/quote_settings;
+  placeholder admin password) that is intentionally invalid until the
+  first-run **catalog wizard** fills the minimums (see "First-run bootstrap"
+  below). There is no default seed and no demo catalog.
 - **Corollary:** no domain numbers in `main.js`, `preload.js`, `app.js`, or
-  `index.html`. Need one? Add it to `config.default.js` and read from `CFG`.
+  `index.html`. A business number is *user* input collected by the wizard or
+  the admin editor, persisted to `config.js`/D1, and read from `CFG` — never a
+  literal in code.
+
+### First-run bootstrap (the catalog wizard)
+
+There is no default seed. A fresh install builds its catalog **from blank**
+through a guided wizard, in both storage modes:
+
+```
+file mode:  no config.js at the chosen path
+cloud mode: cloud:provision creates an empty migrated D1 (returns seeded:false)
+                              │
+                              ▼
+   getEmptyConfig (config:empty) → buildEmptyConfig() held in memory
+                              │
+   catalog wizard (renderer/catalog-wizard.js): 7 steps —
+   Costes → Tramos → Proveedores → Productos → Packs → Complementos → Empresa,
+   every field blank, per-step minimum gating (renderer/wizard-validation.js),
+   reusing the admin editor's render/mutation functions
+                              │
+   validateConfigSchema  (persist only when it passes)
+                              │
+   file  → createConfig (config:create): validated, atomic write, backup-by-create
+   cloud → seedInitialCatalog (catalog:seed-initial): seeds D1 from the wizard catalog
+```
+
+The wizard launches from the local first-run flow, the cloud-provision success,
+the settings "change location" flow (an empty new folder), and the error-screen
+recovery button. New IPC: `config:empty`, `config:create`, `catalog:seed-initial`
+(preload: `getEmptyConfig`, `createConfig`, `seedInitialCatalog`). The wizard
+never writes a half-built config to shared storage — it assembles in memory and
+persists once, after the schema minimums are met.
 
 ### Config schema (current — **v4**)
 
-`config.default.js` is the canonical, documented v4 shape. v2/v3 configs are
-migrated to v4 on read (§4.4) and never seen downstream.
+`buildEmptyConfig()` in `config.default.js` emits the canonical, documented v4
+shape (with empty collections and null parameters); the fixture
+`tests/fixtures/config-v4-full.js` (`buildFullConfigV4`) is a fully-populated v4
+config used by tests. v2/v3 configs are migrated to v4 on read (§4.4) and never
+seen downstream.
 
 ```js
 {
@@ -398,7 +444,9 @@ every tier and option-combo, that tiers don't overlap, and that
 
 ### Adding a config field
 
-1. Add it to `config.default.js`.
+1. Add it to the `buildEmptyConfig()` scaffold in `config.default.js` (and to
+   `buildFullConfigV4` in `tests/fixtures/config-v4-full.js`), and collect it in
+   the first-run wizard / admin editor.
 2. Document it in `PLAN_Calculadora.md`.
 3. If existing NAS configs lack it: add a code fallback **or** migrate the file
    via `lib/migrations.js` (§4.4). Prefer migration for anything beyond a trivial
@@ -478,9 +526,14 @@ tokens, the real NAS `config.js`, or any customer's D1 data.
   3. `calculatePack` (bundle) — the `PLAN_Calculadora.md` case: 12 crew packs no-hood 2-sides → 311.40 €.
   4. `calculatePack` (components) — 7 URBAN + 5 CLASICA T1 → 193.40 €; plus 3XL/4XL/5XL bounds and `margin_pct` over `sale_base`.
   5. `recommendedPrice` — round-up to `x,95` and reported margin at the rounded price.
-  6. `buildDefaultConfig()` — structural v4 keys survive refactors.
-  7. `config-parser` / `config-schema` — malformed files, missing sections, v4 rules.
-  8. `migrations.*` — round-trip v2→v3→v4, idempotency, missing-field errors.
+  6. `buildEmptyConfig()` — structural v4 keys survive refactors, collections
+     empty / parameters null; `tests/fixtures/config-v4-full.js`
+     (`buildFullConfigV4`) supplies the populated v4 config the other tests use.
+  7. `wizard-validation` — per-step minimums (parametersComplete / stepErrors /
+     wizardReady): blocks finishing without complete parameters / a tier /
+     a supplier / a product / a pack; addons + company optional.
+  8. `config-parser` / `config-schema` — malformed files, missing sections, v4 rules.
+  9. `migrations.*` — round-trip v2→v3→v4, idempotency, missing-field errors.
 - **Rule:** any change touching calculation or config schema ships with tests.
   Pure functions (§4.1) make this cheap — there is no excuse to skip it.
 - E2E (Playwright on the packaged `.exe`) is deferred until the app justifies it.

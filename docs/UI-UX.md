@@ -98,6 +98,48 @@ copiarla») con reintento, nunca códigos HTTP.
 falla, pantalla de error con botón **«Restaurar copia de seguridad»** y la app
 no escribe nada más (plan v5 §6).
 
+### 2.0b Asistente de catálogo (catálogo en blanco)
+
+No hay catálogo por defecto. Cuando el almacén está listo pero **vacío** (modo
+archivo sin `config.js` en la ruta elegida, o nube con D1 recién aprovisionada),
+arranca un asistente dedicado (pantalla `#catalog-wizard`) que construye el
+catálogo **desde cero**. Se lanza desde el primer arranque local, el éxito del
+aprovisionamiento en nube, el flujo de «cambiar ubicación» de ajustes (carpeta
+nueva vacía) y el botón de recuperación de la pantalla de error (reetiquetado
+**«Configurar catálogo»**).
+
+**Chrome de pasos:** barra de progreso con los 7 pasos en orden + botones
+`Atrás` / `Siguiente` (y `Finalizar` en el último). El orden lo imponen las
+dependencias (los packs necesitan tramos y productos):
+
+| # | Paso | Mínimo para avanzar |
+|---|---|---|
+| 1 | **Costes** | todos los parámetros rellenos y numéricos (≥ 0) |
+| 2 | **Tramos** | ≥ 1 tramo |
+| 3 | **Proveedores** | ≥ 1 proveedor |
+| 4 | **Productos** | ≥ 1 producto |
+| 5 | **Packs** | ≥ 1 pack |
+| 6 | **Complementos** *(opcional)* | puede quedar vacío |
+| 7 | **Empresa** *(opcional)* | puede quedar vacío |
+
+- **Todo en blanco:** cada campo arranca vacío, sin sugerencias; el DTF por cara
+  y el resto de costes los teclea el usuario (no se siembra ningún valor).
+- **Bloqueo de avance:** `Siguiente` está deshabilitado hasta cumplir el mínimo
+  del paso; `Finalizar` está bloqueado hasta cumplir **todos** los mínimos
+  (`renderer/wizard-validation.js`). Pasos opcionales (Complementos, Empresa)
+  no bloquean.
+- **Línea de error:** bajo el formulario del paso, mensaje en español que explica
+  qué falta («Añade al menos un proveedor.», «Rellena todos los costes…»); nunca
+  se avanza con un paso incompleto y no se ve nunca JSON ni rutas técnicas.
+- **Reutiliza el editor de catálogo:** los formularios de cada entidad
+  (`renderAdminTabContent` / `updateConfigFromInput` / `executeAdminAction`) son
+  los mismos del editor admin (§2.4b) — el asistente solo aporta el chrome de
+  pasos, el bloqueo y el ensamblado. Una sola herramienta para editar el catálogo.
+- **Persistencia al final:** el config se ensambla en memoria y solo se guarda al
+  pulsar `Finalizar` y pasar `validateConfigSchema` (archivo: escritura atómica +
+  backup; nube: siembra de la D1 con el catálogo del asistente). Ningún paso
+  escribe a medias en el almacén compartido.
+
 ### 2.1 Indicador de datos (topbar, siempre visible)
 
 Badge en la topbar, junto al título, con tres estados:
