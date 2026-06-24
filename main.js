@@ -229,13 +229,11 @@ function writeSettings(settings) {
 const TELEMETRY_DSN = DEFAULT_DSN;
 
 // ------------------------------------------------------------------
-// OWNER-CONFIRM CONSTANT — the public GitHub repo the update check
-// (PRD R15) queries for the latest release. This is a GUESS based on
-// package.json:author ('xkoistudio'); the owner MUST confirm the real
-// <owner>/<repo> before the repo flips public. The endpoint and the
+// The public GitHub repo the update check (PRD R15) queries for the
+// latest release (owner-confirmed 2026-06-17). The endpoint and the
 // download link both derive from it; it carries no secret (public API).
 // ------------------------------------------------------------------
-const GITHUB_REPO = 'xkoistudio/packprice';
+const GITHUB_REPO = 'TermiSenpai/Quanto';
 const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_REPO}/releases/latest`;
 
 // The schema version bundled in this build = the highest numbered SQL
