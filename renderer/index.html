@@ -530,13 +530,14 @@
       </button>
     </div>
 
-    <!-- Plan 7B: aviso no bloqueante de versión nueva al arrancar (PRD
-         R15). No instala nada; «Descargar» abre la release en el
-         navegador. Texto rellenado por app.js; se descarta al cerrarlo. -->
+    <!-- Aviso no bloqueante de actualización (PRD R15). La descarga es
+         automática; el banner muestra progreso y, al estar lista, el botón
+         «Reiniciar e instalar ahora». Texto/estado rellenado por app.js
+         (applyUpdateState); se descarta al cerrarlo. -->
     <div id="update-banner" class="reminder-banner hidden" role="status">
       <svg class="icon"><use href="#i-refresh"/></svg>
       <span class="reminder-banner__text" id="update-banner-text">—</span>
-      <button id="btn-update-download" class="btn btn-secondary btn-sm" type="button">Descargar</button>
+      <button id="btn-update-restart" class="btn btn-secondary btn-sm hidden" type="button">Reiniciar e instalar ahora</button>
       <button id="btn-update-dismiss" class="reminder-banner__close" type="button" aria-label="Descartar">
         <svg class="icon"><use href="#i-x"/></svg>
       </button>
@@ -1135,14 +1136,14 @@
 
           <hr class="divider">
 
-          <!-- Updates (Plan 7B · UI-UX §2.6 · PRD R15). The app-version
-               check talks to GitHub Releases; the request lives in main
-               (CSP intact). No auto-install: the result shows a Descargar
-               link that opens the release page in the system browser. -->
+          <!-- Updates (UI-UX §2.6 · PRD R15). The check + download run in
+               main via electron-updater (CSP intact); progress and the
+               terminal result are painted here by applyUpdateState. The
+               update downloads automatically and installs on restart. -->
           <div id="aj-updates-section">
             <div>
               <h3 class="h-card" style="margin-bottom: 6px;">Actualizaciones</h3>
-              <p class="text-secondary" style="font-size: 12px;">Comprueba si hay una versión más reciente en GitHub. No se instala nada automáticamente.</p>
+              <p class="text-secondary" style="font-size: 12px;">Comprueba si hay una versión más reciente. Se descarga sola y te avisa para reiniciar e instalar.</p>
             </div>
 
             <div class="toggle-row">
