@@ -137,7 +137,7 @@ para que no se pierdan:
 | # | Tarea de release | Detalle |
 |---|---|---|
 | R16 | **Semilla demo neutra** — *resuelto en código por R21 (2026-06-16), ya no es tarea del propietario* | Se eliminó el catálogo por defecto por completo: `config.default.js` ya no contiene catálogo (solo versión de esquema + `buildEmptyConfig`), así que **no queda catálogo real que neutralizar para publicar**. El catálogo del cliente nº 1 se movió al fixture de tests `tests/fixtures/config-v4-full.js` (`buildFullConfigV4`), que sigue fijando los importes exactos de `tests/calculo.test.js`. Una instalación nueva construye el catálogo desde cero con el asistente (R21). Queda solo el paso de operaciones de archivar el `config.js` real del taller fuera del repo (principio rector §1b). Independiente ya de **D4** en lo tocante al seed |
-| ✓ | **`GITHUB_REPO` real** | El check de versión (R15) usa la constante `GITHUB_REPO` de `main.js`. Repo renombrado a `TermiSenpai/Quanto` (2026-06-17) y la constante actualizada. El DSN de informes de error (R19) es del desarrollador y ya está fijado |
+| ✓ | **`GITHUB_REPO` real** | El check de versión (R15) usa `package.json` `build.publish` (electron-updater). Repo renombrado a `TermiSenpai/Quanto` (2026-06-17). El DSN de informes de error (R19) es del desarrollador y ya está fijado |
 | — | **Titular del copyright en `LICENSE`** | `LICENSE` (Apache-2.0) en la raíz; confirmar la línea de copyright (`© xkoistudio`) con el propietario antes de abrir el repo |
 
 ## 5. Métricas de éxito

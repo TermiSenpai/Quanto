@@ -67,13 +67,14 @@ const { redactSettings, mergeSettingsWrite } = require('./lib/settings-privacy')
 const { scrubError } = require('./lib/error-scrubber');
 const { reportError, DEFAULT_DSN } = require('./lib/error-reporter');
 const { buildDiagnostics } = require('./lib/diagnostics');
-const { isNewerVersion } = require('./lib/version-compare');
 const { isPathAllowed } = require('./lib/path-guard');
 const { initialThrottleState, nextThrottleState } = require('./lib/admin-throttle');
 const { createD1Client } = require('./lib/d1-client');
 const { loadMigrations } = require('./lib/migration-loader');
 const { createCloudBootstrap } = require('./lib/cloud-bootstrap');
 const { migrateLegacyUserData } = require('./lib/userdata-migration');
+const { autoUpdater } = require('electron-updater');
+const { wireUpdater } = require('./lib/app-updater');
 
 // --- Path configuration ---
 const SETTINGS_DIR = path.join(app.getPath('userData'));
@@ -228,14 +229,6 @@ function writeSettings(settings) {
 
 const TELEMETRY_DSN = DEFAULT_DSN;
 
-// ------------------------------------------------------------------
-// The public GitHub repo the update check (PRD R15) queries for the
-// latest release (owner-confirmed 2026-06-17). The endpoint and the
-// download link both derive from it; it carries no secret (public API).
-// ------------------------------------------------------------------
-const GITHUB_REPO = 'TermiSenpai/Quanto';
-const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_REPO}/releases/latest`;
-
 // The schema version bundled in this build = the highest numbered SQL
 // migration shipped under db/migrations/. Best-effort and cached; a
 // read failure degrades to null so diagnostics never breaks.
@@ -313,6 +306,9 @@ async function reportScrubbedError(err, settings) {
 // ============================================================
 // Main window
 // ============================================================
+
+// Set once in app.whenReady (after the window exists) — see wireUpdater below.
+let updaterController = null;
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -1094,57 +1090,22 @@ ipcMain.handle('dialog:open-external', async (event, url) => {
   }
 });
 
-// --- App-version update check (PRD R15) ---
-//
-// Fetches the latest GitHub release for this repo (public REST API, no
-// token) and compares its tag to the running app version. Network ONLY
-// in main (renderer CSP untouched). The renderer just renders the
-// returned { ok, current, latest, isNewer, url } — `isNewer` is computed
-// here via the single tested lib/version-compare. There is no
-// auto-install: `url` opens the releases page in the system browser. A
-// network/parse failure returns { ok:false, error } (the manual button
-// shows it; on boot the renderer swallows it).
+// --- App update (PRD R15, now real auto-update via electron-updater) ---
+// `update:check` just TRIGGERS a check; progress + result arrive on the
+// renderer as `update:state` events (see wireUpdater in app.whenReady).
+// `update:install` quits and installs a downloaded update. Both signal
+// clearly until the updater is wired, and in dev the wrapper emits a
+// `dev` phase instead of touching electron-updater.
 ipcMain.handle('update:check', async () => {
-  const current = app.getVersion();
-  // Bound the request so «Buscar ahora» can't hang on a dead socket.
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const fetchImpl = typeof fetch === 'function' ? fetch : null;
-    if (!fetchImpl) {
-      return { ok: false, current, error: 'fetch no disponible.' };
-    }
-    const res = await fetchImpl(
-      `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
-      {
-        headers: {
-          'Accept': 'application/vnd.github+json',
-          'User-Agent': 'Quanto-update-check'
-        },
-        signal: controller.signal
-      }
-    );
-    if (!res || !res.ok) {
-      return { ok: false, current, error: `GitHub respondió ${res ? res.status : 'sin respuesta'}.` };
-    }
-    const data = await res.json();
-    const latest = (data && typeof data.tag_name === 'string') ? data.tag_name : '';
-    if (!latest) {
-      return { ok: false, current, error: 'La respuesta de GitHub no trae versión.' };
-    }
-    // Prefer the release's own page; fall back to the generic latest page.
-    const url = (data && typeof data.html_url === 'string' && data.html_url)
-      ? data.html_url
-      : GITHUB_RELEASES_PAGE;
-    return { ok: true, current, latest, isNewer: isNewerVersion(current, latest), url };
-  } catch (err) {
-    if (err && err.name === 'AbortError') {
-      return { ok: false, current, error: 'No se pudo comprobar la versión: la conexión tardó demasiado.' };
-    }
-    return { ok: false, current, error: err.message };
-  } finally {
-    clearTimeout(timeout);
-  }
+  if (!updaterController) return { ok: false, error: 'Updater no inicializado.' };
+  updaterController.checkForUpdates();
+  return { ok: true };
+});
+
+ipcMain.handle('update:install', async () => {
+  if (!updaterController) return { ok: false };
+  updaterController.quitAndInstall();
+  return { ok: true };
 });
 
 // --- App version (renderer welcome-screen label) ---
@@ -1563,6 +1524,22 @@ app.whenReady().then(() => {
   });
 
   createMainWindow();
+
+  // Real auto-update (PRD R15). Configure electron-updater and forward its
+  // state to the renderer. autoDownload pulls updates silently; the user
+  // confirms the restart via the banner, else it installs on quit.
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = logger; // electron-log is electron-updater-compatible
+  updaterController = wireUpdater({
+    updater: autoUpdater,
+    isPackaged: app.isPackaged,
+    onState: (state) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('update:state', state);
+      }
+    }
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

@@ -131,7 +131,8 @@ dependencies. The default answer is **YAGNI**.
   persisted config-format marker `window.PACKPRICE_CONFIG` (existing `config.js`
   files assign it), and the Cloudflare D1 database name `packprice` (already
   provisioned in customer accounts). The GitHub repo was renamed to
-  `TermiSenpai/Quanto` (2026-06-17); `main.js` `GITHUB_REPO` points at it.
+  `TermiSenpai/Quanto` (2026-06-17); the repo lives in `package.json`
+  `build.publish` (electron-updater).
 - **2026-06-16 — Packaging: portable → NSIS installer.** The Windows target
   moves from `portable` to a **per-user one-click NSIS installer**
   (`build.nsis` in `package.json`). Motivation: the portable `.exe` is a
