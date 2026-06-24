@@ -4297,9 +4297,11 @@ async function checkForUpdateNow() {
   btn.innerHTML = '<span class="spinner"></span> Buscando…';
   result.textContent = '';
   try {
-    // Just triggers the check; applyUpdateState paints the result and
-    // re-enables the button when a terminal phase event arrives.
-    await window.packprice.checkAppUpdate();
+    // Triggers the check; applyUpdateState paints progress/result from the
+    // update:state events. A resolved {ok:false} means main couldn't even
+    // start the check (no events will follow), so fall through to the reset.
+    const r = await window.packprice.checkAppUpdate();
+    if (!r || !r.ok) throw new Error(r && r.error);
   } catch (_) {
     result.textContent = 'No se pudo comprobar. Revisa tu conexión e inténtalo de nuevo.';
     btn.disabled = false;
