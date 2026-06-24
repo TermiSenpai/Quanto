@@ -1198,8 +1198,7 @@ function bindEvents() {
   const btnReminderDismiss = el('btn-reminder-dismiss');
   if (btnReminderDismiss) btnReminderDismiss.addEventListener('click', dismissReminder);
 
-  // Plan 7B: dismiss the «versión nueva» notice (download is wired
-  // per-show in maybeCheckForUpdate so it carries the release URL).
+  // Dismiss the update banner; state is repainted by the next update:state event.
   const btnUpdateDismiss = el('btn-update-dismiss');
   if (btnUpdateDismiss) btnUpdateDismiss.addEventListener('click', () => hide('update-banner'));
 
@@ -4283,10 +4282,9 @@ async function loadPrivacyAndUpdatesSection() {
 }
 
 /**
- * Manual «Buscar ahora»: asks main to check GitHub for a newer release
- * and renders the result inline. Unlike the boot check, errors here ARE
- * shown (the user asked). A newer version offers a Descargar link that
- * opens the release page via openExternal (no auto-install).
+ * Manual «Buscar ahora»: triggers the update check in main. Unlike the
+ * boot check, network errors ARE shown (the user asked). Progress and the
+ * result are painted by applyUpdateState via the update:state event.
  */
 async function checkForUpdateNow() {
   const btn = el('btn-aj-buscar-update');
@@ -4338,8 +4336,10 @@ function applyUpdateState(state) {
     }
   }
 
-  // Re-enable the manual «Buscar ahora» button on any terminal phase.
-  if (phase === 'idle' || phase === 'ready' || phase === 'error' || phase === 'dev') {
+  // Re-enable the manual «Buscar ahora» button once the check resolves
+  // (anything past 'checking' — including 'downloading', so it isn't stuck
+  // for the whole background download; progress shows in the result text).
+  if (phase && phase !== 'checking') {
     const btn = el('btn-aj-buscar-update');
     if (btn && btn.dataset.busy === '1') {
       btn.disabled = false;
