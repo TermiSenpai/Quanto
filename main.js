@@ -1103,7 +1103,7 @@ ipcMain.handle('update:check', async () => {
 });
 
 ipcMain.handle('update:install', async () => {
-  if (!updaterController) return { ok: false };
+  if (!updaterController) return { ok: false, error: 'Updater no inicializado.' };
   updaterController.quitAndInstall();
   return { ok: true };
 });
@@ -1111,7 +1111,7 @@ ipcMain.handle('update:install', async () => {
 // --- App version (renderer welcome-screen label) ---
 // Lightweight, no network: the renderer reads the running version to show
 // it instead of a hardcoded string (which used to drift). Distinct from
-// update:check, which compares against the latest GitHub release.
+// update:check, which triggers the electron-updater flow.
 ipcMain.handle('app:version', () => app.getVersion());
 
 // --- Logs (electron-log) ---

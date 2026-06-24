@@ -65,4 +65,13 @@ describe('wireUpdater event → state mapping', () => {
     wireUpdater({ updater, isPackaged: true, onState: () => { throw new Error('ui blew up'); } });
     expect(() => updater.emit('checking-for-update')).not.toThrow();
   });
+
+  test('checkForUpdates emits an error phase if the updater throws synchronously', () => {
+    const updater = fakeUpdater();
+    updater.checkForUpdates = vi.fn(() => { throw new Error('no app-update.yml'); });
+    const states = [];
+    const api = wireUpdater({ updater, isPackaged: true, onState: (s) => states.push(s) });
+    api.checkForUpdates();
+    expect(states).toEqual([{ phase: 'error', error: 'no app-update.yml' }]);
+  });
 });
