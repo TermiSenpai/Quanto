@@ -391,6 +391,14 @@ export function calculatePack(cfg, packId, opt) {
   const margin = saleBase - totalCost;
   const marginPct = saleBase > 0 ? (margin / saleBase) : 0;
 
+  // Per-unit headline including addons (IVA inc). Base per unit is the bundle
+  // price per pack, or the average garment PVP for components. Size surcharges
+  // (4XL/5XL) are NOT folded in here — they stay a separate line.
+  const extrasVatInc = addons.vat_inc;
+  const unitsForExtras = (pack.pricing_mode === 'bundle') ? packsN : total;
+  const baseUnit = (pack.pricing_mode === 'bundle') ? topUnitPrice : (subtotal / total);
+  const unitPriceWithExtras = baseUnit + (unitsForExtras > 0 ? extrasVatInc / unitsForExtras : 0);
+
   return {
     pack_id: packId,
     pricing_mode: pack.pricing_mode,
@@ -404,6 +412,8 @@ export function calculatePack(cfg, packId, opt) {
     subtotal,
     surcharges,
     extras_no_vat: addons.no_vat,
+    extras_vat_inc: extrasVatInc,
+    unit_price_with_extras: unitPriceWithExtras,
     extras_detail: addons.detail,
     total_vat_inc: totalVatInc,
     sale_base: saleBase,

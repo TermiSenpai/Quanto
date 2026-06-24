@@ -1869,9 +1869,11 @@ function recomputePreview() {
   const quantity = r.total_quantity;
   // For a bundle pack the headline is "N packs × bundle price"; for a
   // multi-line components pack we just show the garment count.
+  // Per-unit headline includes the chosen addons (unit_price_with_extras).
+  // Multi-line components packs (unit_price === 0) keep the bare count.
   const priceText = (r.pricing_mode === 'bundle')
-    ? `${r.breakdown[0] ? r.breakdown[0].quantity : 0} packs × ${formatEur(r.unit_price)}`
-    : (r.unit_price > 0 ? `${quantity} × ${formatEur(r.unit_price)}` : `${quantity} prendas`);
+    ? `${r.breakdown[0] ? r.breakdown[0].quantity : 0} packs × ${formatEur(r.unit_price_with_extras)}`
+    : (r.unit_price > 0 ? `${quantity} × ${formatEur(r.unit_price_with_extras)}` : `${quantity} prendas`);
   elMeta.textContent = priceText;
 
   // Short breakdown rows: per line for components, the bundle row for bundle.
@@ -2036,11 +2038,12 @@ function renderResult(r) {
   // For a bundle pack the headline metric is the per-pack price and the
   // number of packs; otherwise the garment count and the average PVP.
   const packsCount = isBundle && r.breakdown[0] ? r.breakdown[0].quantity : quantity;
-  const pricePerPack = isBundle
-    ? formatEur(r.unit_price)
-    : formatEur(r.subtotal / Math.max(1, quantity));
+  // All-in per unit (base + complementos/ud, IVA inc). Engine field; size
+  // surcharges stay a separate line.
+  const pricePerPack = formatEur(r.unit_price_with_extras);
   const quantityLabel = isBundle ? 'Packs' : 'Prendas';
-  const priceLabel = isBundle ? 'PVP por pack' : 'PVP medio';
+  const hasExtras = r.extras_vat_inc > 0;
+  const priceLabel = (isBundle ? 'PVP por pack' : 'PVP medio') + (hasExtras ? ' (con extras)' : '');
   const stats = [
     { label: quantityLabel,     value: isBundle ? packsCount : quantity, mono: true },
     { label: priceLabel,        value: pricePerPack, mono: true },

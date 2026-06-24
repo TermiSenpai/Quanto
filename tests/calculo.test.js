@@ -294,6 +294,44 @@ describe('calculatePack — cost and 3XL', () => {
   });
 });
 
+describe('addons reflected in the per-unit headline', () => {
+  test('bundle pack: extras_vat_inc and unit_price_with_extras include the addon per pack', () => {
+    const cfg = buildDefaultConfig();
+    const packId = 'crew_full';
+    const anyAddonId = Object.keys(cfg.addons)[0];
+    const vat = cfg.parameters.vat;
+    const addon = cfg.addons[anyAddonId];
+
+    const base = calculatePack(cfg, packId, {
+      options: { hood: 'without_hood', sides: 'two_sides' }, packs: 10
+    });
+    const withAddon = calculatePack(cfg, packId, {
+      options: { hood: 'without_hood', sides: 'two_sides' }, packs: 10,
+      addons: { [anyAddonId]: 10 }
+    });
+
+    expect(base.extras_vat_inc).toBe(0);
+    expect(base.unit_price_with_extras).toBeCloseTo(base.unit_price, 2);
+
+    const perPackInc = addon.vat_included ? addon.price : addon.price * (1 + vat);
+    expect(withAddon.extras_vat_inc).toBeCloseTo(10 * perPackInc, 2);
+    expect(withAddon.unit_price_with_extras).toBeCloseTo(withAddon.unit_price + perPackInc, 2);
+  });
+
+  test('components pack: unit_price_with_extras is the all-in average per garment', () => {
+    const cfg = buildDefaultConfig();
+    const packId = 'tshirts_only';
+    const anyAddonId = Object.keys(cfg.addons)[0];
+    const r = calculatePack(cfg, packId, {
+      options: { sides: 'two_sides' },
+      quantities: { tshirt: 10 },
+      addons: { [anyAddonId]: 10 }
+    });
+    expect(r.extras_vat_inc).toBeGreaterThan(0);
+    expect(r.unit_price_with_extras).toBeCloseTo((r.subtotal + r.extras_vat_inc) / r.total_quantity, 2);
+  });
+});
+
 describe('calculateGarmentCost', () => {
   test('BEAGLE 2 sides T1, batch 10 is positive and reasonable', () => {
     const t1 = getTier(CFG, 10);
