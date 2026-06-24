@@ -161,3 +161,25 @@ Es lo esperado si los dos editáis a la vez. La app pregunta qué hacer (sobresc
 - `preload.js` expone solo las funciones necesarias (leer/escribir config, settings, diálogos) en `window.packprice`.
 - La clave de admin (en `config.js`) es protección anti-clic-accidental, no seguridad real. Cualquiera con acceso al NAS puede leerla.
 - Los backups en `<NAS>\Packs\backups\` no se borran automáticamente. Limpia manualmente cada cierto tiempo si crecen mucho.
+
+---
+
+## Publicar una release con auto-update (electron-updater)
+
+La app instalada se actualiza sola leyendo las releases de
+`github.com/TermiSenpai/Quanto`. Para que funcione, cada release debe llevar
+`latest.yml` + el `.exe` + su `.blockmap`, que genera y sube
+`electron-builder --publish`.
+
+1. Sube `package.json:version`.
+2. Exporta un token de GitHub con permiso `repo` (solo para **publicar**; los
+   clientes leen sin token porque el repo es público):
+   `setx GH_TOKEN <token>` (o variable de entorno de la sesión).
+3. `pnpm build:win-publish` — compila el instalador NSIS y sube
+   `Quanto-<version>-setup.exe`, `latest.yml` y `.blockmap` a una release
+   (draft) de GitHub.
+4. Publica la release (quita el "draft") en GitHub.
+
+Las versiones anteriores ya instaladas la detectarán al arrancar, la
+descargarán en segundo plano y ofrecerán «Reiniciar e instalar ahora».
+El `.exe` sigue **sin firmar** (SmartScreen documentado en el manual).
