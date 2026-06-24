@@ -576,6 +576,11 @@ electron-updater needs each release to carry `latest.yml` + `.blockmap` next to 
 **Files:**
 - Modify: `package.json` (`build.publish` + `build:win-publish` script)
 - Modify: `README-build.md` (release process + GH_TOKEN)
+- Modify: `docs/PRD.md` (R15 requirement text — no longer "sin auto-instalación")
+
+- [ ] **Step 0: Update PRD R15 to match the new (approved) behavior**
+
+In `docs/PRD.md`, find the R15 table row. It currently ends with `lo avisa con enlace de descarga — sin auto-instalación; comprobación desactivable en ajustes`. Replace that clause with: `descarga la actualización en segundo plano y avisa para reiniciar e instalar (con instalación al cerrar como respaldo, vía electron-updater); comprobación desactivable en ajustes`. Keep the rest of the row (repo público / `main` es producción / release en GitHub Releases) intact.
 
 - [ ] **Step 1: Add the publish config**
 
