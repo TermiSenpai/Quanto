@@ -67,12 +67,18 @@ contextBridge.exposeInMainWorld('packprice', {
   getErrorReportsEnabled:  ()    => ipcRenderer.invoke('error-reports:get'),
   setErrorReportsEnabled:  (on)  => ipcRenderer.invoke('error-reports:set', on),
 
-  // --- App-version update check (Plan 7B: PRD R15) ---
-  // Asks main to fetch the latest GitHub release and compare it to the
-  // running version. Returns { ok, current, latest, isNewer, url }; the
-  // network call lives in main (CSP intact). No auto-install — `url`
-  // opens the release page via openExternal.
-  checkAppUpdate:          ()    => ipcRenderer.invoke('update:check'),
+  // --- App auto-update (PRD R15, electron-updater) ---
+  // `checkAppUpdate` TRIGGERS a check in main; results arrive via the
+  // `onUpdateState` subscription (main pushes { phase, version, percent,
+  // error } over `update:state`). `installUpdateNow` quits + installs a
+  // downloaded update. All network/Electron lives in main (CSP intact).
+  checkAppUpdate:    ()   => ipcRenderer.invoke('update:check'),
+  installUpdateNow:  ()   => ipcRenderer.invoke('update:install'),
+  onUpdateState:     (cb) => {
+    const listener = (_e, state) => cb(state);
+    ipcRenderer.on('update:state', listener);
+    return () => ipcRenderer.removeListener('update:state', listener);
+  },
 
   // --- App version (welcome-screen label) ---
   // No network: the running version, so the UI never hardcodes it.
