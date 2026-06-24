@@ -839,6 +839,9 @@ function initApp() {
   // (only the manual «Buscar ahora» surfaces errors).
   if (!updateChecked) {
     updateChecked = true;
+    if (window.packprice && typeof window.packprice.onUpdateState === 'function') {
+      window.packprice.onUpdateState(applyUpdateState);
+    }
     maybeCheckForUpdate();
   }
 }
@@ -1195,8 +1198,7 @@ function bindEvents() {
   const btnReminderDismiss = el('btn-reminder-dismiss');
   if (btnReminderDismiss) btnReminderDismiss.addEventListener('click', dismissReminder);
 
-  // Plan 7B: dismiss the «versión nueva» notice (download is wired
-  // per-show in maybeCheckForUpdate so it carries the release URL).
+  // Dismiss the update banner; state is repainted by the next update:state event.
   const btnUpdateDismiss = el('btn-update-dismiss');
   if (btnUpdateDismiss) btnUpdateDismiss.addEventListener('click', () => hide('update-banner'));
 
@@ -1232,6 +1234,13 @@ function bindEvents() {
   if (errorReports) errorReports.addEventListener('change', onErrorReportsToggle);
   const btnBuscarUpdate = el('btn-aj-buscar-update');
   if (btnBuscarUpdate) btnBuscarUpdate.addEventListener('click', checkForUpdateNow);
+  const btnUpdateRestart = el('btn-update-restart');
+  if (btnUpdateRestart) {
+    btnUpdateRestart.addEventListener('click', () => {
+      btnUpdateRestart.disabled = true;
+      window.packprice.installUpdateNow();
+    });
+  }
   const btnDiagnostico = el('btn-aj-diagnostico');
   if (btnDiagnostico) btnDiagnostico.addEventListener('click', exportDiagnostics);
 
@@ -4273,57 +4282,92 @@ async function loadPrivacyAndUpdatesSection() {
 }
 
 /**
- * Manual «Buscar ahora»: asks main to check GitHub for a newer release
- * and renders the result inline. Unlike the boot check, errors here ARE
- * shown (the user asked). A newer version offers a Descargar link that
- * opens the release page via openExternal (no auto-install).
+ * Manual «Buscar ahora»: triggers the update check in main. Unlike the
+ * boot check, network errors ARE shown (the user asked). Progress and the
+ * result are painted by applyUpdateState via the update:state event.
  */
 async function checkForUpdateNow() {
   const btn = el('btn-aj-buscar-update');
   const result = el('aj-update-result');
   if (!btn || !result) return;
 
-  const original = btn.innerHTML;
+  btn.dataset.label = btn.dataset.label || btn.innerHTML;
+  btn.dataset.busy = '1';
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Buscando…';
   result.textContent = '';
-  result.innerHTML = '';
   try {
+    // Triggers the check; applyUpdateState paints progress/result from the
+    // update:state events. A resolved {ok:false} means main couldn't even
+    // start the check (no events will follow), so fall through to the reset.
     const r = await window.packprice.checkAppUpdate();
-    if (!r || !r.ok) {
-      result.textContent = 'No se pudo comprobar. Revisa tu conexión e inténtalo de nuevo.';
-      return;
-    }
-    renderUpdateResult(result, r);
+    if (!r || !r.ok) throw new Error(r && r.error);
   } catch (_) {
     result.textContent = 'No se pudo comprobar. Revisa tu conexión e inténtalo de nuevo.';
-  } finally {
     btn.disabled = false;
-    btn.innerHTML = original;
+    btn.innerHTML = btn.dataset.label;
+    btn.dataset.busy = '';
   }
 }
 
 /**
- * Paints an update-check result into `target`: either «Estás en la última
- * versión» or «Versión X disponible — [Descargar]». The Descargar link is
- * a real button bound to openExternal (no inline handler — CSP intact).
+ * Single source of truth for painting update progress, driven by the
+ * `update:state` events from main. Updates both the settings inline area
+ * (when the modal is open) and the top banner.
  */
-function renderUpdateResult(target, r) {
-  target.textContent = '';
-  target.innerHTML = '';
-  if (r.isNewer) {
-    const label = document.createElement('span');
-    label.textContent = `Versión ${r.latest} disponible — `;
-    const link = document.createElement('button');
-    link.type = 'button';
-    link.className = 'link-button';
-    link.textContent = 'Descargar';
-    link.addEventListener('click', () => openExternalSafe(r.url));
-    target.appendChild(label);
-    target.appendChild(link);
-  } else {
-    target.textContent = 'Estás en la última versión.';
+function applyUpdateState(state) {
+  const phase = state && state.phase;
+
+  // 1) Settings inline result (only present while the modal is open).
+  const result = el('aj-update-result');
+  if (result) {
+    if (phase === 'checking') {
+      result.textContent = 'Buscando…';
+    } else if (phase === 'downloading') {
+      result.textContent = typeof state.percent === 'number'
+        ? `Descargando actualización… ${state.percent}%`
+        : 'Descargando actualización…';
+    } else if (phase === 'ready') {
+      result.textContent = `Versión ${state.version || ''} lista. Se instalará al cerrar la app.`;
+    } else if (phase === 'idle') {
+      result.textContent = 'Estás en la última versión.';
+    } else if (phase === 'error') {
+      result.textContent = 'No se pudo comprobar. Revisa tu conexión e inténtalo de nuevo.';
+    } else if (phase === 'dev') {
+      result.textContent = 'Las actualizaciones automáticas solo están disponibles en la app instalada.';
+    }
   }
+
+  // Re-enable the manual «Buscar ahora» button once the check resolves
+  // (anything past 'checking' — including 'downloading', so it isn't stuck
+  // for the whole background download; progress shows in the result text).
+  if (phase && phase !== 'checking') {
+    const btn = el('btn-aj-buscar-update');
+    if (btn && btn.dataset.busy === '1') {
+      btn.disabled = false;
+      btn.innerHTML = btn.dataset.label || 'Buscar ahora';
+      btn.dataset.busy = '';
+    }
+  }
+
+  // 2) Top banner: show during download and when ready; the restart button
+  // appears only when an update is downloaded and ready to install.
+  const textEl = el('update-banner-text');
+  const restartBtn = el('btn-update-restart');
+  if (phase === 'downloading') {
+    if (textEl) {
+      textEl.textContent = typeof state.percent === 'number'
+        ? `Descargando versión ${state.version || ''}… ${state.percent}%`
+        : 'Descargando actualización…';
+    }
+    if (restartBtn) restartBtn.classList.add('hidden');
+    show('update-banner');
+  } else if (phase === 'ready') {
+    if (textEl) textEl.textContent = `Versión ${state.version || ''} lista`;
+    if (restartBtn) restartBtn.classList.remove('hidden');
+    show('update-banner');
+  }
+  // checking / idle / error / dev: leave the banner as-is (boot stays silent).
 }
 
 /**
@@ -4397,19 +4441,10 @@ async function exportDiagnostics() {
  */
 async function maybeCheckForUpdate() {
   if (SETTINGS && SETTINGS.check_updates_on_start === false) return;
-  let r;
-  try {
-    r = await window.packprice.checkAppUpdate();
-  } catch (_) {
-    return; // swallow on boot — a failed check must never block startup
-  }
-  if (!r || !r.ok || !r.isNewer) return;
-
-  const textEl = el('update-banner-text');
-  if (textEl) textEl.textContent = `Versión ${r.latest} disponible`;
-  const downloadBtn = el('btn-update-download');
-  if (downloadBtn) downloadBtn.onclick = () => openExternalSafe(r.url);
-  show('update-banner');
+  // Just trigger it; results arrive via update:state → applyUpdateState,
+  // which only surfaces the banner for downloading/ready. A failed check
+  // is swallowed silently on boot.
+  try { await window.packprice.checkAppUpdate(); } catch (_) {}
 }
 
 // ============================================================

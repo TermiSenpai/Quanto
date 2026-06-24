@@ -131,7 +131,8 @@ dependencies. The default answer is **YAGNI**.
   persisted config-format marker `window.PACKPRICE_CONFIG` (existing `config.js`
   files assign it), and the Cloudflare D1 database name `packprice` (already
   provisioned in customer accounts). The GitHub repo was renamed to
-  `TermiSenpai/Quanto` (2026-06-17); `main.js` `GITHUB_REPO` points at it.
+  `TermiSenpai/Quanto` (2026-06-17); the repo lives in `package.json`
+  `build.publish` (electron-updater).
 - **2026-06-16 — Packaging: portable → NSIS installer.** The Windows target
   moves from `portable` to a **per-user one-click NSIS installer**
   (`build.nsis` in `package.json`). Motivation: the portable `.exe` is a
@@ -164,6 +165,21 @@ dependencies. The default answer is **YAGNI**.
   (`tests/fixtures/config-v4-full.js`). The demo catalog and any
   "load example" path are dropped. The admin-password placeholder stays as
   dead schema-compat (gate already removed).
+- **2026-06-24 — Auto-update (electron-updater).** Anticipated by the NSIS
+  packaging debate (2026-06-16, which noted it "unlocks `electron-updater`").
+  We add **`electron-updater`** as the only new runtime dependency: the
+  per-user NSIS installer supports it and the old "new version" notice
+  installed nothing. Still **no Worker and no server-side code** — it reads
+  public GitHub Releases (`TermiSenpai/Quanto`) over HTTPS. The `.exe` stays
+  **unsigned**; trust anchor is HTTPS + GitHub Releases. The check/download
+  runs **only in the main process** (renderer CSP untouched); `electron-log`
+  (already present) is the updater logger. UX: silent background download,
+  then a non-blocking "Versión X lista · [Reiniciar e instalar ahora]" banner,
+  with install-on-quit as the fallback. This **supersedes** the manual notice:
+  `lib/version-compare.js` and the GitHub-Releases `fetch` in `update:check`
+  are removed. Anything beyond GitHub Releases (a private feed, staged
+  rollouts, code signing) reopens the debate. Design:
+  `docs/superpowers/specs/2026-06-24-auto-update-electron-updater-design.md`.
 
 > **Language migration:** much legacy code (`main.js`, `app.js`, `calculo.js`,
 > `admin.js`, `config-parser.js`) is Spanish for historical reasons and migrates
