@@ -162,4 +162,38 @@ describe('readQuoteCache — corrupt or bad-shape file', () => {
     fs.writeFileSync(filePath, JSON.stringify({ fetchedAt: 't', payloads: {} }), 'utf-8');
     expect(() => readQuoteCache(dir)).toThrow(/Caché de presupuestos dañada/);
   });
+
+  test('throws Spanish error when payloads is present but wrong-typed', () => {
+    const filePath = quoteCachePathFor(dir);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    // A consumer doing `cache.payloads[id]` would read garbage — corruption,
+    // not forward-compat. An ABSENT payloads is fine; a wrong-typed one is not.
+    const wrongPayloads = [
+      JSON.stringify({ fetchedAt: 't', list: [], payloads: 42 }),
+      JSON.stringify({ fetchedAt: 't', list: [], payloads: 'nope' }),
+      JSON.stringify({ fetchedAt: 't', list: [], payloads: [] }),
+      JSON.stringify({ fetchedAt: 't', list: [], payloads: null }),
+    ];
+    for (const raw of wrongPayloads) {
+      fs.writeFileSync(filePath, raw, 'utf-8');
+      expect(() => readQuoteCache(dir), raw).toThrow(/Caché de presupuestos dañada/);
+    }
+  });
+
+  test('throws Spanish error when fetchedAt is missing or non-string', () => {
+    const filePath = quoteCachePathFor(dir);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    // fetchedAt is the staleness key — a missing/non-string one defeats the
+    // cache's whole purpose, so it is treated as corruption (mirrors the
+    // catalogVersion-is-a-number guard in catalog-cache.js).
+    const badFetchedAt = [
+      JSON.stringify({ list: [], payloads: {} }), // missing entirely
+      JSON.stringify({ fetchedAt: 12345, list: [], payloads: {} }), // number
+      JSON.stringify({ fetchedAt: null, list: [], payloads: {} }), // null
+    ];
+    for (const raw of badFetchedAt) {
+      fs.writeFileSync(filePath, raw, 'utf-8');
+      expect(() => readQuoteCache(dir), raw).toThrow(/Caché de presupuestos dañada/);
+    }
+  });
 });
