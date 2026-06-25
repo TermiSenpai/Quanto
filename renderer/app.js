@@ -4106,8 +4106,8 @@ function dismissReminder() {
 /**
  * On startup, count quotes that need attention and, if any, show the
  * discreet banner — unless already dismissed today. Never blocks: it is
- * a reminder, not a task (§2.7). Reads the local history (the per-PC
- * source of truth for status + validity).
+ * a reminder, not a task (§2.7). Reads the shared quote store
+ * (window.packprice.listQuotes → quotes:list → quoteRepo).
  */
 async function maybeShowReminder() {
   try {

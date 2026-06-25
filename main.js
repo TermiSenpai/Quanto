@@ -1223,13 +1223,13 @@ ipcMain.handle('snapshots:restore', async (event, payload) => {
 
 // --- Cloud quotes + statistics (v5) ---
 //
-// Thin wiring. The local history (quotes:save) stays the per-PC source of
-// truth; these mirror quotes to the shared D1 (idempotently) and compute
-// statistics over all PCs' data. File mode: upload/status are no-ops
-// ({ ok:true, skipped:true } — the chip state is still stored locally by
-// the renderer) and stats answers { ok:false, code:'NOT_CLOUD' } so the
-// screen shows the local-only note (UI-UX §2.7). The token never leaves
-// main; the orchestration (upload, offline enqueue, aggregation) lives in
+// Legacy cloud flat-row mirror (Phase B: no longer called by the renderer).
+// quotes:save now routes to the SHARED store via quoteRepo(settings); these
+// quotes:upload / quotes:set-status handlers are the old per-PC → D1
+// flat-row mirror path and are kept pending removal. File mode: upload/
+// status are no-ops ({ ok:true, skipped:true }) and stats answers
+// { ok:false, code:'NOT_CLOUD' } so the screen shows the local-only note
+// (UI-UX §2.7). The token never leaves main; the orchestration lives in
 // lib/cloud-bootstrap.js.
 ipcMain.handle('quotes:upload', async (event, payload) => {
   const settings = readSettings();

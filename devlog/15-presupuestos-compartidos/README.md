@@ -211,6 +211,11 @@ contenido: `setStatus` **no** sube la `version`.
 - **Pendiente de limpieza:** los canales de preload `uploadQuote` / `setQuoteStatus`
   quedan sin uso (muertos) en el renderer tras esta fase; se retiran en una
   limpieza posterior.
+- **At-least-once en el vaciado de CREATEs offline (nube):** si el proceso muere
+  tras confirmar el `createQuote` en D1 pero antes de eliminar la entrada del
+  outbox, el siguiente vaciado crea un presupuesto duplicado —nunca uno
+  perdido—. Es una propiedad inherente de una cola local sin Worker; el vaciado
+  de EDITs no lo tiene (actualización idempotente sobre un id estable).
 
 ---
 
