@@ -6,8 +6,9 @@
 // but client-injected (D1) instead of folder-backed, orchestrating the
 // lib/cloud-quotes.js ops (no raw SQL here).
 //
-// The fake D1 client below extends the one in tests/quote-repo-cloud.js:
-// it models BOTH the flat `quotes` row (INSERT OR IGNORE on the human
+// The fake D1 client below mirrors the fake in tests/quote-repo-cloud.test.js
+// (it is self-contained): it models BOTH the flat `quotes` row (INSERT OR
+// IGNORE on the human
 // id PK, with a real changes count) and the `quote_payloads` row
 // (INSERT OR IGNORE create-only + version-guarded UPDATE), plus the
 // DELETEs the façade's deleteQuote drives. It records every statement
@@ -271,6 +272,34 @@ describe('createQuote', () => {
     expect(q.id).toBe('PP-2026-0002');
     // the other device's payload survives intact (lost claim wrote nothing)
     expect(JSON.parse(client.payloads.get('PP-2026-0001').payload)).toEqual({ id: 'PP-2026-0001', other: true });
+  });
+
+  test('a network error during the claim PROPAGATES (never mis-read as a collision/retry)', async () => {
+    // The collision check keys on meta.changes (0 = taken). A network failure
+    // is NOT a collision: it must reject, not be swallowed into { claimed:false }
+    // and silently retry/loop. Inject a D1ClientError-like throw on the claim
+    // INSERT and assert createQuote rejects, the loop never advances, and
+    // nothing was written.
+    const client = fakeClient();
+    const innerQuery = client.query.bind(client);
+    let claimAttempts = 0;
+    client.query = async (sql, params = []) => {
+      if (/INSERT OR IGNORE INTO quote_payloads/.test(sql)) {
+        claimAttempts += 1;
+        const err = new Error('Sin conexión con la base de datos');
+        err.network = true; // structural flag the real D1ClientError carries
+        throw err;
+      }
+      return innerQuery(sql, params);
+    };
+
+    await expect(createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' }))
+      .rejects.toThrow(/conexión/i);
+    // the error short-circuited the very first claim — no swallow, no retry loop
+    expect(claimAttempts).toBe(1);
+    // and nothing landed (no orphan flat/payload row)
+    expect(client.quotes.size).toBe(0);
+    expect(client.payloads.size).toBe(0);
   });
 });
 
