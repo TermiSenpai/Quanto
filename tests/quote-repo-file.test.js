@@ -17,6 +17,7 @@ import {
   listQuotes,
   searchQuotes,
   replaceQuote,
+  setStatus,
   deleteQuote,
   MAX_QUOTE_BYTES,
 } from '../lib/quote-repo-file.js';
@@ -335,6 +336,67 @@ describe('replaceQuote', () => {
     const q = createQuote(folder, DRAFT, { now: new Date('2026-06-01T10:00:00Z') });
     const token = getQuote(folder, q.id);
     replaceQuote(folder, q.id, DRAFT, token, { now: new Date('2026-06-01T11:00:00Z') });
+    const file = path.join(folder, `${q.id}.json`);
+    expect(fs.existsSync(file + '.tmp')).toBe(false);
+    expect(fs.existsSync(file)).toBe(true);
+  });
+});
+
+// ── setStatus ─────────────────────────────────────────────────
+describe('setStatus', () => {
+  test('updates status + status_ts and does NOT bump version', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT, { now: new Date('2026-05-11T14:00:00Z') });
+    expect(q.version).toBe(1);
+    const updated = setStatus(folder, q.id, { status: 'accepted', status_ts: '2026-06-01T10:00:00.000Z' });
+    expect(updated.status).toBe('accepted');
+    expect(updated.status_ts).toBe('2026-06-01T10:00:00.000Z');
+    // workflow change must NOT bump the content version (mirrors history.js)
+    expect(updated.version).toBe(1);
+    // persisted
+    const onDisk = getQuote(folder, q.id);
+    expect(onDisk.quote.status).toBe('accepted');
+    expect(onDisk.quote.version).toBe(1);
+  });
+
+  test('accepts a status with no status_ts (leaves any existing one)', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, { ...DRAFT, status_ts: '2026-01-01T00:00:00.000Z' }, { now: new Date('2026-05-11T14:00:00Z') });
+    const updated = setStatus(folder, q.id, { status: 'rejected' });
+    expect(updated.status).toBe('rejected');
+    expect(updated.status_ts).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  test('rejects an invalid status (throws Spanish, writes nothing)', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT, { now: new Date('2026-05-11T14:00:00Z') });
+    expect(() => setStatus(folder, q.id, { status: 'bogus' })).toThrow(/no válido/i);
+    // the stored status is unchanged
+    expect(getQuote(folder, q.id).quote.status).toBe('pending');
+  });
+
+  test('returns null for a missing id', () => {
+    const folder = makeFolder();
+    expect(setStatus(folder, 'PP-2026-9999', { status: 'accepted' })).toBeNull();
+  });
+
+  test('returns null for a traversal id and never writes outside the folder', () => {
+    const folder = makeFolder();
+    const parent = path.dirname(folder);
+    const sentinel = path.join(parent, 'SENTINEL_STATUS.json');
+    fs.writeFileSync(sentinel, JSON.stringify({ status: 'pending' }), 'utf-8');
+    try {
+      expect(setStatus(folder, '../SENTINEL_STATUS', { status: 'accepted' })).toBeNull();
+      expect(JSON.parse(fs.readFileSync(sentinel, 'utf-8')).status).toBe('pending');
+    } finally {
+      fs.rmSync(sentinel, { force: true });
+    }
+  });
+
+  test('atomic write: no .tmp left behind', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT, { now: new Date('2026-06-01T10:00:00Z') });
+    setStatus(folder, q.id, { status: 'accepted', status_ts: '2026-06-02T10:00:00.000Z' });
     const file = path.join(folder, `${q.id}.json`);
     expect(fs.existsSync(file + '.tmp')).toBe(false);
     expect(fs.existsSync(file)).toBe(true);

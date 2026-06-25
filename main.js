@@ -47,15 +47,22 @@ const {
 const { configureLogger, readLastLines, getLogPath, logger } = require('./lib/logger');
 const { diffObjects } = require('./lib/diff');
 const { appendAuditEntry, readRecentEntries } = require('./lib/audit');
+// lib/history.js is NO LONGER the source of truth for the quotes:* IPC
+// (Phase B routes them through the shared quote repository below). It is
+// kept on disk for B5's one-time migration of any legacy presupuestos.json.
+const quoteRepoFile = require('./lib/quote-repo-file');
+const quoteRepoCloud = require('./lib/quote-repo-cloud');
 const {
-  saveQuote: saveQuoteToHistory,
-  listQuotes,
-  searchQuotes,
-  deleteQuote,
-  getQuote,
-  updateQuote,
-  replaceQuote
-} = require('./lib/history');
+  readQuoteCache,
+  writeQuoteCache
+} = require('./lib/quote-cache');
+const { enqueueFullQuote } = require('./lib/quote-outbox');
+const { saveFullQuote } = require('./lib/cloud-quotes');
+const {
+  quotesFolder,
+  isPendingId,
+  newPendingId
+} = require('./lib/quote-store-helpers');
 const {
   renderQuote, BUILTIN_TEMPLATES, brandColors, listBuiltinTemplates, renderPreview
 } = require('./lib/pdf-templates');
@@ -118,8 +125,238 @@ const cloudBootstrap = createCloudBootstrap({
   appVersion: app.getVersion(),
   // Dropped cloud errors (cache fallback, lock-release throws) are
   // logged here so they are never silently swallowed (hard rule §4).
-  log: (msg, meta) => logger.warn(msg, meta)
+  log: (msg, meta) => logger.warn(msg, meta),
+  // Phase B: drains the offline fullQuotes lane on every successful sync.
+  // Reconciles a provisional offline-create id into a real PP-YYYY-NNNN
+  // one and refreshes the per-PC cache (declared below; hoisted).
+  drainFullQuote: drainFullQuoteToCloud
 });
+
+// ============================================================
+// Shared quote repository (Phase B)
+// ============================================================
+// The quotes:* IPC routes through ONE uniform façade bound to the
+// active backend (file: <configDir>/presupuestos/<id>.json; cloud: the
+// customer's D1). It normalizes the two backends' differing
+// conflict tokens (file {mtime,sha256} vs cloud {version}) into one
+// opaque `token` that the renderer only echoes back on an edit-save —
+// the token never leaves main. The per-PC cache (lib/quote-cache.js)
+// mirrors the last good read for the offline list/get fallback; offline
+// writes go to the fullQuotes outbox lane (lib/quote-outbox.js).
+
+// True when an error means the backend was UNREACHABLE (so the write is
+// queueable and a read falls back to the cache), as opposed to a
+// validation/size/conflict bug (which surfaces). Cloud: a D1ClientError
+// with .network === true (set only at the fetch-reject site). File: an
+// fs error whose code marks the folder/path unreachable (NAS down) —
+// never a serialization/size error (those are plain Errors).
+const FILE_UNREACHABLE_CODES = new Set([
+  'ENOENT', 'ENOTDIR', 'EBUSY', 'EPERM', 'EACCES', 'ETIMEDOUT', 'ENETUNREACH',
+  'EHOSTUNREACH', 'ECONNREFUSED', 'ECONNRESET', 'ENETDOWN', 'EHOSTDOWN', 'EIO'
+]);
+function isBackendUnreachable(err) {
+  if (!err) return false;
+  // Cloud: the structural offline flag a D1ClientError carries (set ONLY at
+  // the fetch-reject site in lib/d1-client.js). File: an fs error code that
+  // marks the folder/path unreachable (NAS down).
+  if (err.network === true) return true;
+  return typeof err.code === 'string' && FILE_UNREACHABLE_CODES.has(err.code);
+}
+
+/**
+ * Returns the active quote backend as a uniform async interface,
+ * normalizing the two backends' conflict tokens into one opaque `token`.
+ * File mode wraps the synchronous lib/quote-repo-file.js fns; cloud mode
+ * binds lib/quote-repo-cloud.js to a D1 client built from settings.
+ *
+ * @param {object} settings - per-PC settings (data_source + config_path/cloud)
+ * @returns {object} the uniform repo (createQuote/getQuote/listQuotes/…)
+ */
+function quoteRepo(settings) {
+  const isCloud = settings && settings.data_source === 'cloud';
+
+  if (isCloud) {
+    const client = cloudBootstrap.clientFor(settings);
+    return {
+      async createQuote(draft) {
+        return quoteRepoCloud.createQuote(client, draft);
+      },
+      async getQuote(id) {
+        const res = await quoteRepoCloud.getQuote(client, id);
+        if (!res) return null;
+        return { quote: res.quote, token: { version: res.version } };
+      },
+      async listQuotes() {
+        return quoteRepoCloud.listQuotes(client);
+      },
+      async searchQuotes(query) {
+        return quoteRepoCloud.searchQuotes(client, query);
+      },
+      async replaceQuote(id, draft, token) {
+        // token === null ⇒ force: re-read the CURRENT version and update
+        // against it so the guarded write always wins.
+        let expected = token && token.version;
+        if (token === null) {
+          const cur = await quoteRepoCloud.getQuote(client, id);
+          if (!cur) return null;
+          expected = cur.version;
+        }
+        const res = await quoteRepoCloud.replaceQuote(client, id, draft, expected);
+        if (res && res.conflict) {
+          const cur = await quoteRepoCloud.getQuote(client, id);
+          return { conflict: true, current: cur ? cur.quote : null };
+        }
+        return res;
+      },
+      async setStatus(id, status, statusTs) {
+        return quoteRepoCloud.setStatus(client, id, status, statusTs);
+      },
+      async deleteQuote(id) {
+        return quoteRepoCloud.deleteQuote(client, id);
+      }
+    };
+  }
+
+  const folder = quotesFolder(settings.config_path);
+  return {
+    async createQuote(draft) {
+      return quoteRepoFile.createQuote(folder, draft);
+    },
+    async getQuote(id) {
+      const res = quoteRepoFile.getQuote(folder, id);
+      if (!res) return null;
+      return { quote: res.quote, token: { mtime: res.mtime, sha256: res.sha256 } };
+    },
+    async listQuotes() {
+      return quoteRepoFile.listQuotes(folder, { log: (m) => logger.warn(m) });
+    },
+    async searchQuotes(query) {
+      return quoteRepoFile.searchQuotes(folder, query, { log: (m) => logger.warn(m) });
+    },
+    async replaceQuote(id, draft, token) {
+      // token === null ⇒ force: pass no `expected` so the conflict check
+      // is skipped. Otherwise pass the {mtime,sha256} token straight.
+      const expected = token === null ? null : token;
+      const res = quoteRepoFile.replaceQuote(folder, id, draft, expected);
+      if (res && res.conflict) {
+        const cur = quoteRepoFile.getQuote(folder, id);
+        return { conflict: true, current: cur ? cur.quote : null };
+      }
+      return res;
+    },
+    async setStatus(id, status, statusTs) {
+      return quoteRepoFile.setStatus(folder, id, { status, status_ts: statusTs });
+    },
+    async deleteQuote(id) {
+      return quoteRepoFile.deleteQuote(folder, id);
+    }
+  };
+}
+
+// ── per-PC quote cache helpers ─────────────────────────────────
+// The cache mirrors the last good backend read so the history list and a
+// reopen still answer when the backend is briefly unreachable. A cache
+// read/write failure is never fatal (logged, never surfaced over the
+// real result): the cache is a convenience, not the source of truth.
+
+function readQuoteCacheSafe() {
+  try {
+    return readQuoteCache(SETTINGS_DIR);
+  } catch (err) {
+    logger.warn('quote cache read failed (ignored)', { error: err.message });
+    return null;
+  }
+}
+
+// Maps a full quote to the lightweight list-row shape the history list
+// renders (mirrors lib/quote-repo-cloud.js listQuotes' projection).
+function quoteListRow(q) {
+  return {
+    id: q.id,
+    date: q.date || q.ts,
+    user: q.user,
+    customer: { name: q.customer && q.customer.name },
+    total_vat_inc: (q.totals && q.totals.total_vat_inc) != null ? q.totals.total_vat_inc : q.total_vat_inc,
+    status: q.status,
+    pack_id: q.pack_id
+  };
+}
+
+// Refreshes the cached list (from the rows the backend just returned)
+// while preserving any already-cached payloads. Best-effort.
+function refreshCachedList(list) {
+  try {
+    const prev = readQuoteCacheSafe();
+    writeQuoteCache(SETTINGS_DIR, {
+      fetchedAt: new Date().toISOString(),
+      list: Array.isArray(list) ? list : [],
+      payloads: (prev && prev.payloads) || {}
+    });
+  } catch (err) {
+    logger.warn('quote cache list refresh failed (ignored)', { error: err.message });
+  }
+}
+
+// Upserts one full quote into the cache (its list row + payload). Used on
+// a successful save/get/edit so a warm cache can answer offline. Best-effort.
+function upsertCachedQuote(quote) {
+  if (!quote || !quote.id) return;
+  try {
+    const prev = readQuoteCacheSafe() || { list: [], payloads: {} };
+    const payloads = { ...(prev.payloads || {}), [quote.id]: quote };
+    const list = (prev.list || []).filter((r) => r.id !== quote.id);
+    list.unshift(quoteListRow(quote));
+    list.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    writeQuoteCache(SETTINGS_DIR, { fetchedAt: new Date().toISOString(), list, payloads });
+  } catch (err) {
+    logger.warn('quote cache upsert failed (ignored)', { error: err.message });
+  }
+}
+
+// Removes one quote from the cache (list row + payload). Best-effort.
+function removeCachedQuote(id) {
+  if (!id) return;
+  try {
+    const prev = readQuoteCacheSafe();
+    if (!prev) return;
+    const payloads = { ...(prev.payloads || {}) };
+    delete payloads[id];
+    const list = (prev.list || []).filter((r) => r.id !== id);
+    writeQuoteCache(SETTINGS_DIR, { fetchedAt: new Date().toISOString(), list, payloads });
+  } catch (err) {
+    logger.warn('quote cache remove failed (ignored)', { error: err.message });
+  }
+}
+
+// Replaces a provisional offline-create entry with the real saved quote:
+// drops the PP-PENDING-… payload/list row and inserts the real one.
+function reconcileCachedQuote(provisionalId, realQuote) {
+  removeCachedQuote(provisionalId);
+  upsertCachedQuote(realQuote);
+}
+
+/**
+ * Drains one full reopenable quote buffered offline against the cloud
+ * (Phase B fullQuotes lane). A quote with a PROVISIONAL id (offline create)
+ * gets a REAL PP-YYYY-NNNN id assigned via the cloud create (claim + retry),
+ * then the cache's provisional entry is replaced. A quote that already has a
+ * real id (offline EDIT/replay) drains via the idempotent saveFullQuote.
+ * Throws on failure so the outbox keeps the item (best-effort retry).
+ *
+ * @param {object} client - the live D1 client (bound by cloud-bootstrap)
+ * @param {object} quote - the queued full reopenable quote
+ */
+async function drainFullQuoteToCloud(client, quote) {
+  if (isPendingId(quote && quote.id)) {
+    // Strip the provisional id/version so the cloud create assigns a real one.
+    const { id: provisionalId, version, date, updated_at, ...draft } = quote;
+    const saved = await quoteRepoCloud.createQuote(client, draft);
+    reconcileCachedQuote(provisionalId, saved);
+    return saved;
+  }
+  // Real id: idempotent re-save (INSERT OR IGNORE on the human id).
+  return saveFullQuote(client, quote);
+}
 
 let mainWindow = null;
 
@@ -1189,75 +1426,192 @@ ipcMain.handle('error-reports:set', (event, enabled) => {
   }
 });
 
-// --- Quote history (local, per-PC) ---
+// --- Quote history (shared store, Phase B) ---
 //
-// Stored under <userData>/presupuestos.json. The renderer doesn't
-// need to know the path; it just sends/receives plain quote objects.
-ipcMain.handle('quotes:save', (event, draft) => {
+// Routes through the uniform quote repository (quoteRepo above): file
+// mode → <configDir>/presupuestos/<id>.json; cloud mode → the customer's
+// D1. The renderer sends/receives plain quote objects; the conflict token
+// is opaque and never leaves main (it rides inside the draft on an edit as
+// draft.__token, and draft.__force forces a save past a conflict). The
+// per-PC cache (lib/quote-cache.js) backs the offline list/get fallback;
+// offline writes go to the fullQuotes outbox lane.
+
+// Pulls the transient save envelope (token + force flag the renderer adds
+// on an edit-save) off a draft, returning the clean draft to persist and
+// the extracted { token, force }. These fields must NEVER be stored.
+function extractSaveEnvelope(draft) {
+  if (!draft || typeof draft !== 'object') return { clean: draft, token: undefined, force: false };
+  const { __token, __force, ...clean } = draft;
+  return { clean, token: __token, force: __force === true };
+}
+
+ipcMain.handle('quotes:save', async (event, draft) => {
+  const settings = readSettings();
+  const { clean, token, force } = extractSaveEnvelope(draft);
+  const repo = quoteRepo(settings);
+  const isEdit = Boolean(clean && clean.id);
   try {
     let saved;
-    // If the draft carries an id that already exists locally, replace it
-    // (edit flow — the renderer sets draft.id = state.editingQuoteId before
-    // calling quotes:save so we can route to the correct operation here).
-    if (draft && draft.id && getQuote(SETTINGS_DIR, draft.id)) {
-      saved = replaceQuote(SETTINGS_DIR, draft.id, draft);
+    if (isEdit) {
+      const res = await repo.replaceQuote(clean.id, clean, force ? null : (token || null));
+      if (res === null) {
+        return { ok: false, error: `No se encontró el presupuesto ${clean.id}.` };
+      }
+      if (res.conflict) {
+        logger.info('quote save conflict', { id: clean.id });
+        return { ok: false, conflict: true, current: res.current };
+      }
+      saved = res.quote;
       logger.info('quote replaced (edit)', { id: saved.id });
     } else {
-      saved = saveQuoteToHistory(SETTINGS_DIR, draft);
+      saved = await repo.createQuote(clean);
       logger.info('quote saved', { id: saved.id, total: saved.totals && saved.totals.total_vat_inc });
     }
+    upsertCachedQuote(saved);
     return { ok: true, quote: saved };
   } catch (err) {
+    // A CLOUD-unreachable error must never lose the quote: buffer the FULL
+    // quote to the outbox (it drains on the next successful cloud sync) and
+    // report it queued. A validation/size/conflict error is a data bug —
+    // surface it, never queue.
+    //
+    // File mode has no outbox drain (the NAS file IS the backend), so a
+    // folder-unreachable error there is surfaced for an explicit retry once
+    // the NAS is back — the renderer keeps the data on screen. Queuing it
+    // into a lane nothing drains in file mode would be a silent black hole.
+    const isCloud = settings && settings.data_source === 'cloud';
+    if (isCloud && isBackendUnreachable(err)) {
+      try {
+        let queued;
+        if (isEdit) {
+          // An edit already owns a real id — drain re-saves it idempotently.
+          queued = clean;
+        } else {
+          // A fresh offline create gets a provisional id until the drain
+          // assigns the real one and reconciles the cache.
+          queued = { ...clean, id: newPendingId(), version: 1 };
+        }
+        enqueueFullQuote(SETTINGS_DIR, queued);
+        upsertCachedQuote(queued);
+        logger.info('quote queued (offline)', { id: queued.id, edit: isEdit });
+        return { ok: true, queued: true, quote: queued };
+      } catch (queueErr) {
+        logger.error('quote offline-queue failed', { error: queueErr.message });
+        return { ok: false, error: queueErr.message };
+      }
+    }
     logger.error('quote save failed', { error: err.message });
     return { ok: false, error: err.message };
   }
 });
 
-ipcMain.handle('quotes:list', () => {
+ipcMain.handle('quotes:list', async () => {
+  const settings = readSettings();
   try {
-    return { ok: true, quotes: listQuotes(SETTINGS_DIR) };
+    const quotes = await quoteRepo(settings).listQuotes();
+    refreshCachedList(quotes);
+    return { ok: true, quotes };
   } catch (err) {
+    if (isBackendUnreachable(err)) {
+      const cached = readQuoteCacheSafe();
+      logger.warn('quotes:list backend unreachable, serving cache', { error: err.message });
+      return { ok: true, quotes: (cached && cached.list) || [] };
+    }
+    logger.error('quotes:list failed', { error: err.message });
     return { ok: false, error: err.message };
   }
 });
 
-ipcMain.handle('quotes:search', (event, query) => {
+ipcMain.handle('quotes:search', async (event, query) => {
+  const settings = readSettings();
   try {
-    return { ok: true, quotes: searchQuotes(SETTINGS_DIR, query) };
+    const quotes = await quoteRepo(settings).searchQuotes(query);
+    return { ok: true, quotes };
   } catch (err) {
+    if (isBackendUnreachable(err)) {
+      // Offline: filter the cached list locally (mirrors the backends' fields).
+      const cached = readQuoteCacheSafe();
+      const list = (cached && cached.list) || [];
+      const q = String(query || '').trim().toLowerCase();
+      const filtered = !q ? list : list.filter((row) => {
+        const haystack = [row.id, row.user, row.customer && row.customer.name]
+          .filter(Boolean).join(' ').toLowerCase();
+        return haystack.includes(q);
+      });
+      logger.warn('quotes:search backend unreachable, serving cache', { error: err.message });
+      return { ok: true, quotes: filtered };
+    }
+    logger.error('quotes:search failed', { error: err.message });
     return { ok: false, error: err.message };
   }
 });
 
-ipcMain.handle('quotes:get', (event, id) => {
+ipcMain.handle('quotes:get', async (event, id) => {
+  const settings = readSettings();
   try {
-    return { ok: true, quote: getQuote(SETTINGS_DIR, id) };
+    const res = await quoteRepo(settings).getQuote(id);
+    if (!res) return { ok: true, quote: null, token: null };
+    upsertCachedQuote(res.quote);
+    return { ok: true, quote: res.quote, token: res.token };
   } catch (err) {
+    if (isBackendUnreachable(err)) {
+      const cached = readQuoteCacheSafe();
+      const payload = cached && cached.payloads && cached.payloads[id];
+      logger.warn('quotes:get backend unreachable, serving cache', { id, error: err.message });
+      // No token offline: an edit-save then forces (the renderer can't echo a
+      // token it never received) — acceptable, the next online save wins.
+      return { ok: true, quote: payload || null, token: null };
+    }
+    logger.error('quotes:get failed', { id, error: err.message });
     return { ok: false, error: err.message };
   }
 });
 
-// Patches an existing local quote (status chip change, or recording the
-// cloud UUID after an upload). The local history stays the per-PC source
-// of truth; the cloud mirror is updated separately via quotes:set-status.
-ipcMain.handle('quotes:update', (event, payload) => {
+// Patches an existing quote's STATUS (workflow, not a content edit — no
+// version bump). In cloud mode this updates the authoritative flat row.
+// A legacy cloud_id in the patch is ignored gracefully (the human id is
+// canonical now — B7). The separate quotes:set-status handler still mirrors
+// to the cloud for the renderer's existing flow and stays idempotent.
+ipcMain.handle('quotes:update', async (event, payload) => {
+  const settings = readSettings();
   try {
     const { id, patch } = payload || {};
-    const updated = updateQuote(SETTINGS_DIR, id, patch || {});
-    if (updated) logger.info('quote updated', { id, fields: Object.keys(patch || {}) });
+    const p = patch || {};
+    const status = p.status;
+    const statusTs = p.status_ts || new Date().toISOString();
+    const updated = await quoteRepo(settings).setStatus(id, status, statusTs);
+    if (updated) {
+      logger.info('quote status updated', { id, status });
+      // Refresh the cached entry so the offline view reflects the new status.
+      const got = await quoteRepo(settings).getQuote(id).catch(() => null);
+      if (got && got.quote) upsertCachedQuote(got.quote);
+    }
     return { ok: true, quote: updated };
   } catch (err) {
+    if (isBackendUnreachable(err)) {
+      logger.warn('quotes:update backend unreachable', { error: err.message });
+      return { ok: false, offline: true, error: err.message };
+    }
     logger.error('quote update failed', { error: err.message });
     return { ok: false, error: err.message };
   }
 });
 
-ipcMain.handle('quotes:delete', (event, id) => {
+ipcMain.handle('quotes:delete', async (event, id) => {
+  const settings = readSettings();
   try {
-    const removed = deleteQuote(SETTINGS_DIR, id);
-    if (removed) logger.info('quote deleted', { id });
+    const removed = await quoteRepo(settings).deleteQuote(id);
+    if (removed) {
+      logger.info('quote deleted', { id });
+      removeCachedQuote(id);
+    }
     return { ok: true, removed };
   } catch (err) {
+    if (isBackendUnreachable(err)) {
+      logger.warn('quotes:delete backend unreachable', { error: err.message });
+      return { ok: false, offline: true, error: err.message };
+    }
+    logger.error('quote delete failed', { error: err.message });
     return { ok: false, error: err.message };
   }
 });

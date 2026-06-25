@@ -903,7 +903,7 @@ describe('saveQuote', () => {
     expect(res).toEqual({ ok: true, id: 'uuid-1' });
     expect(created).toEqual([{ token: 'tok-secret', accountId: 'acc-1', databaseId: 'db-1' }]);
     expect(calls.some((c) => /INSERT OR IGNORE INTO quotes/.test(c.sql))).toBe(true);
-    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [], fullQuotes: [] });
   });
 
   test('on a network failure the quote is enqueued and { ok:true, queued:true } returned', async () => {
@@ -935,7 +935,7 @@ describe('saveQuote', () => {
     expect(res.id).toBe('uuid-1');
     expect(res.error).toMatch(/Cloudflare rechazó/);
     expect(res.queued).toBeUndefined();
-    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [], fullQuotes: [] });
     expect(log).toHaveBeenCalled();
   });
 
@@ -951,7 +951,7 @@ describe('saveQuote', () => {
     expect(res.ok).toBe(false);
     expect(res.queued).toBeUndefined();
     expect(res.error).toMatch(/presupuesto/i);
-    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [], fullQuotes: [] });
   });
 
   test('never leaks the token in the returned shape', async () => {
@@ -973,7 +973,7 @@ describe('setQuoteStatus', () => {
     const upd = calls.find((c) => /UPDATE quotes SET status/.test(c.sql));
     expect(upd).toBeTruthy();
     expect(upd.params).toEqual(['accepted', NOW(), 'uuid-1']);
-    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [], fullQuotes: [] });
   });
 
   test('rejects an invalid status without touching the network (Spanish error)', async () => {
@@ -983,7 +983,7 @@ describe('setQuoteStatus', () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/estado/i);
     // An invalid status is a client bug, not an outage → not queued.
-    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [], fullQuotes: [] });
   });
 
   test('on a network failure the status is enqueued and { ok:true, queued:true } returned', async () => {
@@ -1006,7 +1006,7 @@ describe('setQuoteStatus', () => {
 
     expect(res.ok).toBe(false);
     expect(res.queued).toBeUndefined();
-    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [], fullQuotes: [] });
   });
 });
 
@@ -1096,7 +1096,7 @@ describe('outbox flush on sync', () => {
     expect(res.source).toBe('cloud');
     // The queued quote was uploaded and the outbox drained.
     expect(uploads.length).toBe(1);
-    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [] });
+    expect(readOutbox(tmpDir)).toEqual({ quotes: [], statuses: [], fullQuotes: [] });
   });
 
   test('a flush failure never breaks the catalog load (best-effort, logged)', async () => {

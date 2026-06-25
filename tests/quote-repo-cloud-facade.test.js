@@ -22,6 +22,7 @@ import {
   listQuotes,
   searchQuotes,
   replaceQuote,
+  setStatus,
   deleteQuote,
 } from '../lib/quote-repo-cloud.js';
 import { tryClaimFullQuote, deleteFullQuote } from '../lib/cloud-quotes.js';
@@ -444,6 +445,42 @@ describe('replaceQuote', () => {
     expect(res.quote.version).toBe(2);
     const stale = await replaceQuote(client, 'PP-2026-0001', sampleDraft({ user: 'stale' }), 1, { now: '2026-06-12T13:00:00.000Z' });
     expect(stale).toEqual({ conflict: true });
+  });
+});
+
+// ── setStatus ────────────────────────────────────────────────────
+describe('setStatus', () => {
+  test('updates the authoritative flat row status (no payload version bump), getFullQuote overlays it', async () => {
+    const client = fakeClient();
+    await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
+    const res = await setStatus(client, 'PP-2026-0001', 'accepted', '2026-06-13T09:00:00.000Z');
+    expect(res).toEqual({ ok: true, id: 'PP-2026-0001', status: 'accepted' });
+
+    // flat row mutated
+    const flat = client.quotes.get('PP-2026-0001');
+    expect(flat.status).toBe('accepted');
+    expect(flat.status_ts).toBe('2026-06-13T09:00:00.000Z');
+
+    // payload version untouched (status is workflow, not a content edit)
+    expect(client.payloads.get('PP-2026-0001').version).toBe(1);
+
+    // getQuote overlays the authoritative status onto the payload
+    const got = await getQuote(client, 'PP-2026-0001');
+    expect(got.quote.status).toBe('accepted');
+    expect(got.version).toBe(1);
+  });
+
+  test('rejects an invalid status without any write (fail-fast, non-network)', async () => {
+    const client = fakeClient();
+    await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
+    client.calls.length = 0;
+    await expect(setStatus(client, 'PP-2026-0001', 'bogus', '2026-06-13T09:00:00.000Z'))
+      .rejects.toThrow(/no válido/i);
+    // no UPDATE ran
+    const mutated = client.calls.some((c) => /UPDATE/i.test(c.sql || ''));
+    expect(mutated).toBe(false);
+    // status unchanged
+    expect(client.quotes.get('PP-2026-0001').status).toBe('pending');
   });
 });
 
