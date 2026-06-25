@@ -84,6 +84,9 @@ const { createD1Client } = require('./lib/d1-client');
 const { loadMigrations } = require('./lib/migration-loader');
 const { createCloudBootstrap } = require('./lib/cloud-bootstrap');
 const { migrateLegacyUserData } = require('./lib/userdata-migration');
+const { readAllQuotes, historyPathFor } = require('./lib/history');
+const { migrateLocalQuotes } = require('./lib/quote-migrate-local');
+const { tryClaimFullQuote } = require('./lib/cloud-quotes');
 const { autoUpdater } = require('electron-updater');
 const { wireUpdater } = require('./lib/app-updater');
 
@@ -342,6 +345,89 @@ async function drainFullQuoteToCloud(client, quote) {
     reconcileCachedQuote,
     upsertCachedQuote
   }, quote);
+}
+
+// ============================================================
+// B5 · one-time migration of per-PC quotes → shared store
+// ============================================================
+// A PC upgrading from a pre-Phase-B build still has its quotes in the
+// legacy per-PC presupuestos.json (lib/history.js). Phase B made the
+// shared store (file folder next to config.js, or D1 quote_payloads) the
+// source of truth, so on boot we push those legacy quotes into the
+// shared store once, idempotently — preserving each quote's existing id
+// and skipping any id already present (so re-runs and multi-PC boots
+// never duplicate). On a fully-clean run (no failures) the legacy file
+// is renamed to a .bak-pre-shared safety copy (never deleted by the app).
+// Best-effort and logged: a hiccup must never block boot (hard rule §4).
+async function migratePerPcQuotesToSharedStore() {
+  try {
+    const legacyPath = historyPathFor(SETTINGS_DIR);
+    // Read the legacy per-PC file (lazily migrates v2→v3 entries). Empty
+    // or missing → nothing to do.
+    const localQuotes = readAllQuotes(SETTINGS_DIR);
+    if (!localQuotes || localQuotes.length === 0) return;
+
+    const settings = readSettings() || {};
+    const isCloud = settings.data_source === 'cloud';
+
+    // Build the id-preserving putIfAbsent adapter for the active backend.
+    // If the shared store is not configured yet (no config_path in file
+    // mode, no cloud creds in cloud mode) → skip; we'll retry on a later
+    // boot, once the first-run wizard has set things up.
+    let putIfAbsent;
+    if (isCloud) {
+      const cloud = settings.cloud || {};
+      if (!cloud.token || !cloud.account_id || !cloud.database_id) {
+        logger.info('quote migration skipped: cloud store not configured yet');
+        return;
+      }
+      const client = cloudBootstrap.clientFor(settings);
+      // tryClaimFullQuote does INSERT OR IGNORE keyed on the human id and
+      // reports whether it claimed it (claimed=false ⇒ already present).
+      putIfAbsent = async (q) => ({ migrated: (await tryClaimFullQuote(client, q)).claimed });
+    } else {
+      if (!settings.config_path) {
+        logger.info('quote migration skipped: shared config path not set yet');
+        return;
+      }
+      const folder = quotesFolder(settings.config_path);
+      if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+      putIfAbsent = async (q) => quoteRepoFile.putQuoteIfAbsent(folder, q);
+    }
+
+    const summary = await migrateLocalQuotes(localQuotes, putIfAbsent);
+    logger.info('per-PC quote migration ran', {
+      mode: isCloud ? 'cloud' : 'file',
+      total: summary.total,
+      migrated: summary.migrated,
+      skipped: summary.skipped,
+      failed: summary.failed
+    });
+
+    if (summary.failed === 0) {
+      // Every entry is now in the shared store (migrated or already
+      // present). Retire the legacy file to a safety copy — never delete.
+      // Only rename when the source still exists (a prior partial run may
+      // have left an older .bak-pre-shared; that's fine, we overwrite it).
+      if (fs.existsSync(legacyPath)) {
+        const backupPath = legacyPath + '.bak-pre-shared';
+        fs.renameSync(legacyPath, backupPath);
+        logger.info('legacy presupuestos.json retired after migration', { backupPath });
+      }
+    } else {
+      // Leave the source in place so the next boot retries the remaining
+      // entries (already-migrated ids are skipped). Surface the causes.
+      logger.warn('per-PC quote migration had failures; source kept for retry', {
+        failed: summary.failed, errors: summary.errors
+      });
+    }
+  } catch (err) {
+    // Never block or crash boot on a migration hiccup (hard rule §4: log
+    // it, don't swallow silently). The legacy file is untouched on a throw.
+    logger.warn('per-PC quote migration failed (non-blocking)', {
+      error: err && err.message
+    });
+  }
 }
 
 let mainWindow = null;
@@ -1870,6 +1956,12 @@ app.whenReady().then(() => {
     platform: process.platform,
     userData: SETTINGS_DIR
   });
+
+  // One-time, idempotent migration of any pre-Phase-B per-PC quotes into
+  // the shared store (B5). Fire-and-forget: it owns its own try/catch and
+  // must never block boot — the file path is fast, and a slow/hung cloud
+  // call must not delay the window (it just retries next boot). Logged.
+  void migratePerPcQuotesToSharedStore();
 
   // Unhandled main-process errors: log locally (fail-fast surfacing,
   // unchanged) AND route a scrubbed report to the developer endpoint

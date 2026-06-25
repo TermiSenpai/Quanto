@@ -19,6 +19,7 @@ import {
   replaceQuote,
   setStatus,
   deleteQuote,
+  putQuoteIfAbsent,
   MAX_QUOTE_BYTES,
 } from '../lib/quote-repo-file.js';
 
@@ -536,6 +537,80 @@ describe('createQuote EEXIST retry behaviour', () => {
     });
     expect(() => createQuote(folder, DRAFT, { now }))
       .toThrow(/No se pudo asignar un identificador único/);
+  });
+});
+
+// ── putQuoteIfAbsent (B5 one-time migration adapter) ──────────
+describe('putQuoteIfAbsent', () => {
+  // A quote with the local-history fields B5 must PRESERVE (id, date,
+  // version, updated_at) — migration writes them as-is, no re-stamping.
+  const EXISTING = {
+    id: 'PP-2025-0007',
+    date: '2025-09-01T08:00:00.000Z',
+    version: 3,
+    updated_at: '2025-09-15T12:00:00.000Z',
+    user: 'Legacy',
+    customer: { name: 'Viejo Cliente', phone: '600111222' },
+    totals: { total_vat_inc: 121, sale_base: 100, vat: 21, total_cost: 80, margin: 0.2 },
+    status: 'accepted',
+  };
+
+  test('writes <id>.json using the existing id and returns { migrated: true }', () => {
+    const folder = makeFolder();
+    const res = putQuoteIfAbsent(folder, EXISTING);
+    expect(res).toEqual({ migrated: true });
+    const file = path.join(folder, 'PP-2025-0007.json');
+    expect(fs.existsSync(file)).toBe(true);
+    const onDisk = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    // id/date/version/updated_at preserved verbatim (no re-stamp).
+    expect(onDisk.id).toBe('PP-2025-0007');
+    expect(onDisk.date).toBe('2025-09-01T08:00:00.000Z');
+    expect(onDisk.version).toBe(3);
+    expect(onDisk.updated_at).toBe('2025-09-15T12:00:00.000Z');
+    expect(onDisk.status).toBe('accepted');
+  });
+
+  test('a second call with the same id returns { migrated: false } and does NOT overwrite', () => {
+    const folder = makeFolder();
+    expect(putQuoteIfAbsent(folder, EXISTING)).toEqual({ migrated: true });
+    const file = path.join(folder, 'PP-2025-0007.json');
+    const before = fs.readFileSync(file, 'utf-8');
+    // Same id but different content — must be ignored (idempotent skip).
+    const res = putQuoteIfAbsent(folder, { ...EXISTING, user: 'Tampered', version: 99 });
+    expect(res).toEqual({ migrated: false });
+    const after = fs.readFileSync(file, 'utf-8');
+    expect(after).toBe(before); // on-disk content unchanged
+  });
+
+  test('creates the folder if it does not exist yet', () => {
+    const parent = makeFolder();
+    const folder = path.join(parent, 'presupuestos'); // not yet created
+    expect(fs.existsSync(folder)).toBe(false);
+    const res = putQuoteIfAbsent(folder, EXISTING);
+    expect(res).toEqual({ migrated: true });
+    expect(fs.existsSync(path.join(folder, 'PP-2025-0007.json'))).toBe(true);
+  });
+
+  test('throws a Spanish error for a malformed id (caller counts it as failed)', () => {
+    const folder = makeFolder();
+    expect(() => putQuoteIfAbsent(folder, { ...EXISTING, id: '../escape' }))
+      .toThrow(/identificador/i);
+    // Nothing leaked outside the folder.
+    expect(listQuotes(folder)).toEqual([]);
+  });
+
+  test('rejects a non-object quote', () => {
+    const folder = makeFolder();
+    expect(() => putQuoteIfAbsent(folder, null)).toThrow();
+    expect(() => putQuoteIfAbsent(folder, 'oops')).toThrow();
+    expect(() => putQuoteIfAbsent(folder, [])).toThrow();
+  });
+
+  test('rejects an oversized quote', () => {
+    const folder = makeFolder();
+    const huge = { ...EXISTING, blob: 'x'.repeat(MAX_QUOTE_BYTES + 1) };
+    expect(() => putQuoteIfAbsent(folder, huge)).toThrow(/demasiado grande/);
+    expect(listQuotes(folder)).toEqual([]);
   });
 });
 
