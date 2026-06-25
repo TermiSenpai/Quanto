@@ -49,6 +49,17 @@ function packMode(pack) {
 }
 
 /**
+ * Coerces a value to a non-negative-ish integer, mirroring the DOM
+ * helper `intFromInput` (`parseInt(value, 10) || 0`) so the mapping is
+ * an exact inverse of `collectInputs`. A malformed stored value (a
+ * stringified number, NaN, undefined) collapses to 0 instead of leaking
+ * through, exactly as the form path would.
+ */
+function toInt(value) {
+  return parseInt(value, 10) || 0;
+}
+
+/**
  * Converts a saved `opt` into a structured plan.
  * This is the exact inverse of `collectInputs` in app.js.
  *
@@ -68,11 +79,11 @@ export function planInputs(pack, opt) {
     if ((qty || 0) > 0) addons[id] = qty;
   }
 
-  // Sizes: normalise to numbers, default 0.
+  // Sizes: coerce to integers via toInt (mirrors intFromInput), default 0.
   const sizes = {
-    qty_3xl: (opt.qty_3xl || 0),
-    qty_4xl: (opt.qty_4xl || 0),
-    qty_5xl: (opt.qty_5xl || 0)
+    qty_3xl: toInt(opt.qty_3xl),
+    qty_4xl: toInt(opt.qty_4xl),
+    qty_5xl: toInt(opt.qty_5xl)
   };
 
   // Mode-specific fields — exactly three branches matching collectInputs.
@@ -82,12 +93,15 @@ export function planInputs(pack, opt) {
 
   if (mode === 'free') {
     // free_components: array of { product, quantity } lines.
-    lines = (opt.lines || []).map(l => ({ product: l.product || '', quantity: l.quantity || 0 }));
+    lines = (opt.lines || []).map(l => ({ product: l.product || '', quantity: toInt(l.quantity) }));
   } else if (mode === 'bundle') {
-    packs = opt.packs || 0;
+    packs = toInt(opt.packs);
   } else {
-    // components: { componentId: qty } — keyed by component id.
-    quantities = Object.assign({}, opt.quantities || {});
+    // components: { componentId: qty } — keyed by component id, coerced.
+    quantities = {};
+    for (const [id, qty] of Object.entries(opt.quantities || {})) {
+      quantities[id] = toInt(qty);
+    }
   }
 
   return { mode, options, addons, sizes, packs, quantities, lines };
@@ -104,21 +118,25 @@ export function planInputs(pack, opt) {
 export function optFromPlan(pack, plan) {
   const mode = packMode(pack);
 
+  const sizes = plan.sizes || {};
   const opt = {
     options:  Object.assign({}, plan.options || {}),
     addons:   Object.assign({}, plan.addons || {}),
-    qty_3xl:  (plan.sizes && plan.sizes.qty_3xl) || 0,
-    qty_4xl:  (plan.sizes && plan.sizes.qty_4xl) || 0,
-    qty_5xl:  (plan.sizes && plan.sizes.qty_5xl) || 0
+    qty_3xl:  toInt(sizes.qty_3xl),
+    qty_4xl:  toInt(sizes.qty_4xl),
+    qty_5xl:  toInt(sizes.qty_5xl)
   };
 
   // Restore the mode-specific field, matching collectInputs branch order.
   if (mode === 'free') {
-    opt.lines = (plan.lines || []).map(l => ({ product: l.product || '', quantity: l.quantity || 0 }));
+    opt.lines = (plan.lines || []).map(l => ({ product: l.product || '', quantity: toInt(l.quantity) }));
   } else if (mode === 'bundle') {
-    opt.packs = plan.packs || 0;
+    opt.packs = toInt(plan.packs);
   } else {
-    opt.quantities = Object.assign({}, plan.quantities || {});
+    opt.quantities = {};
+    for (const [id, qty] of Object.entries(plan.quantities || {})) {
+      opt.quantities[id] = toInt(qty);
+    }
   }
 
   return opt;

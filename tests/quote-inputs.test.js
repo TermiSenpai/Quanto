@@ -18,7 +18,7 @@ const CFG = buildFullConfigV4();
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Deep-equal check that also validates there are no extra keys. */
+/** Alias for toStrictEqual (which already catches extra/missing keys). */
 function deepEq(a, b) {
   expect(a).toStrictEqual(b);
 }
@@ -171,5 +171,43 @@ describe('planInputs — edge cases', () => {
       packs:    20
     };
     deepEq(optFromPlan(pack, planInputs(pack, opt)), opt);
+  });
+
+  test('numeric fields are coerced via parseInt (mirrors intFromInput)', () => {
+    // Malformed stored values (stringified numbers, NaN, undefined) must
+    // collapse exactly as the DOM path's parseInt(value, 10) || 0 would.
+    const bundlePack = CFG.packs.crew_full;
+    const bundlePlan = planInputs(bundlePack, {
+      options: { hood: 'with_hood', sides: 'two_sides' },
+      qty_3xl: '2', qty_4xl: undefined, qty_5xl: NaN,
+      packs:   '12'
+    });
+    deepEq(bundlePlan.sizes, { qty_3xl: 2, qty_4xl: 0, qty_5xl: 0 });
+    expect(bundlePlan.packs).toBe(12);
+
+    const compPlan = planInputs(CFG.packs.hoodies_mixed, {
+      options:    { sides: 'one_side' },
+      quantities: { classic: '15', urban: NaN }
+    });
+    deepEq(compPlan.quantities, { classic: 15, urban: 0 });
+
+    const freePlan = planInputs(CFG.packs.custom, {
+      options: { sides: 'two_sides' },
+      lines:   [{ product: 'BEAGLE', quantity: '20' }]
+    });
+    deepEq(freePlan.lines, [{ product: 'BEAGLE', quantity: 20 }]);
+
+    // optFromPlan applies the same coercion on the inverse direction.
+    const opt = optFromPlan(bundlePack, {
+      mode: 'bundle',
+      options: { hood: 'with_hood', sides: 'two_sides' },
+      addons: {},
+      sizes: { qty_3xl: '2', qty_4xl: undefined, qty_5xl: NaN },
+      packs: '12', quantities: null, lines: null
+    });
+    expect(opt.qty_3xl).toBe(2);
+    expect(opt.qty_4xl).toBe(0);
+    expect(opt.qty_5xl).toBe(0);
+    expect(opt.packs).toBe(12);
   });
 });
