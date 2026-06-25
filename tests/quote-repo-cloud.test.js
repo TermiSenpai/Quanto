@@ -1,0 +1,395 @@
+// ============================================================
+// Tests · lib/cloud-quotes.js full-quote ops + 0002 migration
+// ============================================================
+// Phase B (shared quote store), cloud backend data layer:
+//   - db/migrations/0002_quote_payloads.sql (separate payload table)
+//   - saveFullQuote / getFullQuote / listFullQuotes / updateFullQuote
+//   - nextCloudQuoteId (PP-YYYY-NNNN, per-year max+1)
+//
+// Pure module: the D1 client is injected. The fake client below
+// models BOTH the flat `quotes` row (INSERT OR IGNORE on the human
+// id PK) and the `quote_payloads` row (INSERT OR REPLACE + the
+// version-guarded UPDATE) realistically enough to assert the
+// round-trip and the optimistic-concurrency conflict.
+// ============================================================
+
+import path from 'node:path';
+import { describe, test, expect } from 'vitest';
+import {
+  saveFullQuote,
+  getFullQuote,
+  listFullQuotes,
+  updateFullQuote,
+  nextCloudQuoteId
+} from '../lib/cloud-quotes.js';
+import { loadMigrations } from '../lib/migration-loader.js';
+import { applyMigrations } from '../lib/db-migrator.js';
+
+const REAL_MIGRATIONS = path.join(__dirname, '..', 'db', 'migrations');
+
+// ── The canonical reopenable quote (CLAUDE.md §9 / B2 spec) ──────
+function sampleFullQuote(overrides = {}) {
+  return {
+    id: 'PP-2026-0001',
+    ts: '2026-06-12T10:00:00.000Z',
+    date: '2026-06-12T10:00:00.000Z',
+    updated_at: '2026-06-12T10:00:00.000Z',
+    version: 1,
+    user: 'Alberto',
+    config_version: 7,
+    catalog_version: 7,
+    customer: { name: 'Peña La Cuesta', phone: '600123123' },
+    valid_until: '2026-06-27T10:00:00.000Z',
+    pack_id: 'crew_full',
+    tier: 'T1',
+    total_units: 24,
+    qty_3xl: 2,
+    qty_4xl: 1,
+    qty_5xl: 0,
+    total_vat_inc: 622.8,
+    sale_base: 514.7,
+    margin_pct: 0.38,
+    target_margin: 0.35,
+    pvp_deviation_pct: -0.05,
+    opt: { packId: 'crew_full', quantities: { T1: 24 }, options: { shirt: 'beagle' } },
+    result: { lines: [{ id: 'shirt', pvp: 12.5 }], tier: 'T1' },
+    totals: { total_vat_inc: 622.8, sale_base: 514.7, vat: 108.1, total_cost: 320, margin: 0.38 },
+    status: 'pending',
+    status_ts: null,
+    items: [
+      { product_id: 'BEAGLE', sides: 'two_sides', qty: 24 }
+    ],
+    addons: [
+      { addon_id: 'name', qty: 24 }
+    ],
+    ...overrides
+  };
+}
+
+// ── Fake D1 client modelling quotes + quote_payloads ─────────────
+// Tracks two in-memory tables and records every statement. It honours
+// just the SQL this module emits: INSERT OR IGNORE INTO quotes (id PK),
+// INSERT OR REPLACE INTO quote_payloads, the version-guarded UPDATE,
+// the stat UPDATE on quotes, and the SELECTs of getFullQuote /
+// listFullQuotes / nextCloudQuoteId.
+function fakeClient() {
+  const quotes = new Map();         // id → flat row object
+  const payloads = new Map();       // quote_id → { payload, version, updated_at }
+  const calls = [];
+
+  function insertOrIgnoreQuotes(sql, params) {
+    // INSERT OR IGNORE INTO quotes (col, col, ...) VALUES (?, ?, ...)
+    const cols = sql.match(/\(([^)]*)\) VALUES/)[1].split(',').map((c) => c.trim());
+    // a single-row insert (saveFullQuote inserts one row)
+    const row = {};
+    cols.forEach((c, i) => { row[c] = params[i]; });
+    if (!quotes.has(row.id)) {
+      quotes.set(row.id, { status: 'pending', status_ts: null, ...row });
+    }
+    return { results: [], meta: { changes: quotes.has(row.id) ? 1 : 0 } };
+  }
+
+  return {
+    calls,
+    quotes,
+    payloads,
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+
+      if (/INSERT OR IGNORE INTO quotes/.test(sql)) {
+        return insertOrIgnoreQuotes(sql, params);
+      }
+      if (/INSERT OR IGNORE INTO quote_items/.test(sql) || /INSERT OR IGNORE INTO quote_addons/.test(sql)) {
+        return { results: [], meta: { changes: 1 } };
+      }
+      if (/INSERT OR REPLACE INTO quote_payloads/.test(sql)) {
+        // version is a SQL literal (1) in the statement, so it is NOT a bound
+        // param: params are [quote_id, payload, updated_at] in that order.
+        const [quote_id, payload, updated_at] = params;
+        payloads.set(quote_id, { payload, version: 1, updated_at });
+        return { results: [], meta: { changes: 1 } };
+      }
+      if (/UPDATE quote_payloads SET payload/.test(sql)) {
+        // ... WHERE quote_id = ? AND version = ?
+        const [payload, updated_at, quote_id, expectedVersion] = params;
+        const cur = payloads.get(quote_id);
+        if (cur && cur.version === expectedVersion) {
+          payloads.set(quote_id, { payload, version: cur.version + 1, updated_at });
+          return { results: [], meta: { changes: 1 } };
+        }
+        return { results: [], meta: { changes: 0 } };
+      }
+      if (/UPDATE quotes SET/.test(sql)) {
+        // stat update: last param is the id (WHERE id = ?)
+        const id = params[params.length - 1];
+        const row = quotes.get(id);
+        if (row) {
+          // reflect total_vat_inc if present (first set column in our impl)
+          quotes.set(id, { ...row, _statUpdated: true });
+          return { results: [], meta: { changes: 1 } };
+        }
+        return { results: [], meta: { changes: 0 } };
+      }
+      if (/SELECT [^]*FROM quote_payloads/i.test(sql)) {
+        const id = params[0];
+        const p = payloads.get(id);
+        return { results: p ? [{ quote_id: id, payload: p.payload, version: p.version, updated_at: p.updated_at }] : [], meta: {} };
+      }
+      if (/SELECT [^]*FROM quotes/i.test(sql)) {
+        // Two shapes: by id (getFullQuote overlay) and the list/year scan.
+        if (/WHERE id = \?/.test(sql)) {
+          const row = quotes.get(params[0]);
+          return { results: row ? [row] : [], meta: {} };
+        }
+        if (/LIKE \?/.test(sql)) {
+          // nextCloudQuoteId: SELECT id ... WHERE id LIKE 'PP-YYYY-%'
+          const like = String(params[0]);
+          const prefix = like.replace(/%$/, '');
+          const rows = [...quotes.values()].filter((r) => String(r.id).startsWith(prefix)).map((r) => ({ id: r.id }));
+          return { results: rows, meta: {} };
+        }
+        // plain list
+        return { results: [...quotes.values()], meta: {} };
+      }
+      return { results: [], meta: { changes: 0 } };
+    },
+    async exec(sqlText) {
+      calls.push({ exec: sqlText });
+      return [{ success: true }];
+    }
+  };
+}
+
+// ── Migration 0002 ───────────────────────────────────────────────
+describe('0002_quote_payloads migration', () => {
+  test('the loader picks up 0002 after 0001', () => {
+    const migrations = loadMigrations(REAL_MIGRATIONS);
+    const ids = migrations.map((m) => m.id);
+    expect(ids).toContain('0002_quote_payloads');
+    expect(ids.indexOf('0002_quote_payloads')).toBe(ids.indexOf('0001_init') + 1);
+  });
+
+  test('0002 creates quote_payloads with CREATE TABLE IF NOT EXISTS', () => {
+    const migrations = loadMigrations(REAL_MIGRATIONS);
+    const m = migrations.find((x) => x.id === '0002_quote_payloads');
+    expect(m.sql).toMatch(/CREATE TABLE IF NOT EXISTS quote_payloads/);
+    // separate table, NOT an ALTER ... ADD COLUMN (SQLite can't guard it)
+    expect(m.sql).not.toMatch(/ALTER TABLE/i);
+    expect(m.sql).toMatch(/quote_id\s+TEXT PRIMARY KEY/);
+    expect(m.sql).toMatch(/payload\s+TEXT NOT NULL/);
+    expect(m.sql).toMatch(/version\s+INTEGER NOT NULL/);
+  });
+
+  test('applyMigrations runs 0002 once; a second run is a no-op (ledger)', async () => {
+    const migrations = loadMigrations(REAL_MIGRATIONS);
+    const client = fakeMigratorClient();
+    const opts = { user: 'PC-Test', appVersion: '5.0.0-beta', now: () => '2026-06-12T10:00:00.000Z' };
+
+    const done1 = await applyMigrations(client, migrations, opts);
+    expect(done1).toContain('0002_quote_payloads');
+
+    const done2 = await applyMigrations(client, migrations, opts);
+    expect(done2).toEqual([]); // ledger has it now
+  });
+
+  test('re-executing the 0002 SQL does not throw (CREATE IF NOT EXISTS)', async () => {
+    const migrations = loadMigrations(REAL_MIGRATIONS);
+    const m = migrations.find((x) => x.id === '0002_quote_payloads');
+    const client = fakeMigratorClient();
+    await expect(client.exec(m.sql)).resolves.toBeTruthy();
+    await expect(client.exec(m.sql)).resolves.toBeTruthy();
+  });
+});
+
+// A migrator-shaped fake (ledger-aware), mirroring tests/db-migrator.test.js.
+function fakeMigratorClient(appliedIds = []) {
+  const rows = appliedIds.map((id) => ({ id }));
+  return {
+    async exec() { return [{ success: true }]; },
+    async query(sql, params = []) {
+      if (/SELECT id FROM schema_migrations/.test(sql)) return { results: rows, meta: {} };
+      if (/INSERT INTO schema_migrations/.test(sql)) { rows.push({ id: params[0] }); return { results: [], meta: { changes: 1 } }; }
+      return { results: [], meta: {} };
+    }
+  };
+}
+
+// ── saveFullQuote ────────────────────────────────────────────────
+describe('saveFullQuote', () => {
+  test('inserts the flat quotes row (OR IGNORE) and the payload (OR REPLACE, version 1)', async () => {
+    const client = fakeClient();
+    const res = await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
+    expect(res.ok).toBe(true);
+    expect(res.id).toBe('PP-2026-0001');
+
+    // flat row landed
+    expect(client.quotes.has('PP-2026-0001')).toBe(true);
+
+    // payload landed with version 1
+    const p = client.payloads.get('PP-2026-0001');
+    expect(p).toBeTruthy();
+    expect(p.version).toBe(1);
+    expect(p.updated_at).toBe('2026-06-12T10:00:00.000Z');
+    const parsed = JSON.parse(p.payload);
+    expect(parsed.opt).toEqual(sampleFullQuote().opt);
+    expect(parsed.result).toEqual(sampleFullQuote().result);
+    expect(parsed.customer).toEqual({ name: 'Peña La Cuesta', phone: '600123123' });
+
+    // the flat insert is OR IGNORE (idempotent on the human id PK)
+    const flatInsert = client.calls.find((c) => /INSERT OR IGNORE INTO quotes/.test(c.sql || ''));
+    expect(flatInsert).toBeTruthy();
+    // the payload insert is OR REPLACE
+    const payloadInsert = client.calls.find((c) => /INSERT OR REPLACE INTO quote_payloads/.test(c.sql || ''));
+    expect(payloadInsert).toBeTruthy();
+    // version is a SQL literal 1 (create/first-save), not a bound param
+    expect(payloadInsert.sql).toMatch(/VALUES \(\?, \?, 1, \?\)/);
+  });
+
+  test('validates the flat row before any network write (defense-in-depth)', async () => {
+    const client = fakeClient();
+    await expect(saveFullQuote(client, sampleFullQuote({ pack_id: undefined })))
+      .rejects.toThrow(/presupuesto/i);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  test('is idempotent: re-saving the same quote does not duplicate (OR IGNORE / OR REPLACE)', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
+    await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T11:00:00.000Z' });
+    expect(client.quotes.size).toBe(1);
+    expect(client.payloads.size).toBe(1);
+    // version stays 1 (saveFullQuote is create/first-save only)
+    expect(client.payloads.get('PP-2026-0001').version).toBe(1);
+  });
+});
+
+// ── getFullQuote ─────────────────────────────────────────────────
+describe('getFullQuote', () => {
+  test('round-trips the full payload and overlays authoritative status from quotes', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
+
+    // simulate a status change on the flat row (the authoritative source)
+    const flat = client.quotes.get('PP-2026-0001');
+    client.quotes.set('PP-2026-0001', { ...flat, status: 'accepted', status_ts: '2026-06-13T09:00:00.000Z' });
+
+    const quote = await getFullQuote(client, 'PP-2026-0001');
+    expect(quote.id).toBe('PP-2026-0001');
+    expect(quote.opt).toEqual(sampleFullQuote().opt);
+    expect(quote.result).toEqual(sampleFullQuote().result);
+    expect(quote.totals.total_vat_inc).toBe(622.8);
+    expect(quote.version).toBe(1);
+    // status comes from the flat quotes row, not from the payload
+    expect(quote.status).toBe('accepted');
+    expect(quote.status_ts).toBe('2026-06-13T09:00:00.000Z');
+  });
+
+  test('returns null when the payload row is absent', async () => {
+    const client = fakeClient();
+    expect(await getFullQuote(client, 'PP-2026-9999')).toBeNull();
+  });
+
+  test('throws a Spanish error when the stored payload JSON is corrupt', async () => {
+    const client = fakeClient();
+    client.payloads.set('PP-2026-0001', { payload: '{not valid json', version: 1, updated_at: 't' });
+    client.quotes.set('PP-2026-0001', { id: 'PP-2026-0001', status: 'pending', status_ts: null });
+    await expect(getFullQuote(client, 'PP-2026-0001')).rejects.toThrow(/presupuesto/i);
+  });
+});
+
+// ── listFullQuotes ───────────────────────────────────────────────
+describe('listFullQuotes', () => {
+  test('reads the flat quotes columns only (no payload needed)', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
+    await saveFullQuote(client, sampleFullQuote({ id: 'PP-2026-0002', customer: { name: 'Otra', phone: '611' } }), { now: '2026-06-12T11:00:00.000Z' });
+
+    const list = await listFullQuotes(client);
+    expect(list).toHaveLength(2);
+    const ids = list.map((q) => q.id).sort();
+    expect(ids).toEqual(['PP-2026-0001', 'PP-2026-0002']);
+
+    // the list query never touched quote_payloads
+    const touchedPayloads = client.calls.some((c) => /quote_payloads/.test(c.sql || '') && /SELECT/i.test(c.sql || ''));
+    // (saveFullQuote does not SELECT payloads, so this is purely from listFullQuotes)
+    const listCall = client.calls.filter((c) => /SELECT/i.test(c.sql || '') && /FROM quotes/i.test(c.sql || ''));
+    expect(listCall.length).toBeGreaterThan(0);
+    expect(touchedPayloads).toBe(false);
+  });
+});
+
+// ── updateFullQuote (optimistic concurrency) ─────────────────────
+describe('updateFullQuote', () => {
+  test('a stale expectedVersion returns { conflict: true } and does not touch the flat row', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
+    // current version is 1; pass a stale 0
+    const updated = sampleFullQuote({ totals: { total_vat_inc: 999, sale_base: 800, vat: 199, total_cost: 400, margin: 0.4 }, total_vat_inc: 999, sale_base: 800, margin_pct: 0.4 });
+    const res = await updateFullQuote(client, 'PP-2026-0001', updated, 0, { now: '2026-06-12T12:00:00.000Z' });
+    expect(res).toEqual({ conflict: true });
+    // payload unchanged (still version 1, original total)
+    const p = client.payloads.get('PP-2026-0001');
+    expect(p.version).toBe(1);
+    expect(JSON.parse(p.payload).totals.total_vat_inc).toBe(622.8);
+    // no stat UPDATE on the flat row happened
+    expect(client.calls.some((c) => /UPDATE quotes SET/.test(c.sql || ''))).toBe(false);
+  });
+
+  test('the current version bumps to version+1 and updates the flat stat columns', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
+    const updated = sampleFullQuote({
+      total_vat_inc: 700, sale_base: 580, margin_pct: 0.41,
+      totals: { total_vat_inc: 700, sale_base: 580, vat: 120, total_cost: 350, margin: 0.41 }
+    });
+    const res = await updateFullQuote(client, 'PP-2026-0001', updated, 1, { now: '2026-06-12T12:00:00.000Z' });
+    expect(res.version).toBe(2);
+    expect(res.quote.id).toBe('PP-2026-0001');
+
+    const p = client.payloads.get('PP-2026-0001');
+    expect(p.version).toBe(2);
+    expect(p.updated_at).toBe('2026-06-12T12:00:00.000Z');
+    expect(JSON.parse(p.payload).total_vat_inc).toBe(700);
+
+    // the flat quotes stat columns were updated (payload-first, then flat)
+    const statUpd = client.calls.find((c) => /UPDATE quotes SET/.test(c.sql || ''));
+    expect(statUpd).toBeTruthy();
+    // the WHERE id = ? targets the same id
+    expect(statUpd.params[statUpd.params.length - 1]).toBe('PP-2026-0001');
+  });
+
+  test('the payload UPDATE happens before the flat-row UPDATE', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
+    client.calls.length = 0; // reset to observe only the update sequence
+    await updateFullQuote(client, 'PP-2026-0001', sampleFullQuote(), 1, { now: '2026-06-12T12:00:00.000Z' });
+    const payloadIdx = client.calls.findIndex((c) => /UPDATE quote_payloads/.test(c.sql || ''));
+    const flatIdx = client.calls.findIndex((c) => /UPDATE quotes SET/.test(c.sql || ''));
+    expect(payloadIdx).toBeGreaterThanOrEqual(0);
+    expect(flatIdx).toBeGreaterThan(payloadIdx);
+  });
+});
+
+// ── nextCloudQuoteId ─────────────────────────────────────────────
+describe('nextCloudQuoteId', () => {
+  test('returns PP-YYYY-0001 for an empty year', async () => {
+    const client = fakeClient();
+    const id = await nextCloudQuoteId(client, 2026);
+    expect(id).toBe('PP-2026-0001');
+  });
+
+  test('returns max+1 for the year (padded to 4 digits)', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote({ id: 'PP-2026-0003' }), { now: '2026-06-12T10:00:00.000Z' });
+    await saveFullQuote(client, sampleFullQuote({ id: 'PP-2026-0007' }), { now: '2026-06-12T10:00:00.000Z' });
+    const id = await nextCloudQuoteId(client, 2026);
+    expect(id).toBe('PP-2026-0008');
+  });
+
+  test('scopes the counter to the requested year', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote({ id: 'PP-2025-0042' }), { now: '2025-06-12T10:00:00.000Z' });
+    const id = await nextCloudQuoteId(client, 2026);
+    expect(id).toBe('PP-2026-0001');
+  });
+});
