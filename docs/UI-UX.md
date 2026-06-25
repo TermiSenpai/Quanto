@@ -185,6 +185,45 @@ Solo entra en conflicto la entidad afectada; el resto de cambios del guardado
 se aplican con normalidad y así se comunica («3 cambios guardados, 1
 conflicto»).
 
+### 2.3b Estados del presupuesto compartido (Fase B)
+
+El presupuesto es ahora una **fuente de verdad compartida** (mismo contrato en
+modo archivo y nube). Tres estados de UI nuevos al guardar/reabrir:
+
+**Conflicto al editar.** Al guardar la edición de un presupuesto reabierto, si
+otro equipo lo cambió mientras tanto (archivo = mtime+sha256; nube = versión),
+diálogo de confirmación —reutiliza la UX de conflicto del catálogo §2.3—:
+
+> **Conflicto al guardar.** Otro equipo cambió este presupuesto.
+> Si continúas, tus cambios sobrescribirán los suyos.
+> `[Sobrescribir]` `[Cancelar]`
+
+`[Cancelar]` deja al usuario en el editor sin perder nada; `[Sobrescribir]`
+reintenta forzando la escritura. Nunca se pisa en silencio el cambio del otro
+(regla dura §6).
+
+**Encolado (sin conexión, modo nube).** Si el backend está inalcanzable al
+guardar, la escritura se **encola** y se sincroniza al reconectar; no es un
+error. Toast discreto + info no bloqueante:
+
+> Guardado · se sincronizará al reconectar
+> *(en una edición: «Cambios guardados · se subirán al reconectar»)*
+
+En **modo archivo** no hay cola: una escritura con el NAS caído **da error**
+(diálogo «No se pudo guardar») y la app conserva los datos en pantalla para
+reintentar — no se finge un encolado que nada vaciaría.
+
+**Pendiente (`PP-PENDING-…`).** Un alta hecha sin conexión obtiene un id
+provisional hasta que la cola se vacía y le asigna su `PP-YYYY-NNNN`
+definitivo. Mientras está pendiente:
+- Reabrir muestra el desglose en **solo lectura** con aviso «Presupuesto
+  pendiente · su ID definitivo se asignará al reconectar» (no entra en modo
+  edición: editar un id provisional no tiene sentido).
+- **Exportar a PDF está bloqueado** con el mismo aviso, para que el PDF nunca
+  imprima un id provisional.
+- Al reconectar, el vaciado de la cola le da el id real y reconcilia la caché
+  (sin duplicar): el presupuesto pasa a editable/exportable con normalidad.
+
 ### 2.4 Error sin red ni caché (primer arranque offline)
 
 Pantalla de error existente, con mensaje específico y dos salidas:

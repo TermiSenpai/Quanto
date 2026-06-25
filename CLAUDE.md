@@ -231,12 +231,17 @@ preload.js         ← the port: window.packprice.* whitelist
 config.default.js  ← schema version + empty scaffold (buildEmptyConfig); no catalog seed
 lib/               ← pure, testable modules (English): config-schema, diff,
                      audit, history, pdf-template, logger, config-parser,
-                     config-store, migrations, path-guard
+                     config-store, migrations, path-guard. Shared quote store
+                     (one quotes:* contract, two backends): quote-repo-file,
+                     quote-repo-cloud, cloud-quotes, quote-cache, quote-outbox,
+                     quote-drain, quote-migrate-local, quote-store-helpers
 renderer/          ← UI + pure calc: index.html, app.js, calculo.js, admin.js,
                      admin-extras.js, history.js, format.js, styles.css,
                      catalog-wizard.js, wizard-validation.js (first-run wizard),
                      quote-inputs.js (pure inverse of collectInputs — repopulates
-                     the step-2 builder when reopening a saved quote)
+                     the step-2 builder when reopening a saved quote; app.js +
+                     history.js handle the reopen-edit conflict dialog and the
+                     queued/pending states of the shared quote store)
 tests/             ← Vitest (English), one file per module
 ```
 Full map and layering rules in `ARCHITECTURE.md` §3.
@@ -293,14 +298,23 @@ hand while an admin editor is open).
   catalog editor opens directly, protected by save confirmation + audit +
   snapshot rollback instead. The `verifyAdminPassword` IPC (main) and the
   `admin_password` config field remain as dead code pending a schema migration.
-- **Saved quote / reopen-to-edit** — a saved quote (`presupuestos.json`,
-  `lib/history.js`) stores the raw builder inputs as `opt` alongside `result`
-  and `totals`, plus `version` (integer, starts at 1) and `updated_at` (ISO).
-  Reopening a quote rebuilds the editable step-2 builder via `applyInputs`
-  (using `renderer/quote-inputs.js`) so "Editar pedido" works; saving the
-  edited quote calls `lib/history.js` `replaceQuote`, which updates the same
-  entry (same id, bumped version) rather than creating a new one. This is local
-  (single PC); cross-device sharing is Phase B.
+- **Saved quote / reopen-to-edit** — a quote stores the raw builder inputs as
+  `opt` alongside `result` and `totals`, plus `version` (starts at 1) and
+  `updated_at` (ISO). Reopening rebuilds the editable step-2 builder via
+  `applyInputs` (using `renderer/quote-inputs.js`) so "Editar pedido" works;
+  saving an edit updates the same entry (same id, bumped version), never a new
+  one. Quotes are a **shared store** (Phase B): the source of truth moved from
+  per-PC `presupuestos.json` to one of two interchangeable backends behind the
+  unchanged `quotes:*` IPC — file mode = `<configDir>/presupuestos/<id>.json`
+  next to `config.js` (`lib/quote-repo-file.js`); cloud mode = a `quote_payloads`
+  table in the customer's D1 (`lib/quote-repo-cloud.js` + `lib/cloud-quotes.js`).
+  `main.js` `quoteRepo(settings)` routes by `data_source` and normalizes the two
+  conflict tokens (file = mtime+sha256; cloud = version) into one opaque token; a
+  per-PC cache (`lib/quote-cache.js`) backs fast list/offline read and an outbox
+  (`lib/quote-outbox.js` + `lib/quote-drain.js`) buffers cloud writes when the
+  backend is unreachable. Never silently clobbers a concurrent edit (hard rule
+  §6). Cloud-mode auto-migration of legacy local quotes is intentionally deferred
+  (file mode migrates once on boot; see `devlog/15-presupuestos-compartidos/`).
 
 ---
 

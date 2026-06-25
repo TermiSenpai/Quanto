@@ -222,7 +222,9 @@ describe('updateQuoteStatus', () => {
   test('UPDATE quotes SET status, status_ts WHERE id', async () => {
     const client = fakeClient();
     const res = await updateQuoteStatus(client, { id: 'q1', status: 'accepted', now: '2026-06-13T00:00:00.000Z' });
-    expect(res).toEqual({ ok: true, id: 'q1', status: 'accepted' });
+    // `changes` (additive) lets a caller honoring an updated|null contract
+    // detect a not-found; the fake's default UPDATE reports 1 row changed.
+    expect(res).toEqual({ ok: true, id: 'q1', status: 'accepted', changes: 1 });
     const upd = client.calls[0];
     expect(upd.sql).toBe('UPDATE quotes SET status = ?, status_ts = ? WHERE id = ?');
     expect(upd.params).toEqual(['accepted', '2026-06-13T00:00:00.000Z', 'q1']);

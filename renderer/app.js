@@ -116,6 +116,7 @@ let pdfTpl = { templates: [], builtinIds: new Set(), selectedId: null, cloud: fa
 const state = {
   packId: null,
   editingQuoteId: null,        // id of the quote being edited (reopened); null = a new quote
+  editingQuoteToken: null,     // opaque conflict token captured at reopen (file: {mtime,sha256}; cloud: {version}); null for a new/read-only quote
   isAdmin: false,
   adminTab: 'parameters',
   showCosts: false,            // secret shortcut: 3 × "." toggles the view
@@ -907,6 +908,18 @@ function isCloudMode() {
   return !!(SETTINGS && SETTINGS.data_source === 'cloud');
 }
 
+// Provisional id prefix for a queued offline create (re-declared here
+// because the renderer can't require lib; keep in sync with
+// lib/quote-store-helpers.js `PENDING_ID_PREFIX`). A pending quote has
+// no final PP-YYYY-NNNN id yet — guard PDF export, reopen-to-edit and
+// the "asignado el ID" message against it.
+const PENDING_ID_PREFIX = 'PP-PENDING-';
+
+/** True when `id` is a provisional (not-yet-synced) quote id. */
+function isPendingQuoteId(id) {
+  return typeof id === 'string' && id.startsWith(PENDING_ID_PREFIX);
+}
+
 /** Author recorded on cloud writes (UI-UX §2.5 «Editando como …»). */
 function cloudAuthorName() {
   const s = SETTINGS || {};
@@ -1462,6 +1475,7 @@ function defaultSidesKey(pack) {
 function selectPack(packId) {
   state.packId = packId;
   state.editingQuoteId = null;  // picking a pack from the menu starts a fresh quote
+  state.editingQuoteToken = null;
   hide('error-msg');
 
   const pack = CFG.packs[packId];
@@ -2434,6 +2448,7 @@ function escapeHTML(s) {
 
 function resetForm() {
   state.editingQuoteId = null; // Limpiar starts a fresh quote
+  state.editingQuoteToken = null;
   if (state.packId) renderPackInputs(state.packId);
   el('cant_3xl').value = '0';
   el('cant_4xl').value = '0';
@@ -2444,6 +2459,7 @@ function resetForm() {
 
 function backToSelection() {
   state.editingQuoteId = null;
+  state.editingQuoteToken = null;
   state.packId = null;
   hide('error-msg');
   document.querySelectorAll('.pack-card').forEach(card => card.classList.remove('is-selected'));
@@ -3539,9 +3555,14 @@ async function onHistoryAction(action, id) {
     const result = quote.result || quote;
     const packId = result.pack_id || quote.pack_id || null;
     const opt = quote.opt;
-    // A quote is editable when its pack still exists in the current config
-    // AND it was saved with the raw builder inputs (opt, added in A1).
-    const editable = Boolean(packId && CFG.packs[packId] && opt);
+    // A pending (queued offline) quote has no final id yet — never enter
+    // edit mode (editing/replacing a provisional id is meaningless until
+    // it syncs). Force read-only with an explanatory notice.
+    const pending = isPendingQuoteId(quote.id);
+    // A quote is editable when its pack still exists in the current config,
+    // it was saved with the raw builder inputs (opt, added in A1), and it
+    // is not a pending (not-yet-synced) quote.
+    const editable = Boolean(packId && CFG.packs[packId] && opt && !pending);
 
     closeHistory();
     try {
@@ -3556,16 +3577,23 @@ async function onHistoryAction(action, id) {
         renderResult(result);     // render the breakdown (calls syncClientCard(result) internally)
         syncClientCard(quote);    // re-prefill customer + validity from the full quote (overrides result)
         goToScreen('resultado');  // land on the breakdown (current UX)
-        state.editingQuoteId = quote.id; // set AFTER selectPack, which reset it
+        state.editingQuoteId = quote.id;     // set AFTER selectPack, which reset it
+        state.editingQuoteToken = r.token;   // conflict token captured at reopen (echoed back on edit-save)
       } else {
         // Fall back to read-only: show the breakdown but skip builder rebuild.
         state.packId = packId;
         state.editingQuoteId = null;
+        state.editingQuoteToken = null;
         lastResult = result;
         renderResult(result);     // calls syncClientCard(result) — no customer on result
         syncClientCard(quote);    // re-prefill customer + validity from the full quote
         goToScreen('resultado');
-        if (packId && !CFG.packs[packId]) {
+        if (pending) {
+          await window.packprice.showInfo({
+            titulo: 'Presupuesto pendiente',
+            mensaje: 'Este presupuesto está pendiente de subir; su ID definitivo se asignará al reconectar.'
+          });
+        } else if (packId && !CFG.packs[packId]) {
           await window.packprice.showInfo({
             titulo: 'Pack no encontrado',
             mensaje: `El pack original ("${packId}") ya no existe en la configuración actual. Se muestra el presupuesto guardado, pero no podrás editarlo como pedido nuevo.`
@@ -3590,6 +3618,14 @@ async function onHistoryAction(action, id) {
   if (action === 'pdf') {
     const r = await window.packprice.getQuote(id);
     if (!r || !r.ok || !r.quote) return;
+    // A pending (queued offline) quote has no final id yet — block export.
+    if (isPendingQuoteId(r.quote.id)) {
+      await window.packprice.showInfo({
+        titulo: 'Presupuesto pendiente',
+        mensaje: 'Este presupuesto está pendiente de subir; podrás exportarlo cuando se sincronice (su ID aún no es definitivo).'
+      });
+      return;
+    }
     const out = await window.packprice.exportPdf({
       quote: r.quote,
       company: CFG && CFG.company,
@@ -3679,15 +3715,17 @@ function formatValidDate(iso) {
 }
 
 /**
- * Builds the normalized cloud quote row from the calc result + client
- * data (Task 5C item 2). Mirrors db/migrations/0001_init.sql columns;
- * lib/cloud-quotes.buildQuoteRows tolerates missing optional fields. The
- * id is a fresh client UUID so re-uploads from the outbox are idempotent.
+ * Builds the flat stat fields (+ normalized items/addons) the shared
+ * cloud backend needs to write the flat `quotes` row and the normalized
+ * item/addon tables (`lib/cloud-quotes.buildQuoteRows`). Phase B: the id
+ * is NO LONGER minted here — the shared repository assigns the human id
+ * (PP-YYYY-NNNN) on save and the renderer trusts `r.quote.id`. These
+ * fields are merged onto the canonical draft in cloud mode only.
  *
  * pvp_deviation_pct = (applied − recommended)/recommended, computed only
  * for a single-unit-price pack where a recommended PVP exists; else null.
  */
-function buildCloudQuote(result, client, ts) {
+function buildCloudStatFields(result, client, ts) {
   const tierId = tierIdFromLabel(result.tier);
   const items = collectQuoteItems(result);
   const addons = Object.entries(result.extras_detail || {})
@@ -3695,8 +3733,10 @@ function buildCloudQuote(result, client, ts) {
     .map(([addon_id, qty]) => ({ addon_id, qty }));
 
   return {
-    id: crypto.randomUUID(),
     ts,
+    // Cloud stat row falls back to 'Equipo' for a blank user_name (this
+    // wins the Object.assign over buildQuoteDraft's null); harmless
+    // cosmetic divergence from file mode, which persists null.
     user: (SETTINGS && SETTINGS.user_name) || 'Equipo',
     client_name: client.name,
     client_phone: client.phone,
@@ -3772,18 +3812,25 @@ function computePvpDeviation(result) {
 }
 
 /**
- * Persists the current quote: local history is the source of truth
- * (always), and in cloud mode the normalized row is also uploaded to D1
- * (enqueued offline). The cloud UUID is stored on the local entry so a
- * later status change targets the same cloud row. Returns the saved
- * local quote, or null on failure (errors already surfaced).
+ * Persists the current quote through the unified shared quote store
+ * (Phase B). ONE canonical draft is sent to `saveQuote`; the shared
+ * repository assigns the human id (new) or replaces the existing entry
+ * (edit), and — in cloud mode — writes both the flat `quotes` stat row
+ * and the normalized item/addon tables from the merged stat fields.
+ * There is no separate cloud UUID / dual-write anymore.
+ *
+ * On edit we send the conflict token captured at reopen (`__token`);
+ * main returns `{ conflict:true, current }` when another device changed
+ * the quote in the meantime — we mirror the catalog conflict UX and let
+ * the user overwrite (`__force`) or cancel.
+ *
+ * Returns `{ quote, queued }` (queued = backend unreachable, write
+ * queued offline → quote.id is a provisional PP-PENDING-… id), or null
+ * on failure / user cancel (errors already surfaced; nothing lost).
  */
 async function persistCurrentQuote(client) {
   const ts = new Date().toISOString();
   const isEdit = Boolean(state.editingQuoteId);
-  // Cloud upload only for new quotes. Re-uploading on edit would create
-  // duplicate cloud stat rows; full cloud edit handling is Phase B.
-  const cloud = (!isEdit && isCloudMode()) ? buildCloudQuote(lastResult, client, ts) : null;
 
   const draft = buildQuoteDraft(lastResult, {
     user: SETTINGS.user_name,
@@ -3793,12 +3840,34 @@ async function persistCurrentQuote(client) {
     opt: lastOpt
   });
   draft.valid_until = computeValidUntil(ts);
-  draft.status = 'pending';
-  if (cloud) draft.cloud_id = cloud.id;
-  // Signal to main which entry to replace (routes quotes:save to replaceQuote).
-  if (isEdit) draft.id = state.editingQuoteId;
+  draft.status = 'pending'; // new quotes start pending; on edit the backend preserves the existing status
+  // In cloud mode, merge the flat stat fields so the shared backend can
+  // write the flat `quotes` row + normalized items/addons. No id here —
+  // the repository assigns it.
+  if (isCloudMode()) Object.assign(draft, buildCloudStatFields(lastResult, client, ts));
+  if (isEdit) {
+    // Signal to main which entry to replace and carry the conflict token.
+    draft.id = state.editingQuoteId;
+    draft.__token = state.editingQuoteToken;
+  }
 
-  const r = await window.packprice.saveQuote(draft);
+  let r = await window.packprice.saveQuote(draft);
+
+  // Conflict (file: mtime/sha256 mismatch; cloud: version mismatch).
+  // Mirror the catalog conflict UX: offer overwrite or cancel.
+  if (r && !r.ok && r.conflict) {
+    const choice = await window.packprice.confirm({
+      titulo: 'Conflicto al guardar',
+      mensaje: 'Otro equipo cambió este presupuesto',
+      detalle: 'Si continúas, tus cambios sobrescribirán los suyos.',
+      botones: ['Sobrescribir', 'Cancelar'],
+      defaultId: 1
+    });
+    if (choice !== 0) return null; // Cancelar → stay on the editor, nothing lost
+    draft.__force = true;
+    r = await window.packprice.saveQuote(draft);
+  }
+
   if (!r || !r.ok) {
     await window.packprice.showError({
       titulo: 'No se pudo guardar',
@@ -3807,19 +3876,22 @@ async function persistCurrentQuote(client) {
     return null;
   }
 
-  // Cloud upload is best-effort: it no-ops in file mode and enqueues
-  // when offline. A hard failure is surfaced as a toast (the local save
-  // already succeeded — we never lose the quote).
-  if (cloud) {
+  const queued = Boolean(r.queued);
+
+  // After a successful NON-queued edit-save, refresh the token so a
+  // second consecutive edit (without reopening) still has a fresh token.
+  // Skip when queued: the save went offline, so getQuote would read the
+  // cache and return token:null anyway (the next online save forces).
+  if (isEdit && !queued && r.quote && r.quote.id) {
     try {
-      const up = await window.packprice.uploadQuote({ quote: cloud });
-      if (up && up.queued) showToast('Guardado · se subirá al reconectar');
-      else if (!up || (!up.ok && !up.skipped)) showToast('Guardado local · la nube falló');
+      const g = await window.packprice.getQuote(r.quote.id);
+      state.editingQuoteToken = (g && g.ok) ? g.token : null;
     } catch (_) {
-      showToast('Guardado local · la nube falló');
+      state.editingQuoteToken = null;
     }
   }
-  return r.quote;
+
+  return { quote: r.quote, queued };
 }
 
 async function saveCurrentQuote() {
@@ -3835,9 +3907,33 @@ async function saveCurrentQuote() {
 
   // Capture whether this is an edit BEFORE persisting (editingQuoteId stays set).
   const wasEditing = Boolean(state.editingQuoteId);
-  const saved = await persistCurrentQuote(client);
-  if (!saved) return;
+  const res = await persistCurrentQuote(client);
+  if (!res) return;
+  const { quote: saved, queued } = res;
   lastResult = saved;
+
+  if (queued) {
+    // The save was queued offline. A queued EDIT keeps its real existing
+    // id (only the upload is pending), so it must NOT claim an ID will be
+    // assigned; a queued NEW create has a provisional PP-PENDING-… id.
+    if (wasEditing) {
+      showToast('Cambios guardados · se subirán al reconectar');
+      await window.packprice.showInfo({
+        titulo: 'Cambios guardados',
+        mensaje: 'Los cambios se subirán al reconectar.',
+        detalle: 'Disponible en el botón “Historial” del menú superior.'
+      });
+    } else {
+      showToast('Guardado · se sincronizará al reconectar');
+      await window.packprice.showInfo({
+        titulo: 'Presupuesto guardado',
+        mensaje: 'Presupuesto guardado. Se subirá y obtendrá su ID definitivo al reconectar.',
+        detalle: 'Disponible en el botón “Historial” del menú superior.'
+      });
+    }
+    return;
+  }
+
   if (wasEditing) {
     await window.packprice.showInfo({
       titulo: 'Presupuesto actualizado',
@@ -3873,9 +3969,19 @@ async function exportQuotePdf() {
     if (!client) return; // inline errors already shown
     const saved = await persistCurrentQuote(client);
     if (!saved) return;
-    quote = saved;
+    quote = saved.quote;
     // Replace lastResult so subsequent clicks reuse the saved id.
     lastResult = quote;
+  }
+
+  // A pending (queued offline) quote has no final id yet — block export
+  // until it syncs so the PDF never prints a provisional PP-PENDING-… id.
+  if (isPendingQuoteId(quote && quote.id)) {
+    await window.packprice.showInfo({
+      titulo: 'Presupuesto pendiente',
+      mensaje: 'Este presupuesto está pendiente de subir; podrás exportarlo cuando se sincronice (su ID aún no es definitivo).'
+    });
+    return;
   }
 
   const r = await window.packprice.exportPdf({
@@ -3903,10 +4009,9 @@ async function exportQuotePdf() {
 // ============================================================
 
 /**
- * Changes a quote's status from a history chip: updates the local entry
- * (source of truth) and, in cloud mode, mirrors it to D1 via the entry's
- * cloud UUID (enqueued offline). Offers undo via toast. File mode skips
- * the cloud call but still stores the status locally.
+ * Changes a quote's status from a history chip: writes through the shared
+ * quote store (`updateQuote` handles both modes — see applyQuoteStatus).
+ * Offers undo via toast (one tap restores the previous status).
  */
 async function changeQuoteStatus(localId, status) {
   const r = await window.packprice.getQuote(localId);
@@ -3929,19 +4034,18 @@ async function changeQuoteStatus(localId, status) {
   });
 }
 
-/** Writes a status to the local entry and (cloud mode) to D1. */
+/**
+ * Writes a status to the shared quote store (Phase B). `updateQuote` now
+ * updates the status in both modes (file: the quote file; cloud: the
+ * authoritative flat `quotes` row keyed by the human id) — there is no
+ * separate cloud-UUID mirror anymore. A legacy quote that still carries a
+ * `cloud_id` field is simply ignored (no crash, no extra write).
+ */
 async function applyQuoteStatus(quote, status) {
   await window.packprice.updateQuote({
     id: quote.id,
     patch: { status, status_ts: new Date().toISOString() }
   });
-  // Cloud mirror: target the stored cloud UUID. In file mode the IPC
-  // no-ops ({ ok:true, skipped:true }); offline it enqueues.
-  if (isCloudMode() && quote.cloud_id) {
-    try {
-      await window.packprice.setQuoteStatus({ id: quote.cloud_id, status });
-    } catch (_) { /* surfaced via the offline queue; local already saved */ }
-  }
 }
 
 function statusToastText(status) {
@@ -4002,8 +4106,8 @@ function dismissReminder() {
 /**
  * On startup, count quotes that need attention and, if any, show the
  * discreet banner — unless already dismissed today. Never blocks: it is
- * a reminder, not a task (§2.7). Reads the local history (the per-PC
- * source of truth for status + validity).
+ * a reminder, not a task (§2.7). Reads the shared quote store
+ * (window.packprice.listQuotes → quotes:list → quoteRepo).
  */
 async function maybeShowReminder() {
   try {

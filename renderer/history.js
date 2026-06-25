@@ -71,7 +71,9 @@ export function renderHistoryList(quotes) {
   const rows = quotes.map(q => {
     const total = q.totals?.total_vat_inc ?? q.total_vat_inc;
     const customer = q.customer?.name || '—';
-    const pack = q.pack || q.type || '—';
+    // File rows carry the pack name (`pack`); cloud mapped rows only carry
+    // `pack_id` (no name lookup server-side) — fall back so neither crashes.
+    const pack = q.pack || q.type || q.pack_id || '—';
     return `
       <tr>
         <td class="text-mono">${esc(q.id)}</td>

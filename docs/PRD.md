@@ -82,6 +82,7 @@ Todos son perfiles técnicos básicos. UI en **español**; sin formación previa
 | R10b | **Actualizar la app nunca rompe datos** | Si el `.exe` nuevo encuentra un esquema viejo: candado anti-concurrencia → **backup automático** (dump SQL a `%APPDATA%` + Time Travel) → migración aditiva → verificación con el validador → si falla, botón «Restaurar copia de seguridad» y la app no escribe nada más. Un `.exe` viejo contra esquema nuevo sigue funcionando (migraciones solo aditivas) |
 | R11 | **Devlog profesional por release** | Cada release publica una entrada en `devlog/` siguiendo `devlog/TEMPLATE.md` (capturas + gráficos) |
 | R12 | **Presupuestos sincronizados a la nube** | Cada presupuesto guardado se sube a D1 (resumen + líneas); sin conexión se encola en local y se sube al reconectar; el historial local sigue funcionando igual |
+| R12b | **Presupuestos compartidos y reabribles (ver y editar entre PCs)** *(amplía R12, Fase B)* | El presupuesto deja de ser una copia por PC y pasa a ser **fuente de verdad compartida** detrás del mismo contrato `quotes:*`, en los dos modos: archivo (carpeta `presupuestos/<id>.json` junto a `config.js`) y nube (tabla `quote_payloads` con el JSON reabrible completo). Un presupuesto guardado en un PC aparece en otro tras refrescar; reabrir reconstruye el paso 2 editable (`opt`) y al guardar **se actualiza el mismo presupuesto** (mismo id, sube `version`). Control de conflicto que nunca pisa en silencio el cambio de otro equipo (archivo = mtime+sha256; nube = versión) → diálogo Sobrescribir/Cancelar. A salvo sin conexión (nube): una escritura con backend inalcanzable se **encola** y se sincroniza al reconectar; un alta offline muestra estado **pendiente** (id provisional `PP-PENDING-…`, no exportable ni editable) hasta obtener su id definitivo. En modo archivo, una escritura con el NAS caído **da error** (no encola): no hay vaciado de cola en archivo. Migración de los presupuestos locales previos al arrancar (modo archivo, una vez, idempotente; el origen se renombra a `presupuestos.json.bak-pre-shared`). **Limitación documentada:** en modo nube los presupuestos locales previos **no** se auto-migran (requiere derivar campos planos dependientes del catálogo, puentear ids contra las filas UUID antiguas y de-duplicar estadísticas); el archivo local se conserva intacto |
 | R13 | **Datos del cliente en el presupuesto** | Nombre y teléfono obligatorios al guardar; validez de 15 días (`quote_settings.validity_days`, configurable como todo dato de negocio) impresa en el PDF |
 | R13b | **Estado del presupuesto** | Cualquier trabajador marca pendiente / aceptado / rechazado desde el historial. Al abrir la app, recordatorio discreto: presupuestos sin estado con más de 7 días y los que caducan esta semana |
 | R14 | **Pantalla de estadísticas** | Gráficos (SVG propio, sin librerías) sobre los datos de todos los PCs: packs más presupuestados, conversión, tramos, evolución temporal, margen real vs objetivo, productos/addons más usados, desviación sobre el PVP recomendado y frecuencia de tallas especiales |
@@ -155,6 +156,11 @@ para que no se pierdan:
    «¿estamos respetando el margen objetivo?» — y al menos **una decisión de
    catálogo** (precio, pack retirado o nuevo) tomada a partir de la pantalla
    de estadísticas.
+6. **Un presupuesto guardado en un PC se reabre y se edita desde cualquier
+   otro** del mismo config (R12b): cero presupuestos perdidos por una caída de
+   red (encolado + reintento en nube; error visible que conserva los datos en
+   archivo) y cero sobreescrituras silenciosas de una edición concurrente
+   (diálogo de conflicto siempre).
 
 ## 6. Riesgos y mitigaciones
 
