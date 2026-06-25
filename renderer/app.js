@@ -3734,6 +3734,9 @@ function buildCloudStatFields(result, client, ts) {
 
   return {
     ts,
+    // Cloud stat row falls back to 'Equipo' for a blank user_name (this
+    // wins the Object.assign over buildQuoteDraft's null); harmless
+    // cosmetic divergence from file mode, which persists null.
     user: (SETTINGS && SETTINGS.user_name) || 'Equipo',
     client_name: client.name,
     client_phone: client.phone,
@@ -3873,9 +3876,13 @@ async function persistCurrentQuote(client) {
     return null;
   }
 
-  // After a successful edit-save, refresh the token so a second
-  // consecutive edit (without reopening) still has a fresh token.
-  if (isEdit && r.quote && r.quote.id) {
+  const queued = Boolean(r.queued);
+
+  // After a successful NON-queued edit-save, refresh the token so a
+  // second consecutive edit (without reopening) still has a fresh token.
+  // Skip when queued: the save went offline, so getQuote would read the
+  // cache and return token:null anyway (the next online save forces).
+  if (isEdit && !queued && r.quote && r.quote.id) {
     try {
       const g = await window.packprice.getQuote(r.quote.id);
       state.editingQuoteToken = (g && g.ok) ? g.token : null;
@@ -3884,7 +3891,7 @@ async function persistCurrentQuote(client) {
     }
   }
 
-  return { quote: r.quote, queued: Boolean(r.queued) };
+  return { quote: r.quote, queued };
 }
 
 async function saveCurrentQuote() {
@@ -3906,14 +3913,24 @@ async function saveCurrentQuote() {
   lastResult = saved;
 
   if (queued) {
-    // Queued offline create: the id is provisional (PP-PENDING-…) — do
-    // not announce it as the final ID.
-    showToast('Guardado · se sincronizará al reconectar');
-    await window.packprice.showInfo({
-      titulo: 'Presupuesto guardado',
-      mensaje: 'Presupuesto guardado. Se subirá y obtendrá su ID definitivo al reconectar.',
-      detalle: 'Disponible en el botón “Historial” del menú superior.'
-    });
+    // The save was queued offline. A queued EDIT keeps its real existing
+    // id (only the upload is pending), so it must NOT claim an ID will be
+    // assigned; a queued NEW create has a provisional PP-PENDING-… id.
+    if (wasEditing) {
+      showToast('Cambios guardados · se subirán al reconectar');
+      await window.packprice.showInfo({
+        titulo: 'Cambios guardados',
+        mensaje: 'Los cambios se subirán al reconectar.',
+        detalle: 'Disponible en el botón “Historial” del menú superior.'
+      });
+    } else {
+      showToast('Guardado · se sincronizará al reconectar');
+      await window.packprice.showInfo({
+        titulo: 'Presupuesto guardado',
+        mensaje: 'Presupuesto guardado. Se subirá y obtendrá su ID definitivo al reconectar.',
+        detalle: 'Disponible en el botón “Historial” del menú superior.'
+      });
+    }
     return;
   }
 
