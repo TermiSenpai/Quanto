@@ -1,7 +1,7 @@
 # Shared Quotes & Reopen-to-Edit — Design
 
 **Date:** 2026-06-24
-**Status:** Approved (high-level). Delivered in two phases, each with its own plan.
+**Status:** Phase A implemented on branch `feat/shared-quotes-reopen-edit`; Phase B pending.
 **Plans:** `docs/superpowers/plans/2026-06-24-phase-a-reopen-and-edit.md`,
 `docs/superpowers/plans/2026-06-24-phase-b-shared-quote-store.md`
 

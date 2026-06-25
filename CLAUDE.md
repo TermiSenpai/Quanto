@@ -234,7 +234,9 @@ lib/               ← pure, testable modules (English): config-schema, diff,
                      config-store, migrations, path-guard
 renderer/          ← UI + pure calc: index.html, app.js, calculo.js, admin.js,
                      admin-extras.js, history.js, format.js, styles.css,
-                     catalog-wizard.js, wizard-validation.js (first-run wizard)
+                     catalog-wizard.js, wizard-validation.js (first-run wizard),
+                     quote-inputs.js (pure inverse of collectInputs — repopulates
+                     the step-2 builder when reopening a saved quote)
 tests/             ← Vitest (English), one file per module
 ```
 Full map and layering rules in `ARCHITECTURE.md` §3.
@@ -291,6 +293,14 @@ hand while an admin editor is open).
   catalog editor opens directly, protected by save confirmation + audit +
   snapshot rollback instead. The `verifyAdminPassword` IPC (main) and the
   `admin_password` config field remain as dead code pending a schema migration.
+- **Saved quote / reopen-to-edit** — a saved quote (`presupuestos.json`,
+  `lib/history.js`) stores the raw builder inputs as `opt` alongside `result`
+  and `totals`, plus `version` (integer, starts at 1) and `updated_at` (ISO).
+  Reopening a quote rebuilds the editable step-2 builder via `applyInputs`
+  (using `renderer/quote-inputs.js`) so "Editar pedido" works; saving the
+  edited quote calls `lib/history.js` `replaceQuote`, which updates the same
+  entry (same id, bumped version) rather than creating a new one. This is local
+  (single PC); cross-device sharing is Phase B.
 
 ---
 
