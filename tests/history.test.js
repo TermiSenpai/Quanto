@@ -340,6 +340,27 @@ describe('replaceQuote', () => {
     expect(replaced.result).toEqual({ total: 999 });
   });
 
+  test('carries the draft status when the existing entry has none', () => {
+    const dir = makeUserData();
+    // saveQuote does not stamp a status, so this stored entry has none.
+    const original = saveQuote(dir, { user: 'X' });
+    expect(original.status).toBeUndefined();
+    // The draft carries a status (as persistCurrentQuote always does).
+    const replaced = replaceQuote(dir, original.id, { user: 'X', status: 'pending' });
+    expect(replaced.status).toBe('pending');
+    expect(getQuote(dir, original.id).status).toBe('pending');
+  });
+
+  test('bumps version across repeated edits (1 -> 2 -> 3)', () => {
+    const dir = makeUserData();
+    const original = saveQuote(dir, { user: 'X', result: { total: 1 } });
+    expect(original.version).toBe(1);
+    const first = replaceQuote(dir, original.id, { user: 'X', result: { total: 2 } });
+    expect(first.version).toBe(2);
+    const second = replaceQuote(dir, original.id, { user: 'X', result: { total: 3 } });
+    expect(second.version).toBe(3);
+  });
+
   test('returns null for an unknown id and writes nothing', () => {
     const dir = makeUserData();
     const before = listQuotes(dir);
