@@ -73,10 +73,11 @@ export function planInputs(pack, opt) {
   // Options: pass through as-is (already { optionId: valueId }).
   const options = Object.assign({}, opt.options || {});
 
-  // Addons: keep only positive quantities (mirrors collectInputs filter).
+  // Addons: coerce to integer and keep only positive quantities (mirrors collectInputs filter).
   const addons = {};
   for (const [id, qty] of Object.entries(opt.addons || {})) {
-    if ((qty || 0) > 0) addons[id] = qty;
+    const q = toInt(qty);
+    if (q > 0) addons[id] = q;
   }
 
   // Sizes: coerce to integers via toInt (mirrors intFromInput), default 0.
@@ -119,9 +120,15 @@ export function optFromPlan(pack, plan) {
   const mode = packMode(pack);
 
   const sizes = plan.sizes || {};
+  // Coerce addon quantities to integers for consistency with planInputs.
+  const addons = {};
+  for (const [id, qty] of Object.entries(plan.addons || {})) {
+    const q = toInt(qty);
+    if (q > 0) addons[id] = q;
+  }
   const opt = {
     options:  Object.assign({}, plan.options || {}),
-    addons:   Object.assign({}, plan.addons || {}),
+    addons,
     qty_3xl:  toInt(sizes.qty_3xl),
     qty_4xl:  toInt(sizes.qty_4xl),
     qty_5xl:  toInt(sizes.qty_5xl)

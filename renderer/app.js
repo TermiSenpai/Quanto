@@ -72,6 +72,7 @@ let adminConfigInfoAtOpen = null; // mtime + hash when admin opened (conflicts)
 let CFG_BACKUP = null;           // copy for "Cancel changes"
 let eventsBound = false;
 let lastResult = null;           // useful for "Copy summary"
+let lastOpt    = null;           // inputs that produced lastResult (snapshot at calc time)
 
 // v5 cloud: the last catalog load envelope drives the topbar indicator
 // and the offline banner. In file mode it stays { source: 'file' }.
@@ -1938,6 +1939,7 @@ function recomputePreview() {
   }
 
   lastResult = r;
+  lastOpt    = opt;
   elTotal.textContent = formatEur(r.total_vat_inc);
   elTier.textContent = `Tramo ${tierIdFromLabel(r.tier)}`;
 
@@ -2078,6 +2080,7 @@ function runCalculation() {
   }
 
   lastResult = result;
+  lastOpt    = opt;
   renderResult(result);
   goToScreen('resultado');
 }
@@ -3549,6 +3552,7 @@ async function onHistoryAction(action, id) {
         applyInputs(packId, opt); // fill every field from the stored opt
         recomputePreview();       // recompute again with the restored inputs (selectPack recomputed with defaults)
         lastResult = result;
+        lastOpt    = opt;         // snapshot the saved inputs so saving without recalc stores the correct opt
         renderResult(result);     // render the breakdown (calls syncClientCard(result) internally)
         syncClientCard(quote);    // re-prefill customer + validity from the full quote (overrides result)
         goToScreen('resultado');  // land on the breakdown (current UX)
@@ -3786,7 +3790,7 @@ async function persistCurrentQuote(client) {
     configVersion: CFG && CFG.version,
     packId: state.packId,
     customer: { name: client.name, phone: client.phone },
-    opt: collectInputsSafe()
+    opt: lastOpt
   });
   draft.valid_until = computeValidUntil(ts);
   draft.status = 'pending';

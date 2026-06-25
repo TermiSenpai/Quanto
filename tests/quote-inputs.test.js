@@ -210,4 +210,26 @@ describe('planInputs — edge cases', () => {
     expect(opt.qty_5xl).toBe(0);
     expect(opt.packs).toBe(12);
   });
+
+  test('addon quantities are coerced via parseInt in planInputs and optFromPlan', () => {
+    const pack = CFG.packs.crew_full;
+
+    // planInputs: stringified qty coerces to integer; NaN/garbage collapses to 0 (excluded).
+    const plan = planInputs(pack, {
+      options: { hood: 'with_hood', sides: 'one_side' },
+      addons:  { name: '2', short_sleeve: NaN, long_sleeve: '0' },
+      packs:   10
+    });
+    deepEq(plan.addons, { name: 2 }); // '2' → 2; NaN → 0 (excluded); '0' → 0 (excluded)
+
+    // optFromPlan: same coercion applies to plan.addons.
+    const opt = optFromPlan(pack, {
+      mode: 'bundle',
+      options: { hood: 'with_hood', sides: 'one_side' },
+      addons:  { name: '2', short_sleeve: NaN },
+      sizes:   { qty_3xl: 0, qty_4xl: 0, qty_5xl: 0 },
+      packs:   10, quantities: null, lines: null
+    });
+    deepEq(opt.addons, { name: 2 }); // '2' → 2; NaN → 0 (excluded)
+  });
 });
