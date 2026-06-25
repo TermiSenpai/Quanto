@@ -69,9 +69,10 @@ function sampleFullQuote(overrides = {}) {
 // ── Fake D1 client modelling quotes + quote_payloads ─────────────
 // Tracks two in-memory tables and records every statement. It honours
 // just the SQL this module emits: INSERT OR IGNORE INTO quotes (id PK),
-// INSERT OR REPLACE INTO quote_payloads, the version-guarded UPDATE,
-// the stat UPDATE on quotes, and the SELECTs of getFullQuote /
-// listFullQuotes / nextCloudQuoteId.
+// INSERT OR IGNORE INTO quote_payloads (create-only), the version-guarded
+// payload UPDATE, the stat UPDATE on quotes (params mapped back onto the
+// SET columns so the new values are actually stored), and the SELECTs of
+// getFullQuote / listFullQuotes / nextCloudQuoteId.
 function fakeClient() {
   const quotes = new Map();         // id → flat row object
   const payloads = new Map();       // quote_id → { payload, version, updated_at }
@@ -102,10 +103,12 @@ function fakeClient() {
       if (/INSERT OR IGNORE INTO quote_items/.test(sql) || /INSERT OR IGNORE INTO quote_addons/.test(sql)) {
         return { results: [], meta: { changes: 1 } };
       }
-      if (/INSERT OR REPLACE INTO quote_payloads/.test(sql)) {
+      if (/INSERT OR IGNORE INTO quote_payloads/.test(sql)) {
         // version is a SQL literal (1) in the statement, so it is NOT a bound
         // param: params are [quote_id, payload, updated_at] in that order.
+        // OR IGNORE → create-only: an existing payload is left untouched.
         const [quote_id, payload, updated_at] = params;
+        if (payloads.has(quote_id)) return { results: [], meta: { changes: 0 } };
         payloads.set(quote_id, { payload, version: 1, updated_at });
         return { results: [], meta: { changes: 1 } };
       }
@@ -120,12 +123,23 @@ function fakeClient() {
         return { results: [], meta: { changes: 0 } };
       }
       if (/UPDATE quotes SET/.test(sql)) {
-        // stat update: last param is the id (WHERE id = ?)
+        // stat update: parse the SET columns ("col = ?, col = ?, ...") and map
+        // the leading params onto them so the NEW values are actually stored;
+        // the trailing param is the id (WHERE id = ?). This lets a test assert
+        // the refreshed columns carry the new payload values, not just that the
+        // statement ran.
+        const setCols = sql
+          .replace(/^[^]*SET\s+/i, '')
+          .replace(/\s+WHERE[^]*$/i, '')
+          .split(',')
+          .map((p) => p.trim().replace(/\s*=\s*\?$/, ''));
         const id = params[params.length - 1];
         const row = quotes.get(id);
         if (row) {
-          // reflect total_vat_inc if present (first set column in our impl)
-          quotes.set(id, { ...row, _statUpdated: true });
+          const next = { ...row };
+          setCols.forEach((col, i) => { next[col] = params[i]; });
+          next._statUpdated = true;
+          quotes.set(id, next);
           return { results: [], meta: { changes: 1 } };
         }
         return { results: [], meta: { changes: 0 } };
@@ -216,7 +230,7 @@ function fakeMigratorClient(appliedIds = []) {
 
 // ── saveFullQuote ────────────────────────────────────────────────
 describe('saveFullQuote', () => {
-  test('inserts the flat quotes row (OR IGNORE) and the payload (OR REPLACE, version 1)', async () => {
+  test('inserts the flat quotes row and the payload (both OR IGNORE, version 1)', async () => {
     const client = fakeClient();
     const res = await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
     expect(res.ok).toBe(true);
@@ -238,9 +252,11 @@ describe('saveFullQuote', () => {
     // the flat insert is OR IGNORE (idempotent on the human id PK)
     const flatInsert = client.calls.find((c) => /INSERT OR IGNORE INTO quotes/.test(c.sql || ''));
     expect(flatInsert).toBeTruthy();
-    // the payload insert is OR REPLACE
-    const payloadInsert = client.calls.find((c) => /INSERT OR REPLACE INTO quote_payloads/.test(c.sql || ''));
+    // the payload insert is create-only OR IGNORE (a stale replay must NOT
+    // clobber an edited payload or reset its version — see saveFullQuote doc)
+    const payloadInsert = client.calls.find((c) => /INSERT OR IGNORE INTO quote_payloads/.test(c.sql || ''));
     expect(payloadInsert).toBeTruthy();
+    expect(payloadInsert.sql).not.toMatch(/INSERT OR REPLACE/);
     // version is a SQL literal 1 (create/first-save), not a bound param
     expect(payloadInsert.sql).toMatch(/VALUES \(\?, \?, 1, \?\)/);
   });
@@ -252,7 +268,7 @@ describe('saveFullQuote', () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  test('is idempotent: re-saving the same quote does not duplicate (OR IGNORE / OR REPLACE)', async () => {
+  test('is idempotent: re-saving the same quote does not duplicate (both OR IGNORE)', async () => {
     const client = fakeClient();
     await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
     await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T11:00:00.000Z' });
@@ -260,6 +276,22 @@ describe('saveFullQuote', () => {
     expect(client.payloads.size).toBe(1);
     // version stays 1 (saveFullQuote is create/first-save only)
     expect(client.payloads.get('PP-2026-0001').version).toBe(1);
+  });
+
+  test('a stale replay AFTER an edit does NOT clobber the edited payload or reset version', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T10:00:00.000Z' });
+    // edit it → version 2, new total
+    const edited = sampleFullQuote({ total_vat_inc: 700, totals: { ...sampleFullQuote().totals, total_vat_inc: 700 } });
+    await updateFullQuote(client, 'PP-2026-0001', edited, 1, { now: '2026-06-12T12:00:00.000Z' });
+    expect(client.payloads.get('PP-2026-0001').version).toBe(2);
+
+    // a delayed outbox replay of the ORIGINAL save fires again…
+    await saveFullQuote(client, sampleFullQuote(), { now: '2026-06-12T13:00:00.000Z' });
+    // …and OR IGNORE leaves the edited payload + version untouched (no data loss)
+    const p = client.payloads.get('PP-2026-0001');
+    expect(p.version).toBe(2);
+    expect(JSON.parse(p.payload).total_vat_inc).toBe(700);
   });
 });
 
@@ -294,6 +326,24 @@ describe('getFullQuote', () => {
     client.payloads.set('PP-2026-0001', { payload: '{not valid json', version: 1, updated_at: 't' });
     client.quotes.set('PP-2026-0001', { id: 'PP-2026-0001', status: 'pending', status_ts: null });
     await expect(getFullQuote(client, 'PP-2026-0001')).rejects.toThrow(/presupuesto/i);
+  });
+
+  test('when the flat row is MISSING, keeps the payload version and its own status/status_ts', async () => {
+    // Pins the else-path of the overlay: status is authoritative from the flat
+    // row only WHEN PRESENT; with no flat row the payload's own values stand.
+    const client = fakeClient();
+    client.payloads.set('PP-2026-0001', {
+      payload: JSON.stringify(sampleFullQuote({ status: 'rejected', status_ts: '2026-06-14T08:00:00.000Z' })),
+      version: 3,
+      updated_at: '2026-06-14T08:00:00.000Z'
+    });
+    // no client.quotes entry for this id
+
+    const quote = await getFullQuote(client, 'PP-2026-0001');
+    expect(quote).toBeTruthy();
+    expect(quote.version).toBe(3); // from the payload row
+    expect(quote.status).toBe('rejected'); // payload's own value, not overlaid
+    expect(quote.status_ts).toBe('2026-06-14T08:00:00.000Z');
   });
 });
 
@@ -356,6 +406,16 @@ describe('updateFullQuote', () => {
     expect(statUpd).toBeTruthy();
     // the WHERE id = ? targets the same id
     expect(statUpd.params[statUpd.params.length - 1]).toBe('PP-2026-0001');
+
+    // …and the NEW values actually landed on the flat row (the fake maps the
+    // UPDATE params back onto the SET columns), so stats stay correct.
+    const flat = client.quotes.get('PP-2026-0001');
+    expect(flat.total_vat_inc).toBe(700);
+    expect(flat.sale_base).toBe(580);
+    expect(flat.margin_pct).toBe(0.41);
+    // status/status_ts must NOT have been overwritten by the stat refresh
+    expect(flat.status).toBe('pending');
+    expect(flat.status_ts).toBeNull();
   });
 
   test('the payload UPDATE happens before the flat-row UPDATE', async () => {
