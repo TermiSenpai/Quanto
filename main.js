@@ -85,7 +85,7 @@ const { loadMigrations } = require('./lib/migration-loader');
 const { createCloudBootstrap } = require('./lib/cloud-bootstrap');
 const { migrateLegacyUserData } = require('./lib/userdata-migration');
 const { readAllQuotes, historyPathFor, HISTORY_FILE_NAME } = require('./lib/history');
-const { migrateLocalQuotes } = require('./lib/quote-migrate-local');
+const { migrateLocalQuotes, partitionMigratableQuotes } = require('./lib/quote-migrate-local');
 const { autoUpdater } = require('electron-updater');
 const { wireUpdater } = require('./lib/app-updater');
 
@@ -361,11 +361,6 @@ async function drainFullQuoteToCloud(client, quote) {
 async function migratePerPcQuotesToSharedStore() {
   try {
     const legacyPath = historyPathFor(SETTINGS_DIR);
-    // Read the legacy per-PC file (lazily migrates v2→v3 entries). Empty
-    // or missing → nothing to do.
-    const localQuotes = readAllQuotes(SETTINGS_DIR);
-    if (!localQuotes || localQuotes.length === 0) return;
-
     const settings = readSettings() || {};
     const isCloud = settings.data_source === 'cloud';
 
@@ -377,43 +372,66 @@ async function migratePerPcQuotesToSharedStore() {
     // flat-field derivation (tier), id-bridging against the pre-Phase-B
     // UUID-keyed flat rows, and stats de-dup — out of scope here, and cloud
     // mode is brand-new so legacy local data in cloud is an edge case
-    // (tracked for B8). Attempting it would fail validation on every quote →
-    // re-log N errors every boot. So we keep the data intact (no rename) and
-    // log a single honest line instead.
+    // (tracked for B8). So we keep the data fully intact and log the skip.
+    //
+    // We do NOT call readAllQuotes here: it lazily REWRITES presupuestos.json
+    // in place when it finds v2 (Spanish-key) entries. Touching nothing in
+    // cloud mode means a cheap existence check, not a full parse + rewrite.
     if (isCloud) {
-      logger.warn(
-        `cloud mode: ${localQuotes.length} legacy local quotes were NOT auto-migrated ` +
-        `to the shared store (kept in ${HISTORY_FILE_NAME}); cloud backfill of ` +
-        `pre-Phase-B quotes is not yet supported`,
-        { count: localQuotes.length }
-      );
+      if (fs.existsSync(legacyPath)) {
+        logger.warn(
+          `cloud mode: legacy local quotes in ${HISTORY_FILE_NAME} were NOT ` +
+          'auto-migrated to the shared store (kept intact); cloud backfill of ' +
+          'pre-Phase-B quotes is not yet supported'
+        );
+      }
       return;
     }
 
-    // File mode: build the id-preserving putIfAbsent adapter. If the shared
-    // store is not configured yet (no config_path) → skip; we'll retry on a
-    // later boot, once the first-run wizard has set the path.
+    // File mode. The shared store must be configured (the wizard sets
+    // config_path on first run); otherwise skip and retry on a later boot.
     if (!settings.config_path) {
       logger.info('quote migration skipped: shared config path not set yet');
       return;
     }
+
+    // Read the legacy per-PC file (lazily migrates v2→v3 entries — fine in
+    // file mode, where we are about to consume + retire it). Empty/missing →
+    // nothing to do.
+    const localQuotes = readAllQuotes(SETTINGS_DIR);
+    if (!localQuotes || localQuotes.length === 0) return;
+
+    // Drop structurally-invalid entries (null / non-object / bad id) from the
+    // attempt: the id-preserving adapter could only ever THROW on them, and
+    // counting that as `failed` would wedge the migration into endless retry
+    // (the source never gets renamed). They are NOT lost — the original file
+    // becomes the .bak-pre-shared backup. So `failed` reflects only transient
+    // fs errors, the correct gate for "keep the source for retry".
+    const { migratable, invalid } = partitionMigratableQuotes(localQuotes, quoteRepoFile.isValidId);
+    if (invalid.length > 0) {
+      logger.warn('per-PC quote migration: dropped structurally-invalid entries (preserved in backup)', {
+        dropped: invalid.length
+      });
+    }
+
     const folder = quotesFolder(settings.config_path);
     if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
     const putIfAbsent = async (q) => quoteRepoFile.putQuoteIfAbsent(folder, q);
 
-    const summary = await migrateLocalQuotes(localQuotes, putIfAbsent);
+    const summary = await migrateLocalQuotes(migratable, putIfAbsent);
     logger.info('per-PC quote migration ran (file mode)', {
       total: summary.total,
       migrated: summary.migrated,
       skipped: summary.skipped,
-      failed: summary.failed
+      failed: summary.failed,
+      droppedInvalid: invalid.length
     });
 
     if (summary.failed === 0) {
-      // Every entry is now in the shared store (migrated or already
-      // present). Retire the legacy file to a safety copy — never delete.
-      // Only rename when the source still exists (a prior partial run may
-      // have left an older .bak-pre-shared; that's fine, we overwrite it).
+      // Every migratable entry is now in the shared store (migrated or
+      // already present). Retire the legacy file to a safety copy — never
+      // delete. Only rename when the source still exists (a prior partial run
+      // may have left an older .bak-pre-shared; that's fine, we overwrite it).
       if (fs.existsSync(legacyPath)) {
         const backupPath = legacyPath + '.bak-pre-shared';
         fs.renameSync(legacyPath, backupPath);
@@ -421,9 +439,13 @@ async function migratePerPcQuotesToSharedStore() {
       }
     } else {
       // Leave the source in place so the next boot retries the remaining
-      // entries (already-migrated ids are skipped). Surface the causes.
-      logger.warn('per-PC quote migration had failures; source kept for retry', {
-        failed: summary.failed, errors: summary.errors
+      // entries (already-migrated ids are skipped). Surface the causes, but
+      // bound the log: a backend-wide failure would otherwise dump one
+      // id+message per quote on every boot.
+      logger.warn('per-PC quote migration had transient failures; source kept for retry', {
+        failed: summary.failed,
+        firstErrors: summary.errors.slice(0, 5),
+        moreErrors: Math.max(0, summary.errors.length - 5)
       });
     }
   } catch (err) {

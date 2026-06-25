@@ -8,7 +8,8 @@
 // ============================================================
 
 import { describe, test, expect } from 'vitest';
-import { migrateLocalQuotes } from '../lib/quote-migrate-local.js';
+import { migrateLocalQuotes, partitionMigratableQuotes } from '../lib/quote-migrate-local.js';
+import { isValidId } from '../lib/quote-repo-file.js';
 
 // A handful of local-history-shaped quotes (the only field migration
 // cares about is the existing human id).
@@ -80,5 +81,68 @@ describe('migrateLocalQuotes', () => {
     const { putIfAbsent } = makeFakeStore();
     const summary = await migrateLocalQuotes([], putIfAbsent);
     expect(summary).toEqual({ total: 0, migrated: 0, skipped: 0, failed: 0, errors: [] });
+  });
+});
+
+// ── partitionMigratableQuotes ─────────────────────────────────
+describe('partitionMigratableQuotes', () => {
+  test('keeps real objects with a valid id; quarantines the rest', () => {
+    const valid1 = { id: 'PP-2026-0001', user: 'A' };
+    const valid2 = { id: 'PP-2026-0002', user: 'B' };
+    const input = [
+      valid1,
+      null,                       // not an object
+      'oops',                     // not an object
+      [],                         // array, not a plain quote object
+      { id: 'not-an-id', x: 1 },  // bad id shape
+      { user: 'no id' },          // missing id
+      valid2,
+    ];
+    const { migratable, invalid } = partitionMigratableQuotes(input, isValidId);
+    expect(migratable).toEqual([valid1, valid2]);
+    expect(invalid).toHaveLength(5);
+  });
+
+  test('falls back to the built-in PP-YYYY-NNNN guard when none is injected', () => {
+    const { migratable, invalid } = partitionMigratableQuotes([
+      { id: 'PP-2025-0042' },
+      { id: 'PP-25-1' }, // year not 4 digits
+    ]);
+    expect(migratable.map(q => q.id)).toEqual(['PP-2025-0042']);
+    expect(invalid).toHaveLength(1);
+  });
+
+  test('a non-array input yields empty partitions', () => {
+    expect(partitionMigratableQuotes(null)).toEqual({ migratable: [], invalid: [] });
+    expect(partitionMigratableQuotes(undefined)).toEqual({ migratable: [], invalid: [] });
+  });
+
+  test('reuses lib/quote-repo-file.js isValidId (same rule as the adapter)', () => {
+    // The exported guard must accept exactly what the file adapter writes.
+    expect(isValidId('PP-2026-0001')).toBe(true);
+    expect(isValidId('../escape')).toBe(false);
+    expect(isValidId(null)).toBe(false);
+  });
+});
+
+// ── pre-filter + migrate: invalid entries are skipped, not failed ──
+describe('pre-filtered migration (invalid entries do not wedge the gate)', () => {
+  test('valid quotes migrate cleanly (failed===0) while invalid ones are quarantined', async () => {
+    const { store, putIfAbsent } = makeFakeStore();
+    const mixed = [
+      { id: 'PP-2026-0001', user: 'A' },
+      null,                              // structurally invalid
+      { id: '../escape', user: 'EVIL' }, // bad id — would THROW in the real adapter
+      { id: 'PP-2026-0002', user: 'B' },
+    ];
+    const { migratable, invalid } = partitionMigratableQuotes(mixed, isValidId);
+    expect(invalid).toHaveLength(2);
+
+    // Only the migratable subset reaches the (id-preserving) adapter, so it
+    // never throws → failed stays 0 → the caller's rename gate (failed===0)
+    // holds even though the source contained junk.
+    const summary = await migrateLocalQuotes(migratable, putIfAbsent);
+    expect(summary).toMatchObject({ total: 2, migrated: 2, skipped: 0, failed: 0 });
+    expect([...store.keys()]).toEqual(['PP-2026-0001', 'PP-2026-0002']);
   });
 });
