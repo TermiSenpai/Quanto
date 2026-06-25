@@ -2430,6 +2430,7 @@ function escapeHTML(s) {
 }
 
 function resetForm() {
+  state.editingQuoteId = null; // Limpiar starts a fresh quote
   if (state.packId) renderPackInputs(state.packId);
   el('cant_3xl').value = '0';
   el('cant_4xl').value = '0';
@@ -2439,6 +2440,7 @@ function resetForm() {
 }
 
 function backToSelection() {
+  state.editingQuoteId = null;
   state.packId = null;
   hide('error-msg');
   document.querySelectorAll('.pack-card').forEach(card => card.classList.remove('is-selected'));
@@ -3545,12 +3547,12 @@ async function onHistoryAction(action, id) {
         // pedido" lands on a fully populated step-2 form.
         selectPack(packId);       // renders builder + navigates to paso2 + hooks listeners + recomputes
         applyInputs(packId, opt); // fill every field from the stored opt
-        recomputePreview();       // sync the live preview to the restored inputs
+        recomputePreview();       // recompute again with the restored inputs (selectPack recomputed with defaults)
         lastResult = result;
         renderResult(result);     // render the breakdown (calls syncClientCard(result) internally)
         syncClientCard(quote);    // re-prefill customer + validity from the full quote (overrides result)
         goToScreen('resultado');  // land on the breakdown (current UX)
-        state.editingQuoteId = quote.id;
+        state.editingQuoteId = quote.id; // set AFTER selectPack, which reset it
       } else {
         // Fall back to read-only: show the breakdown but skip builder rebuild.
         state.packId = packId;
@@ -3774,7 +3776,10 @@ function computePvpDeviation(result) {
  */
 async function persistCurrentQuote(client) {
   const ts = new Date().toISOString();
-  const cloud = isCloudMode() ? buildCloudQuote(lastResult, client, ts) : null;
+  const isEdit = Boolean(state.editingQuoteId);
+  // Cloud upload only for new quotes. Re-uploading on edit would create
+  // duplicate cloud stat rows; full cloud edit handling is Phase B.
+  const cloud = (!isEdit && isCloudMode()) ? buildCloudQuote(lastResult, client, ts) : null;
 
   const draft = buildQuoteDraft(lastResult, {
     user: SETTINGS.user_name,
@@ -3786,6 +3791,8 @@ async function persistCurrentQuote(client) {
   draft.valid_until = computeValidUntil(ts);
   draft.status = 'pending';
   if (cloud) draft.cloud_id = cloud.id;
+  // Signal to main which entry to replace (routes quotes:save to replaceQuote).
+  if (isEdit) draft.id = state.editingQuoteId;
 
   const r = await window.packprice.saveQuote(draft);
   if (!r || !r.ok) {
@@ -3822,14 +3829,24 @@ async function saveCurrentQuote() {
   const client = collectClientOrInvalid();
   if (!client) return; // inline errors already shown
 
+  // Capture whether this is an edit BEFORE persisting (editingQuoteId stays set).
+  const wasEditing = Boolean(state.editingQuoteId);
   const saved = await persistCurrentQuote(client);
   if (!saved) return;
   lastResult = saved;
-  await window.packprice.showInfo({
-    titulo: 'Presupuesto guardado',
-    mensaje: `Asignado el ID ${saved.id}.`,
-    detalle: 'Disponible en el botón “Historial” del menú superior.'
-  });
+  if (wasEditing) {
+    await window.packprice.showInfo({
+      titulo: 'Presupuesto actualizado',
+      mensaje: `Se actualizó el presupuesto ${saved.id}.`,
+      detalle: 'Disponible en el botón “Historial” del menú superior.'
+    });
+  } else {
+    await window.packprice.showInfo({
+      titulo: 'Presupuesto guardado',
+      mensaje: `Asignado el ID ${saved.id}.`,
+      detalle: 'Disponible en el botón “Historial” del menú superior.'
+    });
+  }
 }
 
 async function exportQuotePdf() {
