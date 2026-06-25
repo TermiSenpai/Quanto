@@ -969,7 +969,7 @@ describe('setQuoteStatus', () => {
     const { bootstrap } = makeBootstrap(client);
     const res = await bootstrap.setQuoteStatus(SETTINGS, { id: 'uuid-1', status: 'accepted' });
 
-    expect(res).toEqual({ ok: true, id: 'uuid-1', status: 'accepted' });
+    expect(res).toEqual({ ok: true, id: 'uuid-1', status: 'accepted', changes: 1 });
     const upd = calls.find((c) => /UPDATE quotes SET status/.test(c.sql));
     expect(upd).toBeTruthy();
     expect(upd.params).toEqual(['accepted', NOW(), 'uuid-1']);

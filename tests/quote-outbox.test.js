@@ -212,6 +212,53 @@ describe('flushOutbox', () => {
     expect(readOutbox(dir).fullQuotes.map((q) => q.id)).toEqual(['PP-PENDING-keep']);
   });
 
+  // (I1 regression) A quote enqueued DURING a drain await must survive the
+  // commit point — the flush must subtract only what it drained from a FRESH
+  // read, not overwrite with a stale top-of-function snapshot.
+  test('an enqueue interleaved with a drain is preserved (no lost-update race)', async () => {
+    enqueueFullQuote(dir, { ...sampleQuote('PP-2026-0001') });
+    // The drain for the first item simulates a concurrent offline-save that
+    // appends a NEW full quote while the network call is in flight.
+    let injected = false;
+    const deps = {
+      uploaded: [], statuses: [],
+      async uploadQuote() {},
+      async updateQuoteStatus() {},
+      async drainFullQuote(quote) {
+        if (!injected && quote.id === 'PP-2026-0001') {
+          injected = true;
+          enqueueFullQuote(dir, { ...sampleQuote('PP-2026-0002') }); // arrives mid-flush
+        }
+        return { ok: true, id: quote.id };
+      }
+    };
+
+    const res = await flushOutbox(dir, client, deps);
+    expect(res.fullQuotesDrained).toBe(1); // only the one snapshotted item drained
+    const remaining = readOutbox(dir).fullQuotes.map((q) => q.id);
+    // The drained item is gone; the concurrently-enqueued one SURVIVES.
+    expect(remaining).toEqual(['PP-2026-0002']);
+    expect(res.remaining).toBe(1);
+  });
+
+  test('an interleaved enqueue on the flat `quotes` lane is preserved too', async () => {
+    enqueueQuote(dir, sampleQuote('q1'));
+    let injected = false;
+    const deps = {
+      uploaded: [], statuses: [],
+      async uploadQuote(_client, quote) {
+        if (!injected && quote.id === 'q1') {
+          injected = true;
+          enqueueQuote(dir, sampleQuote('q2')); // arrives mid-flush
+        }
+      },
+      async updateQuoteStatus() {}
+    };
+    const res = await flushOutbox(dir, client, deps);
+    expect(res.uploaded).toBe(1);
+    expect(readOutbox(dir).quotes.map((q) => q.id)).toEqual(['q2']);
+  });
+
   test('a corrupt outbox is tolerated (never crashes the flush)', async () => {
     const p = outboxPathFor(dir);
     fs.mkdirSync(path.dirname(p), { recursive: true });

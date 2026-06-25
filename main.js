@@ -57,12 +57,15 @@ const {
   writeQuoteCache
 } = require('./lib/quote-cache');
 const { enqueueFullQuote } = require('./lib/quote-outbox');
-const { saveFullQuote } = require('./lib/cloud-quotes');
 const {
   quotesFolder,
-  isPendingId,
   newPendingId
 } = require('./lib/quote-store-helpers');
+const {
+  isBackendUnreachable,
+  isPermissionError,
+  drainQueuedFullQuote
+} = require('./lib/quote-drain');
 const {
   renderQuote, BUILTIN_TEMPLATES, brandColors, listBuiltinTemplates, renderPreview
 } = require('./lib/pdf-templates');
@@ -143,25 +146,10 @@ const cloudBootstrap = createCloudBootstrap({
 // the token never leaves main. The per-PC cache (lib/quote-cache.js)
 // mirrors the last good read for the offline list/get fallback; offline
 // writes go to the fullQuotes outbox lane (lib/quote-outbox.js).
-
-// True when an error means the backend was UNREACHABLE (so the write is
-// queueable and a read falls back to the cache), as opposed to a
-// validation/size/conflict bug (which surfaces). Cloud: a D1ClientError
-// with .network === true (set only at the fetch-reject site). File: an
-// fs error whose code marks the folder/path unreachable (NAS down) —
-// never a serialization/size error (those are plain Errors).
-const FILE_UNREACHABLE_CODES = new Set([
-  'ENOENT', 'ENOTDIR', 'EBUSY', 'EPERM', 'EACCES', 'ETIMEDOUT', 'ENETUNREACH',
-  'EHOSTUNREACH', 'ECONNREFUSED', 'ECONNRESET', 'ENETDOWN', 'EHOSTDOWN', 'EIO'
-]);
-function isBackendUnreachable(err) {
-  if (!err) return false;
-  // Cloud: the structural offline flag a D1ClientError carries (set ONLY at
-  // the fetch-reject site in lib/d1-client.js). File: an fs error code that
-  // marks the folder/path unreachable (NAS down).
-  if (err.network === true) return true;
-  return typeof err.code === 'string' && FILE_UNREACHABLE_CODES.has(err.code);
-}
+//
+// The error classification (isBackendUnreachable) and the offline-drain
+// routing (create vs edit) live in lib/quote-drain.js so they are pure +
+// unit-tested (Electron can't be launched in tests).
 
 /**
  * Returns the active quote backend as a uniform async interface,
@@ -337,25 +325,23 @@ function reconcileCachedQuote(provisionalId, realQuote) {
 
 /**
  * Drains one full reopenable quote buffered offline against the cloud
- * (Phase B fullQuotes lane). A quote with a PROVISIONAL id (offline create)
- * gets a REAL PP-YYYY-NNNN id assigned via the cloud create (claim + retry),
- * then the cache's provisional entry is replaced. A quote that already has a
- * real id (offline EDIT/replay) drains via the idempotent saveFullQuote.
- * Throws on failure so the outbox keeps the item (best-effort retry).
+ * (Phase B fullQuotes lane), routing CREATE vs EDIT correctly via the pure
+ * lib/quote-drain.js (a CREATE assigns a real id + reconciles the cache; an
+ * EDIT goes through the force-update path so the edited payload is actually
+ * written and `version` bumps — never create-only saveFullQuote). Throws on
+ * failure so the outbox keeps the item for a later retry.
  *
  * @param {object} client - the live D1 client (bound by cloud-bootstrap)
  * @param {object} quote - the queued full reopenable quote
  */
 async function drainFullQuoteToCloud(client, quote) {
-  if (isPendingId(quote && quote.id)) {
-    // Strip the provisional id/version so the cloud create assigns a real one.
-    const { id: provisionalId, version, date, updated_at, ...draft } = quote;
-    const saved = await quoteRepoCloud.createQuote(client, draft);
-    reconcileCachedQuote(provisionalId, saved);
-    return saved;
-  }
-  // Real id: idempotent re-save (INSERT OR IGNORE on the human id).
-  return saveFullQuote(client, quote);
+  return drainQueuedFullQuote({
+    createQuote: (draft) => quoteRepoCloud.createQuote(client, draft),
+    // null token ⇒ force (current-version re-read), so the queued edit lands.
+    replaceQuote: (id, q, token) => quoteRepoCloud.replaceQuote(client, id, q, token),
+    reconcileCachedQuote,
+    upsertCachedQuote
+  }, quote);
 }
 
 let mainWindow = null;
@@ -1482,25 +1468,37 @@ ipcMain.handle('quotes:save', async (event, draft) => {
     const isCloud = settings && settings.data_source === 'cloud';
     if (isCloud && isBackendUnreachable(err)) {
       try {
-        let queued;
+        // The displayed/cached quote carries no transient marker; the queued
+        // copy carries `__op` so the drain (lib/quote-drain.js) routes it to
+        // the RIGHT cloud op — an EDIT through the force-update path (so the
+        // edit is actually written), a CREATE through id assignment.
+        let display;
         if (isEdit) {
-          // An edit already owns a real id — drain re-saves it idempotently.
-          queued = clean;
+          // An edit already owns a real id; mark it so the drain UPDATES it
+          // (never the create-only path, which would no-op and lose the edit).
+          display = clean;
+          enqueueFullQuote(SETTINGS_DIR, { ...clean, __op: 'edit' });
         } else {
           // A fresh offline create gets a provisional id until the drain
           // assigns the real one and reconciles the cache.
-          queued = { ...clean, id: newPendingId(), version: 1 };
+          display = { ...clean, id: newPendingId(), version: 1 };
+          enqueueFullQuote(SETTINGS_DIR, { ...display, __op: 'create' });
         }
-        enqueueFullQuote(SETTINGS_DIR, queued);
-        upsertCachedQuote(queued);
-        logger.info('quote queued (offline)', { id: queued.id, edit: isEdit });
-        return { ok: true, queued: true, quote: queued };
+        upsertCachedQuote(display);
+        logger.info('quote queued (offline)', { id: display.id, edit: isEdit });
+        return { ok: true, queued: true, quote: display };
       } catch (queueErr) {
         logger.error('quote offline-queue failed', { error: queueErr.message });
         return { ok: false, error: queueErr.message };
       }
     }
-    logger.error('quote save failed', { error: err.message });
+    if (isPermissionError(err)) {
+      // A persistent permission misconfig (not an outage): surface + log
+      // loudly so it is fixed, never masked as transient/retry.
+      logger.error('quote save: permission denied', { error: err.message, code: err.code });
+    } else {
+      logger.error('quote save failed', { error: err.message });
+    }
     return { ok: false, error: err.message };
   }
 });
@@ -1574,17 +1572,21 @@ ipcMain.handle('quotes:get', async (event, id) => {
 // to the cloud for the renderer's existing flow and stays idempotent.
 ipcMain.handle('quotes:update', async (event, payload) => {
   const settings = readSettings();
+  // Build the repo (and, in cloud mode, the D1 client) ONCE and reuse it for
+  // both the status write and the cache refresh — no second client/round-trip.
+  const repo = quoteRepo(settings);
   try {
     const { id, patch } = payload || {};
     const p = patch || {};
     const status = p.status;
     const statusTs = p.status_ts || new Date().toISOString();
-    const updated = await quoteRepo(settings).setStatus(id, status, statusTs);
+    // setStatus now honors the uniform updated|null contract in BOTH modes:
+    // it returns the overlaid quote (file: full record; cloud: re-fetched)
+    // or null for an unknown id. So a real quote can be cached directly.
+    const updated = await repo.setStatus(id, status, statusTs);
     if (updated) {
       logger.info('quote status updated', { id, status });
-      // Refresh the cached entry so the offline view reflects the new status.
-      const got = await quoteRepo(settings).getQuote(id).catch(() => null);
-      if (got && got.quote) upsertCachedQuote(got.quote);
+      upsertCachedQuote(updated);
     }
     return { ok: true, quote: updated };
   } catch (err) {

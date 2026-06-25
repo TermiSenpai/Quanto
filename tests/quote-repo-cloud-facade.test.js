@@ -450,11 +450,15 @@ describe('replaceQuote', () => {
 
 // ── setStatus ────────────────────────────────────────────────────
 describe('setStatus', () => {
-  test('updates the authoritative flat row status (no payload version bump), getFullQuote overlays it', async () => {
+  test('returns the overlaid quote (updated|null contract) and updates the authoritative flat row, no payload version bump', async () => {
     const client = fakeClient();
     await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
-    const res = await setStatus(client, 'PP-2026-0001', 'accepted', '2026-06-13T09:00:00.000Z');
-    expect(res).toEqual({ ok: true, id: 'PP-2026-0001', status: 'accepted' });
+    const updated = await setStatus(client, 'PP-2026-0001', 'accepted', '2026-06-13T09:00:00.000Z');
+    // Uniform contract: a full quote, not { ok, id, status }
+    expect(updated).not.toBeNull();
+    expect(updated.id).toBe('PP-2026-0001');
+    expect(updated.status).toBe('accepted');
+    expect(updated.status_ts).toBe('2026-06-13T09:00:00.000Z');
 
     // flat row mutated
     const flat = client.quotes.get('PP-2026-0001');
@@ -463,11 +467,29 @@ describe('setStatus', () => {
 
     // payload version untouched (status is workflow, not a content edit)
     expect(client.payloads.get('PP-2026-0001').version).toBe(1);
+    expect(updated.version).toBe(1);
 
     // getQuote overlays the authoritative status onto the payload
     const got = await getQuote(client, 'PP-2026-0001');
     expect(got.quote.status).toBe('accepted');
     expect(got.version).toBe(1);
+  });
+
+  test('returns null for an unknown id (UPDATE changes 0), never falsely reports success', async () => {
+    const client = fakeClient();
+    await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
+    const res = await setStatus(client, 'PP-2026-9999', 'accepted', '2026-06-13T09:00:00.000Z');
+    expect(res).toBeNull();
+    // the real quote was untouched
+    expect(client.quotes.get('PP-2026-0001').status).toBe('pending');
+  });
+
+  test('returns null for a shape-invalid id without any query', async () => {
+    const client = fakeClient();
+    client.calls.length = 0;
+    expect(await setStatus(client, '../evil', 'accepted', 't')).toBeNull();
+    const mutated = client.calls.some((c) => /UPDATE|SELECT/i.test(c.sql || ''));
+    expect(mutated).toBe(false);
   });
 
   test('rejects an invalid status without any write (fail-fast, non-network)', async () => {
