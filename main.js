@@ -84,9 +84,8 @@ const { createD1Client } = require('./lib/d1-client');
 const { loadMigrations } = require('./lib/migration-loader');
 const { createCloudBootstrap } = require('./lib/cloud-bootstrap');
 const { migrateLegacyUserData } = require('./lib/userdata-migration');
-const { readAllQuotes, historyPathFor } = require('./lib/history');
+const { readAllQuotes, historyPathFor, HISTORY_FILE_NAME } = require('./lib/history');
 const { migrateLocalQuotes } = require('./lib/quote-migrate-local');
-const { tryClaimFullQuote } = require('./lib/cloud-quotes');
 const { autoUpdater } = require('electron-updater');
 const { wireUpdater } = require('./lib/app-updater');
 
@@ -370,34 +369,40 @@ async function migratePerPcQuotesToSharedStore() {
     const settings = readSettings() || {};
     const isCloud = settings.data_source === 'cloud';
 
-    // Build the id-preserving putIfAbsent adapter for the active backend.
-    // If the shared store is not configured yet (no config_path in file
-    // mode, no cloud creds in cloud mode) → skip; we'll retry on a later
-    // boot, once the first-run wizard has set things up.
-    let putIfAbsent;
+    // Cloud mode: do NOT attempt per-quote migration. Legacy per-PC quotes
+    // carry the buildQuoteDraft shape (user/customer/result/totals/opt/…)
+    // but NOT the flat stat fields tryClaimFullQuote → validateQuoteRow
+    // requires (ts, tier, total_units, total_vat_inc, sale_base, margin_pct,
+    // catalog_version). A correct cloud backfill needs catalog-dependent
+    // flat-field derivation (tier), id-bridging against the pre-Phase-B
+    // UUID-keyed flat rows, and stats de-dup — out of scope here, and cloud
+    // mode is brand-new so legacy local data in cloud is an edge case
+    // (tracked for B8). Attempting it would fail validation on every quote →
+    // re-log N errors every boot. So we keep the data intact (no rename) and
+    // log a single honest line instead.
     if (isCloud) {
-      const cloud = settings.cloud || {};
-      if (!cloud.token || !cloud.account_id || !cloud.database_id) {
-        logger.info('quote migration skipped: cloud store not configured yet');
-        return;
-      }
-      const client = cloudBootstrap.clientFor(settings);
-      // tryClaimFullQuote does INSERT OR IGNORE keyed on the human id and
-      // reports whether it claimed it (claimed=false ⇒ already present).
-      putIfAbsent = async (q) => ({ migrated: (await tryClaimFullQuote(client, q)).claimed });
-    } else {
-      if (!settings.config_path) {
-        logger.info('quote migration skipped: shared config path not set yet');
-        return;
-      }
-      const folder = quotesFolder(settings.config_path);
-      if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
-      putIfAbsent = async (q) => quoteRepoFile.putQuoteIfAbsent(folder, q);
+      logger.warn(
+        `cloud mode: ${localQuotes.length} legacy local quotes were NOT auto-migrated ` +
+        `to the shared store (kept in ${HISTORY_FILE_NAME}); cloud backfill of ` +
+        `pre-Phase-B quotes is not yet supported`,
+        { count: localQuotes.length }
+      );
+      return;
     }
 
+    // File mode: build the id-preserving putIfAbsent adapter. If the shared
+    // store is not configured yet (no config_path) → skip; we'll retry on a
+    // later boot, once the first-run wizard has set the path.
+    if (!settings.config_path) {
+      logger.info('quote migration skipped: shared config path not set yet');
+      return;
+    }
+    const folder = quotesFolder(settings.config_path);
+    if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+    const putIfAbsent = async (q) => quoteRepoFile.putQuoteIfAbsent(folder, q);
+
     const summary = await migrateLocalQuotes(localQuotes, putIfAbsent);
-    logger.info('per-PC quote migration ran', {
-      mode: isCloud ? 'cloud' : 'file',
+    logger.info('per-PC quote migration ran (file mode)', {
       total: summary.total,
       migrated: summary.migrated,
       skipped: summary.skipped,
