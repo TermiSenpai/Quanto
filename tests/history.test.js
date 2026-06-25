@@ -12,6 +12,7 @@ import {
   deleteQuote,
   getQuote,
   updateQuote,
+  replaceQuote,
   nextIdForYear,
   historyPathFor,
   HISTORY_FILE_NAME,
@@ -266,6 +267,115 @@ describe('updateQuote', () => {
       status_ts: '2026-06-13T10:00:00.000Z',
       cloud_id: 'uuid-9'
     });
+  });
+});
+
+describe('saveQuote version/updated_at stamps', () => {
+  test('stamps version=1 and updated_at equal to date', () => {
+    const dir = makeUserData();
+    const now = new Date('2026-05-11T14:32:00Z');
+    const quote = saveQuote(dir, { user: 'Alberto' }, { now });
+    expect(quote.version).toBe(1);
+    expect(quote.updated_at).toBe(quote.date);
+    expect(quote.updated_at).toBe('2026-05-11T14:32:00.000Z');
+  });
+});
+
+describe('replaceQuote', () => {
+  test('overwrites editable fields and keeps original id and date', () => {
+    const dir = makeUserData();
+    const now = new Date('2026-05-11T14:00:00Z');
+    const original = saveQuote(dir, {
+      user: 'Alberto',
+      result: { total: 100 },
+      customer: { name: 'Ana' }
+    }, { now });
+
+    const laterNow = new Date('2026-05-11T15:00:00Z');
+    const replaced = replaceQuote(dir, original.id, {
+      user: 'Alberto',
+      result: { total: 200 },
+      customer: { name: 'Beatriz' }
+    }, { now: laterNow });
+
+    // Editable fields updated.
+    expect(replaced.result).toEqual({ total: 200 });
+    expect(replaced.customer).toEqual({ name: 'Beatriz' });
+    // Identity preserved.
+    expect(replaced.id).toBe(original.id);
+    expect(replaced.date).toBe(original.date);
+    // Revision tracking updated.
+    expect(replaced.updated_at).toBe('2026-05-11T15:00:00.000Z');
+    expect(replaced.version).toBe(2); // 1 → 2
+    // Persisted correctly.
+    const onDisk = getQuote(dir, original.id);
+    expect(onDisk.result).toEqual({ total: 200 });
+    expect(onDisk.id).toBe(original.id);
+  });
+
+  test('preserves status/status_ts/cloud_id even if draft carries different values', () => {
+    const dir = makeUserData();
+    const original = saveQuote(dir, { user: 'Alberto' });
+    // Simulate the quote being accepted and synced to cloud.
+    updateQuote(dir, original.id, {
+      status: 'accepted',
+      status_ts: '2026-06-01T10:00:00.000Z',
+      cloud_id: 'uuid-abc'
+    });
+
+    // Now try to replace with a draft that includes conflicting workflow fields.
+    const replaced = replaceQuote(dir, original.id, {
+      user: 'Alberto',
+      result: { total: 999 },
+      status: 'rejected',      // should be ignored
+      status_ts: 'BAD',        // should be ignored
+      cloud_id: 'uuid-EVIL'    // should be ignored
+    });
+
+    // Workflow fields from the stored entry must be preserved.
+    expect(replaced.status).toBe('accepted');
+    expect(replaced.status_ts).toBe('2026-06-01T10:00:00.000Z');
+    expect(replaced.cloud_id).toBe('uuid-abc');
+    // Editable content updated.
+    expect(replaced.result).toEqual({ total: 999 });
+  });
+
+  test('carries the draft status when the existing entry has none', () => {
+    const dir = makeUserData();
+    // saveQuote does not stamp a status, so this stored entry has none.
+    const original = saveQuote(dir, { user: 'X' });
+    expect(original.status).toBeUndefined();
+    // The draft carries a status (as persistCurrentQuote always does).
+    const replaced = replaceQuote(dir, original.id, { user: 'X', status: 'pending' });
+    expect(replaced.status).toBe('pending');
+    expect(getQuote(dir, original.id).status).toBe('pending');
+  });
+
+  test('bumps version across repeated edits (1 -> 2 -> 3)', () => {
+    const dir = makeUserData();
+    const original = saveQuote(dir, { user: 'X', result: { total: 1 } });
+    expect(original.version).toBe(1);
+    const first = replaceQuote(dir, original.id, { user: 'X', result: { total: 2 } });
+    expect(first.version).toBe(2);
+    const second = replaceQuote(dir, original.id, { user: 'X', result: { total: 3 } });
+    expect(second.version).toBe(3);
+  });
+
+  test('returns null for an unknown id and writes nothing', () => {
+    const dir = makeUserData();
+    const before = listQuotes(dir);
+    const result = replaceQuote(dir, 'PP-2026-9999', { user: 'Ghost' });
+    expect(result).toBeNull();
+    // File unchanged — still empty.
+    expect(listQuotes(dir)).toEqual(before);
+  });
+
+  test('rejects a non-object draft', () => {
+    const dir = makeUserData();
+    const q = saveQuote(dir, { user: 'Test' });
+    expect(() => replaceQuote(dir, q.id, null)).toThrow();
+    expect(() => replaceQuote(dir, q.id, 'bad')).toThrow();
+    expect(() => replaceQuote(dir, q.id, [])).toThrow();
   });
 });
 

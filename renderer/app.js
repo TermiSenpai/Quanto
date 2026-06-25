@@ -61,6 +61,7 @@ import {
 } from './stats-view.js';
 import { enhanceDropdowns } from './dropdown.js';
 import { startCatalogWizard } from './catalog-wizard.js';
+import { planInputs } from './quote-inputs.js';
 
 // ============================================================
 // Module state
@@ -71,6 +72,7 @@ let adminConfigInfoAtOpen = null; // mtime + hash when admin opened (conflicts)
 let CFG_BACKUP = null;           // copy for "Cancel changes"
 let eventsBound = false;
 let lastResult = null;           // useful for "Copy summary"
+let lastOpt    = null;           // inputs that produced lastResult (snapshot at calc time)
 
 // v5 cloud: the last catalog load envelope drives the topbar indicator
 // and the offline banner. In file mode it stays { source: 'file' }.
@@ -113,6 +115,7 @@ let pdfTpl = { templates: [], builtinIds: new Set(), selectedId: null, cloud: fa
 
 const state = {
   packId: null,
+  editingQuoteId: null,        // id of the quote being edited (reopened); null = a new quote
   isAdmin: false,
   adminTab: 'parameters',
   showCosts: false,            // secret shortcut: 3 × "." toggles the view
@@ -1458,6 +1461,7 @@ function defaultSidesKey(pack) {
 
 function selectPack(packId) {
   state.packId = packId;
+  state.editingQuoteId = null;  // picking a pack from the menu starts a fresh quote
   hide('error-msg');
 
   const pack = CFG.packs[packId];
@@ -1834,6 +1838,69 @@ function cssEscape(value) {
 }
 
 // ============================================================
+// Reopen: apply saved inputs to the step-2 builder DOM
+// ============================================================
+
+/**
+ * Inverse of collectInputs: writes a saved `opt` back into the step-2
+ * form that renderPackInputs produced. Must be called AFTER selectPack
+ * (which runs renderPackInputs) so the DOM elements exist.
+ *
+ * Option radio visuals are driven by CSS :has(input:checked), so setting
+ * .checked is enough — no synthetic events needed.
+ * After this returns, call recomputePreview() to update the live preview.
+ *
+ * @param {string} packId - id of the pack whose builder is currently rendered
+ * @param {object} opt    - the opt object stored with the quote (from collectInputs)
+ */
+function applyInputs(packId, opt) {
+  const pack = CFG.packs[packId];
+  const plan = planInputs(pack, opt);
+
+  // Options: check the radio that matches the saved value.
+  for (const [optionId, valueId] of Object.entries(plan.options)) {
+    const radio = document.querySelector(
+      `input[name="opt_${cssEscape(optionId)}"][value="${cssEscape(valueId)}"]`
+    );
+    if (radio) radio.checked = true;
+  }
+
+  // Addons: fill qty inputs (default to 0 for addons not in the saved opt).
+  document.querySelectorAll('[data-addon-qty]').forEach(input => {
+    input.value = String(plan.addons[input.dataset.addonQty] || 0);
+  });
+
+  // Sizes: fill special-size inputs.
+  const setVal = (id, v) => { const n = el(id); if (n) n.value = String(v); };
+  setVal('cant_3xl', plan.sizes.qty_3xl);
+  setVal('cant_4xl', plan.sizes.qty_4xl);
+  setVal('cant_5xl', plan.sizes.qty_5xl);
+
+  // Mode-specific quantity inputs.
+  if (plan.mode === 'free') {
+    // Rebuild the free-components lines from the saved data.
+    const productIds = Object.keys(CFG.products || {});
+    const cont = el('lineas-personalizado');
+    if (cont) {
+      cont.innerHTML = '';
+      const lines = (plan.lines && plan.lines.length)
+        ? plan.lines
+        : [{ product: productIds[0], quantity: 0 }];
+      lines.forEach((line, idx) => cont.appendChild(
+        createCustomLine(productIds, line.product || productIds[0], line.quantity, idx)
+      ));
+    }
+  } else if (plan.mode === 'bundle') {
+    setVal('in_packs', plan.packs || 0);
+  } else {
+    // components mode: one input per component, keyed by index.
+    (pack.components || []).forEach((c, idx) =>
+      setVal(`in_comp_${idx}`, (plan.quantities && plan.quantities[c.id]) || 0)
+    );
+  }
+}
+
+// ============================================================
 // Live preview (side column of step 2)
 // ============================================================
 
@@ -1872,6 +1939,7 @@ function recomputePreview() {
   }
 
   lastResult = r;
+  lastOpt    = opt;
   elTotal.textContent = formatEur(r.total_vat_inc);
   elTier.textContent = `Tramo ${tierIdFromLabel(r.tier)}`;
 
@@ -2012,6 +2080,7 @@ function runCalculation() {
   }
 
   lastResult = result;
+  lastOpt    = opt;
   renderResult(result);
   goToScreen('resultado');
 }
@@ -2364,6 +2433,7 @@ function escapeHTML(s) {
 }
 
 function resetForm() {
+  state.editingQuoteId = null; // Limpiar starts a fresh quote
   if (state.packId) renderPackInputs(state.packId);
   el('cant_3xl').value = '0';
   el('cant_4xl').value = '0';
@@ -2373,6 +2443,7 @@ function resetForm() {
 }
 
 function backToSelection() {
+  state.editingQuoteId = null;
   state.packId = null;
   hide('error-msg');
   document.querySelectorAll('.pack-card').forEach(card => card.classList.remove('is-selected'));
@@ -3464,28 +3535,48 @@ async function onHistoryAction(action, id) {
   if (action === 'open') {
     const r = await window.packprice.getQuote(id);
     if (!r || !r.ok || !r.quote) return;
-    const result = r.quote.result || r.quote;
-    lastResult = result;
-
-    // Restore the pack context the result was computed under. The
-    // result carries `pack_id`; fall back to the stored draft field.
-    const packId = result.pack_id || r.quote.pack_id || null;
-    state.packId = packId;
-
-    // Guard: if the pack was renamed/removed from the config, the
-    // result still renders (it is self-contained) but option/composition
-    // lookups would fail. Warn instead of crashing.
-    if (packId && !CFG.packs[packId]) {
-      await window.packprice.showInfo({
-        titulo: 'Pack no encontrado',
-        mensaje: `El pack original ("${packId}") ya no existe en la configuración actual. Se muestra el presupuesto guardado, pero no podrás editarlo como pedido nuevo.`
-      });
-    }
+    const quote = r.quote;
+    const result = quote.result || quote;
+    const packId = result.pack_id || quote.pack_id || null;
+    const opt = quote.opt;
+    // A quote is editable when its pack still exists in the current config
+    // AND it was saved with the raw builder inputs (opt, added in A1).
+    const editable = Boolean(packId && CFG.packs[packId] && opt);
 
     closeHistory();
     try {
-      renderResult(result);
-      goToScreen('resultado');
+      if (editable) {
+        // Rebuild the editable builder from the saved inputs so "Editar
+        // pedido" lands on a fully populated step-2 form.
+        selectPack(packId);       // renders builder + navigates to paso2 + hooks listeners + recomputes
+        applyInputs(packId, opt); // fill every field from the stored opt
+        recomputePreview();       // recompute again with the restored inputs (selectPack recomputed with defaults)
+        lastResult = result;
+        lastOpt    = opt;         // snapshot the saved inputs so saving without recalc stores the correct opt
+        renderResult(result);     // render the breakdown (calls syncClientCard(result) internally)
+        syncClientCard(quote);    // re-prefill customer + validity from the full quote (overrides result)
+        goToScreen('resultado');  // land on the breakdown (current UX)
+        state.editingQuoteId = quote.id; // set AFTER selectPack, which reset it
+      } else {
+        // Fall back to read-only: show the breakdown but skip builder rebuild.
+        state.packId = packId;
+        state.editingQuoteId = null;
+        lastResult = result;
+        renderResult(result);     // calls syncClientCard(result) — no customer on result
+        syncClientCard(quote);    // re-prefill customer + validity from the full quote
+        goToScreen('resultado');
+        if (packId && !CFG.packs[packId]) {
+          await window.packprice.showInfo({
+            titulo: 'Pack no encontrado',
+            mensaje: `El pack original ("${packId}") ya no existe en la configuración actual. Se muestra el presupuesto guardado, pero no podrás editarlo como pedido nuevo.`
+          });
+        } else if (!opt) {
+          await window.packprice.showInfo({
+            titulo: 'Presupuesto antiguo',
+            mensaje: 'Este presupuesto se guardó con una versión anterior y no incluye los datos para editarlo. Se muestra el desglose y puedes exportarlo a PDF, pero no editarlo.'
+          });
+        }
+      }
     } catch (err) {
       await window.packprice.showError({
         titulo: 'No se pudo reabrir',
@@ -3689,17 +3780,23 @@ function computePvpDeviation(result) {
  */
 async function persistCurrentQuote(client) {
   const ts = new Date().toISOString();
-  const cloud = isCloudMode() ? buildCloudQuote(lastResult, client, ts) : null;
+  const isEdit = Boolean(state.editingQuoteId);
+  // Cloud upload only for new quotes. Re-uploading on edit would create
+  // duplicate cloud stat rows; full cloud edit handling is Phase B.
+  const cloud = (!isEdit && isCloudMode()) ? buildCloudQuote(lastResult, client, ts) : null;
 
   const draft = buildQuoteDraft(lastResult, {
     user: SETTINGS.user_name,
     configVersion: CFG && CFG.version,
     packId: state.packId,
-    customer: { name: client.name, phone: client.phone }
+    customer: { name: client.name, phone: client.phone },
+    opt: lastOpt
   });
   draft.valid_until = computeValidUntil(ts);
   draft.status = 'pending';
   if (cloud) draft.cloud_id = cloud.id;
+  // Signal to main which entry to replace (routes quotes:save to replaceQuote).
+  if (isEdit) draft.id = state.editingQuoteId;
 
   const r = await window.packprice.saveQuote(draft);
   if (!r || !r.ok) {
@@ -3736,14 +3833,24 @@ async function saveCurrentQuote() {
   const client = collectClientOrInvalid();
   if (!client) return; // inline errors already shown
 
+  // Capture whether this is an edit BEFORE persisting (editingQuoteId stays set).
+  const wasEditing = Boolean(state.editingQuoteId);
   const saved = await persistCurrentQuote(client);
   if (!saved) return;
   lastResult = saved;
-  await window.packprice.showInfo({
-    titulo: 'Presupuesto guardado',
-    mensaje: `Asignado el ID ${saved.id}.`,
-    detalle: 'Disponible en el botón “Historial” del menú superior.'
-  });
+  if (wasEditing) {
+    await window.packprice.showInfo({
+      titulo: 'Presupuesto actualizado',
+      mensaje: `Se actualizó el presupuesto ${saved.id}.`,
+      detalle: 'Disponible en el botón “Historial” del menú superior.'
+    });
+  } else {
+    await window.packprice.showInfo({
+      titulo: 'Presupuesto guardado',
+      mensaje: `Asignado el ID ${saved.id}.`,
+      detalle: 'Disponible en el botón “Historial” del menú superior.'
+    });
+  }
 }
 
 async function exportQuotePdf() {

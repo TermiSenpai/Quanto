@@ -53,7 +53,8 @@ const {
   searchQuotes,
   deleteQuote,
   getQuote,
-  updateQuote
+  updateQuote,
+  replaceQuote
 } = require('./lib/history');
 const {
   renderQuote, BUILTIN_TEMPLATES, brandColors, listBuiltinTemplates, renderPreview
@@ -1194,8 +1195,17 @@ ipcMain.handle('error-reports:set', (event, enabled) => {
 // need to know the path; it just sends/receives plain quote objects.
 ipcMain.handle('quotes:save', (event, draft) => {
   try {
-    const saved = saveQuoteToHistory(SETTINGS_DIR, draft);
-    logger.info('quote saved', { id: saved.id, total: saved.totals && saved.totals.total_vat_inc });
+    let saved;
+    // If the draft carries an id that already exists locally, replace it
+    // (edit flow — the renderer sets draft.id = state.editingQuoteId before
+    // calling quotes:save so we can route to the correct operation here).
+    if (draft && draft.id && getQuote(SETTINGS_DIR, draft.id)) {
+      saved = replaceQuote(SETTINGS_DIR, draft.id, draft);
+      logger.info('quote replaced (edit)', { id: saved.id });
+    } else {
+      saved = saveQuoteToHistory(SETTINGS_DIR, draft);
+      logger.info('quote saved', { id: saved.id, total: saved.totals && saved.totals.total_vat_inc });
+    }
     return { ok: true, quote: saved };
   } catch (err) {
     logger.error('quote save failed', { error: err.message });

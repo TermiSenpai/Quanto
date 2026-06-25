@@ -110,6 +110,7 @@ packs app/
 │   ├── catalog-wizard.js   ← first-run wizard chrome (reuses admin render/mutation) (EN)
 │   ├── wizard-validation.js ← pure per-step minimum gating (WIZARD_STEPS, wizardReady) (EN)
 │   ├── history.js          ← quote history UI                         (EN)
+│   ├── quote-inputs.js     ← pure inverse of collectInputs: planInputs/optFromPlan (EN)
 │   ├── format.js           ← DOM/format helpers                       (legacy ES)
 │   └── styles.css          ← design tokens in :root, BEM-lite classes
 │
@@ -192,9 +193,54 @@ through scattered `fs` calls:
 | Artifact | Module | Location | API shape |
 |---|---|---|---|
 | Business config | `config:*` handlers + `config-parser.js` | NAS `config.js` | read / write / force-write / info |
-| Quote history | `lib/history.js` | per-PC JSON | `save` / `list` / `search` / `get` / `delete` |
+| Quote history | `lib/history.js` | per-PC JSON | `save` / `list` / `search` / `get` / `delete` / `replace` |
 | Audit log | `lib/audit.js` | NAS append-only | `appendAuditEntry` / `readRecentEntries` |
 | Local settings | `settings:*` handlers | `%APPDATA%` JSON | read / write |
+
+#### Saved quote record shape
+
+Every entry in `presupuestos.json` is a canonical quote record:
+
+```js
+{
+  id,           // PP-YYYY-NNNN
+  date,         // ISO created-at
+  updated_at,   // ISO last-edit
+  version,      // integer, starts at 1, bumped on each edit
+  customer: { name, phone },
+  pack_id,
+  opt,          // raw builder inputs (options, addons, sizes, quantities/lines)
+                // — what collectInputs() returns; absent on pre-Phase-A quotes
+  result,       // computed snapshot (display + PDF without recompute)
+  totals,       // { total_vat_inc, sale_base, vat, total_cost, margin }
+  status,       // pending | accepted | rejected
+  status_ts,
+  cloud_id      // optional UUID bridge for cloud mode
+}
+```
+
+`opt` is the key field: it stores the raw step-2 inputs so a quote can be
+faithfully reopened and edited. A quote that lacks `opt` (saved before Phase A
+was shipped) reopens read-only — never crashes.
+
+#### Reopen-to-edit flow
+
+```
+history 'Reabrir'
+  → main quotes:get → renderer app.js historyAction('open')
+  → selectPack(pack_id) + renderPackInputs
+  → applyInputs(planInputs(pack, opt))   // renderer/quote-inputs.js — pure, DOM-free
+  → syncClientCard + recomputePreview + renderResult
+  → state.editingQuoteId = id            // marks this as an edit, not a new quote
+  → user edits step 2 and saves
+  → persistCurrentQuote (editingQuoteId set)
+  → quotes:save → lib/history.js replaceQuote  // updates same entry: pins id/date,
+                                               //   preserves status/cloud_id, bumps version
+```
+
+`renderer/quote-inputs.js` (`planInputs` / `optFromPlan`) is a pure, DOM-free
+module — the inverse of `collectInputs`. It translates a saved `opt` into a
+field-by-field plan that `applyInputs` uses to repopulate the step-2 builder.
 
 **Rule:** no business logic does raw `fs.readFileSync` on these paths. Go through
 the module. New persistence → new module with the same verb-style API.
