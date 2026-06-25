@@ -1,7 +1,13 @@
 # Shared Quotes & Reopen-to-Edit — Design
 
 **Date:** 2026-06-24
-**Status:** Phase A implemented on branch `feat/shared-quotes-reopen-edit`; Phase B pending.
+**Status:** Phase A implemented (merged); Phase B implemented on branch
+`feat/shared-quote-store` (shared quote store: `lib/quote-repo-file.js`,
+`lib/quote-repo-cloud.js`, migration `0002_quote_payloads.sql`, cache + outbox +
+drain, `quoteRepo(settings)` selector). **Known limitation:** cloud-mode
+auto-migration of legacy local quotes is intentionally deferred (file mode
+migrates on boot; cloud keeps the local file for a future backfill — see §6.4 and
+`devlog/15-presupuestos-compartidos/`).
 **Plans:** `docs/superpowers/plans/2026-06-24-phase-a-reopen-and-edit.md`,
 `docs/superpowers/plans/2026-06-24-phase-b-shared-quote-store.md`
 

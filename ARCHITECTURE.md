@@ -193,19 +193,23 @@ through scattered `fs` calls:
 | Artifact | Module | Location | API shape |
 |---|---|---|---|
 | Business config | `config:*` handlers + `config-parser.js` | NAS `config.js` | read / write / force-write / info |
-| Quote history | `lib/history.js` | per-PC JSON | `save` / `list` / `search` / `get` / `delete` / `replace` |
+| Saved quotes (shared) | `lib/quote-repo-file.js` / `lib/quote-repo-cloud.js` behind `quoteRepo(settings)` | folder of `<id>.json` next to `config.js`, **or** D1 `quote_payloads` | `create` / `get` / `list` / `search` / `replace` / `setStatus` / `delete` |
+| Legacy per-PC quotes | `lib/history.js` | per-PC `presupuestos.json` | `save` / `list` / … — migrated into the shared store on boot, then retired |
 | Audit log | `lib/audit.js` | NAS append-only | `appendAuditEntry` / `readRecentEntries` |
 | Local settings | `settings:*` handlers | `%APPDATA%` JSON | read / write |
 
+The shared quote store is detailed in **§4.3b**; the record shape is below.
+
 #### Saved quote record shape
 
-Every entry in `presupuestos.json` is a canonical quote record:
+Every quote — one `<id>.json` file in file mode, one `quote_payloads` row in
+cloud mode — is the same canonical record:
 
 ```js
 {
-  id,           // PP-YYYY-NNNN
+  id,           // PP-YYYY-NNNN — human, shared, identical across devices
   date,         // ISO created-at
-  updated_at,   // ISO last-edit
+  updated_at,   // ISO last-edit (sort + conflict)
   version,      // integer, starts at 1, bumped on each edit
   customer: { name, phone },
   pack_id,
@@ -213,9 +217,9 @@ Every entry in `presupuestos.json` is a canonical quote record:
                 // — what collectInputs() returns; absent on pre-Phase-A quotes
   result,       // computed snapshot (display + PDF without recompute)
   totals,       // { total_vat_inc, sale_base, vat, total_cost, margin }
-  status,       // pending | accepted | rejected
+  status,       // pending | accepted | rejected  (workflow; set without bumping version)
   status_ts,
-  cloud_id      // optional UUID bridge for cloud mode
+  cloud_id      // optional legacy UUID bridge (Phase-A cloud records)
 }
 ```
 
@@ -233,9 +237,9 @@ history 'Reabrir'
   → syncClientCard + recomputePreview + renderResult
   → state.editingQuoteId = id            // marks this as an edit, not a new quote
   → user edits step 2 and saves
-  → persistCurrentQuote (editingQuoteId set)
-  → quotes:save → lib/history.js replaceQuote  // updates same entry: pins id/date,
-                                               //   preserves status/cloud_id, bumps version
+  → persistCurrentQuote (editingQuoteId set; carries the conflict token)
+  → quotes:save → quoteRepo.replaceQuote  // updates same entry: pins id/date,
+                                          //   preserves status, bumps version
 ```
 
 `renderer/quote-inputs.js` (`planInputs` / `optFromPlan`) is a pure, DOM-free
@@ -244,6 +248,64 @@ field-by-field plan that `applyInputs` uses to repopulate the step-2 builder.
 
 **Rule:** no business logic does raw `fs.readFileSync` on these paths. Go through
 the module. New persistence → new module with the same verb-style API.
+
+#### 4.3b The shared quote repository seam
+
+Quotes are a **shared** source of truth (Phase B): every device on the same
+config sees and edits the same quotes. The renderer keeps calling the unchanged
+`quotes:*` IPC; `main.js` `quoteRepo(settings)` picks the backend by
+`settings.data_source` and exposes one verb API. The renderer never learns where
+quotes live (hard rule §3) — the same Ports & Adapters seam the catalog uses.
+
+```
+renderer (app.js, history.js)
+        │  window.packprice.{saveQuote,listQuotes,getQuote,updateQuote,deleteQuote,searchQuotes}
+        ▼
+main.js  quoteRepo(settings)  ── normalizes both conflict tokens into one opaque token
+        ├── file mode  → lib/quote-repo-file.js    (<configDir>/presupuestos/<id>.json)
+        └── cloud mode → lib/quote-repo-cloud.js    (D1 quote_payloads, via lib/cloud-quotes.js)
+                                   │
+                       lib/quote-cache.js   (per-PC mirror: fast list + offline read — NOT a write buffer)
+                       lib/quote-outbox.js  (fullQuotes lane: cloud writes buffered while offline)
+                       lib/quote-drain.js   (pure: route a queued CREATE vs EDIT on reconnect)
+```
+
+- **Source of truth** = the shared backend. **Cache** = a per-PC read mirror
+  (`<userData>/cache/quotes.json`) for a fast list and a last-known offline view.
+  **Outbox** = pending **cloud** writes (`<userData>/cache/outbox.json`,
+  `fullQuotes` lane) drained on reconnect so a write is never lost.
+- **Ids.** The human `PP-YYYY-NNNN` is canonical in both modes. Create is
+  collision-safe across devices: file mode uses an exclusive `wx` create with a
+  recompute-retry; cloud mode claims the id via `INSERT OR IGNORE` (`tryClaimFullQuote`)
+  and retries on a lost race. An offline cloud CREATE gets a provisional
+  `PP-PENDING-<uuid>` id reconciled to a real id when the outbox drains.
+- **Conflict model (hard rule §6).** File = `mtime + sha256`; cloud = `version`
+  (optimistic `UPDATE … WHERE version = ?`). `quoteRepo` returns an opaque token
+  on `get`; the renderer round-trips it on edit. A stale write returns
+  `{ conflict, current }` → the renderer offers Sobrescribir / Cancelar
+  (reuses the catalog conflict UX). A status change is workflow, not a content
+  edit, so `setStatus` does **not** bump the version.
+- **Offline behavior.** Cloud mode: an unreachable backend (`isBackendUnreachable`)
+  queues the full quote and returns `{ queued: true }`; `quotes:list`/`search`
+  fall back to the cache. File mode has **no drain** — a NAS-unreachable write
+  surfaces an error (the renderer keeps the data on screen) rather than queue
+  into a lane nothing drains.
+- **Boot migration.** `lib/quote-migrate-local.js` pushes a PC's legacy per-PC
+  `presupuestos.json` into the shared store once, idempotently (id-preserving
+  `putQuoteIfAbsent`); on a clean file-mode run the source is renamed to
+  `presupuestos.json.bak-pre-shared`. **Cloud-mode auto-migration is intentionally
+  deferred** (legacy local quotes lack the flat stat fields the cloud backend
+  requires; a correct backfill needs catalog-dependent tier derivation, id-bridging
+  against the old UUID-keyed rows, and stats de-dup) — the local file is kept intact
+  and the skip is logged.
+
+The cloud payload lives in a **separate `quote_payloads` table** (the full
+reopenable JSON + `version` + `updated_at`), not new columns on the flat `quotes`
+stats row, so the additive migration (`db/migrations/0002_quote_payloads.sql`) is
+idempotent by construction — `CREATE TABLE IF NOT EXISTS` re-execs cleanly,
+whereas SQLite has no `ALTER TABLE … ADD COLUMN IF NOT EXISTS` and the runner may
+re-exec a file after a crash (`lib/db-migrator.js`). The flat `quotes` row keeps
+feeding statistics and owns the authoritative status.
 
 ### 4.4 Migration / Adapter layer (the anti-tech-debt keystone)
 
@@ -604,8 +666,10 @@ growth seams; anything beyond them needs a debate and a `CLAUDE.md` update.
   never a per-pack branch. Add tests pinning the new behavior.
 
 ### Bigger seams (each gated on a real trigger)
-- **Quote history at scale:** already local per-PC JSON via `lib/history.js`. If
-  it grows, the repository API hides the storage swap.
+- **Quote history at scale:** now a **shared** store behind `quoteRepo(settings)`
+  (file folder or D1 `quote_payloads`; §4.3b). The repository API already hid the
+  per-PC→shared swap; pagination/lazy reads over years of quotes are deferred to a
+  real trigger.
 - **Cloud storage (v5 — approved 2026-06-12, in progress):** the catalog (and
   quotes) can live in Cloudflare D1 (normalized tables) in *the customer's
   own account*, accessed **directly over Cloudflare's REST API — no Worker,
