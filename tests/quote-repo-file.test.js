@@ -6,7 +6,7 @@
 // Style mirrors tests/history.test.js.
 // ============================================================
 
-import { describe, test, expect, afterAll } from 'vitest';
+import { describe, test, expect, afterAll, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -356,6 +356,124 @@ describe('deleteQuote', () => {
   test('returns null for a missing id', () => {
     const folder = makeFolder();
     expect(deleteQuote(folder, 'PP-2026-9999')).toBeNull();
+  });
+});
+
+// ── id validation / path traversal ────────────────────────────
+describe('id validation (path-traversal guard)', () => {
+  // A grab-bag of ids that must never reach the filesystem as a path.
+  const badIds = [
+    '../config',
+    '..\\settings',
+    '../../settings.json',
+    '..',
+    '',
+    'PP-2026',          // missing the sequence
+    'PP-20-1',          // year not 4 digits
+    'config',
+    null,
+    undefined,
+    42,
+    {},
+  ];
+
+  test('getQuote returns null for invalid ids and never reads outside the folder', () => {
+    const folder = makeFolder();
+    // Drop a sentinel file in the parent so a traversal would expose it.
+    const parent = path.dirname(folder);
+    const sentinel = path.join(parent, 'SENTINEL_SECRET.json');
+    fs.writeFileSync(sentinel, JSON.stringify({ secret: true }), 'utf-8');
+    try {
+      for (const bad of badIds) {
+        expect(getQuote(folder, bad)).toBeNull();
+      }
+      // Even a crafted traversal that would resolve to the sentinel returns null.
+      expect(getQuote(folder, '../SENTINEL_SECRET')).toBeNull();
+    } finally {
+      fs.rmSync(sentinel, { force: true });
+    }
+  });
+
+  test('deleteQuote returns null for invalid ids and does not unlink outside the folder', () => {
+    const folder = makeFolder();
+    const parent = path.dirname(folder);
+    const sentinel = path.join(parent, 'SENTINEL_DELETE.json');
+    fs.writeFileSync(sentinel, JSON.stringify({ keep: true }), 'utf-8');
+    try {
+      for (const bad of badIds) {
+        expect(deleteQuote(folder, bad)).toBeNull();
+      }
+      // A traversal id resolving to the sentinel must NOT delete it.
+      expect(deleteQuote(folder, '../SENTINEL_DELETE')).toBeNull();
+      expect(fs.existsSync(sentinel)).toBe(true);
+    } finally {
+      fs.rmSync(sentinel, { force: true });
+    }
+  });
+
+  test('replaceQuote returns null for invalid ids and writes nothing outside the folder', () => {
+    const folder = makeFolder();
+    const parent = path.dirname(folder);
+    const sentinel = path.join(parent, 'SENTINEL_REPLACE.json');
+    fs.writeFileSync(sentinel, JSON.stringify({ original: true }), 'utf-8');
+    try {
+      for (const bad of badIds) {
+        expect(replaceQuote(folder, bad, DRAFT, null)).toBeNull();
+      }
+      // A traversal id must not overwrite the sentinel.
+      expect(replaceQuote(folder, '../SENTINEL_REPLACE', DRAFT, null)).toBeNull();
+      const onDisk = JSON.parse(fs.readFileSync(sentinel, 'utf-8'));
+      expect(onDisk).toEqual({ original: true });
+      // No stray .tmp left behind in the parent either.
+      expect(fs.existsSync(sentinel + '.tmp')).toBe(false);
+    } finally {
+      fs.rmSync(sentinel, { force: true });
+    }
+  });
+});
+
+// ── createQuote wx EEXIST retry ────────────────────────────────
+describe('createQuote EEXIST retry behaviour', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('retries past EEXIST collisions and lands on a later id', () => {
+    const folder = makeFolder();
+    const now = new Date('2026-05-11T10:00:00Z');
+    const real = fs.writeFileSync.bind(fs);
+    let throwsLeft = 2; // first two writes "collide", third succeeds
+    vi.spyOn(fs, 'writeFileSync').mockImplementation((file, body, opts) => {
+      if (throwsLeft > 0 && opts && opts.flag === 'wx') {
+        throwsLeft -= 1;
+        const err = new Error('EEXIST');
+        err.code = 'EEXIST';
+        throw err;
+      }
+      return real(file, body, opts);
+    });
+    const q = createQuote(folder, DRAFT, { now });
+    // nextIdForYear keeps returning PP-2026-0001 (folder still empty after the
+    // mocked throws), so the retry loop only succeeds once the mock stops
+    // throwing — proving the EEXIST branch was exercised without crashing.
+    expect(q.id).toBe('PP-2026-0001');
+    expect(fs.existsSync(path.join(folder, 'PP-2026-0001.json'))).toBe(true);
+  });
+
+  test('throws the Spanish exhaustion error after MAX_ID_RETRIES collisions', () => {
+    const folder = makeFolder();
+    const now = new Date('2026-05-11T10:00:00Z');
+    vi.spyOn(fs, 'writeFileSync').mockImplementation((file, body, opts) => {
+      if (opts && opts.flag === 'wx') {
+        const err = new Error('EEXIST');
+        err.code = 'EEXIST';
+        throw err;
+      }
+      // (.tmp writes from other paths would pass through, but createQuote
+      // only uses the wx flag.)
+    });
+    expect(() => createQuote(folder, DRAFT, { now }))
+      .toThrow(/No se pudo asignar un identificador único/);
   });
 });
 
