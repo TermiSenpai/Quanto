@@ -125,7 +125,7 @@ export function renderHistoryList(quotes) {
  * so the entry survives future config changes.
  *
  * @param {object} result  the calculator output
- * @param {object} ctx      { user, configVersion, customer?, packId? }
+ * @param {object} ctx      { user, configVersion, customer?, packId?, opt? }
  * @returns {object} draft passed to packprice.saveQuote
  */
 export function buildQuoteDraft(result, ctx) {
@@ -142,6 +142,7 @@ export function buildQuoteDraft(result, ctx) {
       vat:           result.vat ?? null,
       total_cost:    result.total_cost ?? null,
       margin:        result.margin ?? null
-    }
+    },
+    opt: ctx.opt || null
   };
 }

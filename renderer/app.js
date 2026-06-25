@@ -3695,7 +3695,8 @@ async function persistCurrentQuote(client) {
     user: SETTINGS.user_name,
     configVersion: CFG && CFG.version,
     packId: state.packId,
-    customer: { name: client.name, phone: client.phone }
+    customer: { name: client.name, phone: client.phone },
+    opt: collectInputsSafe()
   });
   draft.valid_until = computeValidUntil(ts);
   draft.status = 'pending';
