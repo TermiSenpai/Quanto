@@ -780,14 +780,9 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
   align-items: center;
   gap: 12px;
 }
-.topbar__brand-icon {
-  width: 32px; height: 32px;
-  background: var(--surface-inverse);
-  color: var(--fg-inverse);
-  border-radius: var(--radius-md);
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.topbar__brand-title { font-size: 16px; font-weight: 700; }
+/* Quanto wordmark (180:64). Ink follows currentColor; the price line stays brand indigo. */
+.topbar__brand-wordmark { display: block; width: 79px; height: 28px; color: var(--fg-primary); }
+.topbar__brand-wordmark--lg { width: 113px; height: 40px; }
 .topbar__brand-sep {
   width: 1px; height: 18px; background: var(--border-strong);
 }
@@ -867,8 +862,7 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
   justify-content: space-between;
   gap: 32px;
 }
-.split__left .topbar__brand-icon { background: var(--accent-primary); }
-.split__left .topbar__brand-title { color: var(--fg-inverse); font-size: 20px; }
+.split__left .topbar__brand-wordmark { color: var(--fg-inverse); }
 
 .split__hero { display: flex; flex-direction: column; gap: 24px; }
 .split__hero h1 { color: var(--fg-inverse); font-size: 42px; line-height: 1.15; letter-spacing: -0.5px; }
