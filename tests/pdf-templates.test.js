@@ -49,20 +49,48 @@ const SAMPLE_MIXED_QUOTE = {
   customer: { name: 'Marina', phone: '611 111 111' },
   result: {
     pack: 'Pack mixto sudaderas',
+    pricing_mode: 'components',
     tier: '10-24 uds',
     total_quantity: 12,
     quantity: 12,
     breakdown: [
-      { model: 'CLASICA', name: 'Sudadera sin capucha', quantity: 5, price: 14.95, subtotal: 74.75 },
-      { model: 'URBAN', name: 'Sudadera con capucha', quantity: 7, price: 16.95, subtotal: 118.65 }
+      { model: 'CLASICA', name: 'Sudadera sin capucha', quantity: 5, sides: 2, unit_price: 14.95, subtotal: 74.75 },
+      { model: 'URBAN', name: 'Sudadera con capucha', quantity: 7, sides: 2, unit_price: 16.95, subtotal: 118.65 }
     ],
     subtotal: 193.40,
     surcharges: 11,
+    surcharge_lines: [
+      { size: '4XL', quantity: 2, unit_price: 3, subtotal: 6 },
+      { size: '5XL+', quantity: 1, unit_price: 5, subtotal: 5 }
+    ],
     extras_no_vat: 7.5,
+    extras_vat_inc: 9.075,
     total_vat_inc: 213.475,
     sale_base: 176.43,
     vat: 37.05,
     qty_3xl: 1, qty_4xl: 2, qty_5xl: 1
+  }
+};
+
+const SAMPLE_BUNDLE_QUOTE = {
+  id: 'PP-2026-0100',
+  date: '2026-05-11T10:00:00Z',
+  customer: { name: 'Peña Bundle', phone: '622 000 000' },
+  result: {
+    pricing_mode: 'bundle',
+    pack: 'Pack Peña (camiseta + sudadera)',
+    tier: '10-24 uds',
+    total_quantity: 12, quantity: 12,
+    unit_price: 25.95, subtotal: 311.40,
+    surcharges: 0, extras_no_vat: 0,
+    total_vat_inc: 311.40, sale_base: 257.36, vat: 54.04,
+    breakdown: [{
+      model: 'crew_full', name: 'Pack Peña', quantity: 12, sides: 2, unit_price: 25.95, subtotal: 311.40,
+      components: [
+        { model: 'BEAGLE',  name: 'Camiseta', quantity: 12, unit_price: 11.55, subtotal: 138.60 },
+        { model: 'CLASICA', name: 'Sudadera', quantity: 12, unit_price: 14.40, subtotal: 172.80 }
+      ]
+    }]
   }
 };
 
@@ -176,9 +204,11 @@ describe('buildQuoteContext', () => {
 
   test('computes totals (base/vat/total) as formatted strings', () => {
     const ctx = buildQuoteContext(SAMPLE_CREW_QUOTE, {});
+    // base = Σ rows (12 × 21.45 = 257.40); the IVA line absorbs the
+    // rounding drift against the charged total (311.40 − 257.40).
     expect(ctx.totals.total).toMatch(/311[,.]40/);
-    expect(ctx.totals.base).toMatch(/257[,.]36/);
-    expect(ctx.totals.vat).toMatch(/54[,.]04/);
+    expect(ctx.totals.base).toMatch(/257[,.]40/);
+    expect(ctx.totals.vat).toMatch(/54[,.]00/);
   });
 
   test('derives a valid_until from date + validity_days', () => {
@@ -186,10 +216,61 @@ describe('buildQuoteContext', () => {
     expect(ctx.quote.valid_until).toContain('12/05/2026');
   });
 
-  test('derives per-person price when there is one pack line', () => {
+  test('itemizes bundle components as one line each', () => {
+    const ctx = buildQuoteContext(SAMPLE_BUNDLE_QUOTE, {});
+    expect(ctx.items.length).toBe(2);
+    expect(ctx.items[0].concept).toContain('Camiseta');
+    expect(ctx.items[1].concept).toContain('Sudadera');
+  });
+
+  test('shows ex-VAT unit prices (net), not the VAT-inc PVP', () => {
+    const ctx = buildQuoteContext(SAMPLE_MIXED_QUOTE, {});
+    // 74.75 / 1.21 / 5 ≈ 12.36 (net), never the 14.95 PVP
+    expect(ctx.items[0].unit).not.toMatch(/14[,.]95/);
+  });
+
+  test('itemizes extras when the result carries extras_lines', () => {
+    const withExtras = {
+      ...SAMPLE_MIXED_QUOTE,
+      result: {
+        ...SAMPLE_MIXED_QUOTE.result,
+        extras_lines: [{ id: 'name', name: 'Nombre', quantity: 3, unit_price: 1.815, subtotal: 5.445, vat_included: false }]
+      }
+    };
+    const ctx = buildQuoteContext(withExtras, {});
+    expect(ctx.extras_lines.length).toBe(1);
+    expect(ctx.extras_lines[0].concept).toBe('Nombre');
+  });
+
+  test('itemizes the large-size surcharge per size (qty + ex-VAT unit)', () => {
+    const ctx = buildQuoteContext(SAMPLE_MIXED_QUOTE, {});
+    expect(ctx.surcharge_lines.length).toBe(2);
+    expect(ctx.surcharge_lines[0].concept).toMatch(/4XL/);
+    expect(ctx.surcharge_lines[0].qty).toBe('2');
+    expect(ctx.surcharge_lines[0].unit).not.toBe('—');
+  });
+
+  test('legacy surcharge_line/extras_line derive from the same table rows', () => {
+    const ctx = buildQuoteContext(SAMPLE_MIXED_QUOTE, {});
+    // surcharge rows: 2 × 2.48 + 1 × 4.13 = 9.09 net
+    expect(ctx.has_surcharge).toBe(true);
+    expect(ctx.surcharge_line.subtotal).toMatch(/9[,.]09/);
+    // extras (legacy collapsed, no extras_lines in the result): 7.50 net
+    expect(ctx.has_extras).toBe(true);
+    expect(ctx.extras_line.concept).toBe('Extras opcionales (sin IVA)');
+    expect(ctx.extras_line.subtotal).toMatch(/7[,.]50/);
+  });
+
+  test('keeps per_person for a single-line quote (custom templates)', () => {
     const ctx = buildQuoteContext(SAMPLE_CREW_QUOTE, {});
     expect(ctx.has_per_person).toBe(true);
-    // total / 12 ≈ 25.95
+    expect(ctx.per_person).toMatch(/25[,.]95/);
+  });
+
+  test('keeps per_person for an itemized bundle (one pack per person)', () => {
+    const ctx = buildQuoteContext(SAMPLE_BUNDLE_QUOTE, {});
+    expect(ctx.items.length).toBe(2);
+    expect(ctx.has_per_person).toBe(true);
     expect(ctx.per_person).toMatch(/25[,.]95/);
   });
 
@@ -246,6 +327,20 @@ describe('renderQuote — every built-in renders clean', () => {
       expect(html).not.toContain('{{');
       expect(html).toContain('Sudadera sin capucha');
       expect(html).toContain('Sudadera con capucha');
+    });
+
+    test(`'${id}' no longer prints a per-person figure`, () => {
+      const html = renderQuote(SAMPLE_CREW_QUOTE, {
+        templateId: id, company: { name: 'T' }, quoteSettings: { terms: '' }, brand: brandColors('#3D7BD9')
+      });
+      expect(html).not.toMatch(/por\s+persona/i);
+    });
+
+    test(`'${id}' no longer prints the "Tallas con recargo" summary`, () => {
+      const html = renderQuote(SAMPLE_MIXED_QUOTE, {
+        templateId: id, company: { name: 'T' }, quoteSettings: { terms: '' }, brand: brandColors('#3D7BD9')
+      });
+      expect(html).not.toMatch(/Tallas con recargo/i);
     });
   }
 });

@@ -72,6 +72,7 @@ export function calculateAddons(cfg, selection) {
   let noVat = 0;
   let vatInc = 0;
   const detail = {};
+  const lines = [];
 
   for (const [id, qty] of Object.entries(sel)) {
     const n = qty || 0;
@@ -79,17 +80,29 @@ export function calculateAddons(cfg, selection) {
     const addon = addons[id];
     if (!addon) continue;
     detail[id] = n;
+    let unitVatInc;
     if (addon.vat_included) {
       // Price already includes VAT: split out the net part.
+      unitVatInc = addon.price;
       vatInc += n * addon.price;
       noVat += n * (addon.price / (1 + vat));
     } else {
+      unitVatInc = addon.price * (1 + vat);
       noVat += n * addon.price;
       vatInc += n * addon.price * (1 + vat);
     }
+    // Self-describing line for the PDF (VAT-inc; pdf-lines nets it out).
+    lines.push({
+      id,
+      name: addon.label || id,
+      quantity: n,
+      unit_price: unitVatInc,
+      subtotal: n * unitVatInc,
+      vat_included: Boolean(addon.vat_included)
+    });
   }
 
-  return { no_vat: noVat, vat_inc: vatInc, detail };
+  return { no_vat: noVat, vat_inc: vatInc, detail, lines };
 }
 
 /**
@@ -186,6 +199,70 @@ function roundUpToEnding(value, ending) {
 
 function round2(n) {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Splits a bundle pack's VAT-incl `bundleSubtotal` across its component
+ * lines so the customer sees a per-article price. Every component weighs
+ * on ONE basis: the standalone catalog price (prices[sidesKey][tier])
+ * when all components have one; else internal garment cost for all;
+ * else an equal per-unit split. Mixing retail and cost scales inside one
+ * bundle would skew the split (retail carries margin + VAT, cost does
+ * not). Reconciled to the cent so the parts sum exactly to
+ * `bundleSubtotal`.
+ *
+ * @returns Array aligned to `lines` of { unit_price, subtotal } (VAT-incl).
+ */
+function distributeBundleSubtotal(cfg, lines, sidesKey, sidesNum, tier, total, bundleSubtotal) {
+  const catalogPrices = lines.map((l) => {
+    const product = cfg.products[l.productId] || {};
+    const priceTable = (product.prices || {})[sidesKey] || {};
+    const price = priceTable[tier.id];
+    return (typeof price === 'number' && price > 0) ? price : null;
+  });
+  let unitWeights;
+  if (catalogPrices.every((p) => p !== null)) {
+    unitWeights = catalogPrices;
+  } else {
+    const costs = lines.map((l) => {
+      const cost = calculateGarmentCost(cfg, l.productId, sidesNum, tier, total).total;
+      return (typeof cost === 'number' && cost > 0) ? cost : null;
+    });
+    unitWeights = costs.every((c) => c !== null) ? costs : lines.map(() => 1);
+  }
+  const weights = unitWeights.map((w, i) => w * (lines[i].quantity || 0));
+  const sumW = weights.reduce((s, w) => s + w, 0);
+  const raw = weights.map((w) => (sumW > 0
+    ? round2(bundleSubtotal * w / sumW)
+    : round2(bundleSubtotal / lines.length)));
+  const parts = reconcileCents(raw, bundleSubtotal);
+  return parts.map((subtotal, i) => ({
+    subtotal,
+    unit_price: lines[i].quantity > 0 ? round2(subtotal / lines[i].quantity) : 0
+  }));
+}
+
+// Adjusts cent-rounded `amounts` so their sum equals round2(target),
+// spreading the ±cent drift over the largest-magnitude entries first.
+// Drift is bounded by construction (each amount is the rounded exact
+// share of `target`, so at most one cent per line) — never data-sized.
+function reconcileCents(amounts, target) {
+  const cents = amounts.map((a) => Math.round(a * 100));
+  let drift = Math.round(target * 100) - cents.reduce((s, c) => s + c, 0);
+  if (drift !== 0 && cents.length > 0) {
+    const order = cents
+      .map((c, i) => ({ i, mag: Math.abs(c) }))
+      .sort((a, b) => b.mag - a.mag || a.i - b.i)
+      .map((o) => o.i);
+    const step = drift > 0 ? 1 : -1;
+    let k = 0;
+    while (drift !== 0) {
+      cents[order[k % order.length]] += step;
+      drift -= step;
+      k += 1;
+    }
+  }
+  return cents.map((c) => c / 100);
 }
 
 // ------------------------------------------------------------
@@ -321,7 +398,10 @@ export function calculatePack(cfg, packId, opt) {
     topUnitPrice = bundlePrice;
 
     // Represent the bundle as a single row (qty = packs, unit = bundle
-    // price per pack), keeping the component composition for the PDF.
+    // price per pack), keeping the component composition for the PDF. Each
+    // component also carries its share of the pack price (distributed so
+    // the parts sum exactly to `subtotal`) so the PDF can itemize it.
+    const parts = distributeBundleSubtotal(cfg, lines, sidesKey, sidesNum, tier, total, subtotal);
     breakdown.push({
       model: packId,
       name: pack.name,
@@ -329,10 +409,12 @@ export function calculatePack(cfg, packId, opt) {
       sides: sidesNum,
       unit_price: bundlePrice,
       subtotal,
-      components: lines.map(l => ({
+      components: lines.map((l, i) => ({
         model: l.productId,
         name: cfg.products[l.productId].name,
-        quantity: l.quantity
+        quantity: l.quantity,
+        unit_price: parts[i].unit_price,
+        subtotal: parts[i].subtotal
       }))
     });
   } else {
@@ -384,6 +466,18 @@ export function calculatePack(cfg, packId, opt) {
   const surcharges = (qty4xl * cfg.parameters.surcharge_4xl_eur)
                    + (qty5xl * cfg.parameters.surcharge_5xl_eur);
 
+  // Self-describing per-size surcharge lines for the PDF (VAT-incl unit,
+  // like extras_lines). Only sizes actually present appear.
+  const surchargeLines = [];
+  if (qty4xl > 0) {
+    const unit = cfg.parameters.surcharge_4xl_eur;
+    surchargeLines.push({ size: '4XL', quantity: qty4xl, unit_price: unit, subtotal: qty4xl * unit });
+  }
+  if (qty5xl > 0) {
+    const unit = cfg.parameters.surcharge_5xl_eur;
+    surchargeLines.push({ size: '5XL+', quantity: qty5xl, unit_price: unit, subtotal: qty5xl * unit });
+  }
+
   // --- Totals. ---
   const totalVatInc = subtotal + surcharges + addons.vat_inc;
   const saleBase = totalVatInc / (1 + cfg.parameters.vat);
@@ -411,10 +505,12 @@ export function calculatePack(cfg, packId, opt) {
     breakdown,
     subtotal,
     surcharges,
+    surcharge_lines: surchargeLines,
     extras_no_vat: addons.no_vat,
     extras_vat_inc: extrasVatInc,
     unit_price_with_extras: unitPriceWithExtras,
     extras_detail: addons.detail,
+    extras_lines: addons.lines,
     total_vat_inc: totalVatInc,
     sale_base: saleBase,
     vat,

@@ -420,3 +420,80 @@ describe('totals internal coherence', () => {
     expect(r.margin_pct).toBeCloseTo(r.margin / r.sale_base, 6);
   });
 });
+
+describe('bundle article distribution + extras_lines', () => {
+  const opt = { options: { hood: 'without_hood', sides: 'two_sides' }, packs: 12 };
+
+  test('bundle components carry per-article prices summing to the bundle subtotal', () => {
+    const r = calculatePack(CFG, 'crew_full', opt);
+    const comps = r.breakdown[0].components;
+    expect(comps).toHaveLength(2);
+    for (const c of comps) {
+      expect(typeof c.unit_price).toBe('number');
+      expect(typeof c.subtotal).toBe('number');
+    }
+    const sum = comps.reduce((s, c) => s + c.subtotal, 0);
+    expect(Math.round(sum * 100) / 100).toBe(Math.round(r.subtotal * 100) / 100);
+  });
+
+  test('distribution weights the pricier garment higher (sudadera > camiseta)', () => {
+    const r = calculatePack(CFG, 'crew_full', opt);
+    const [tshirt, hoodie] = r.breakdown[0].components;
+    expect(hoodie.unit_price).toBeGreaterThan(tshirt.unit_price);
+  });
+
+  test('bundle split weighs every component on one basis (no PVP/cost mix)', () => {
+    // Remove the hoodie's standalone two-sides prices: with a mixed
+    // basis (tshirt by retail PVP, hoodie by internal cost) the cheaper
+    // tshirt would out-weigh the dearer hoodie; a uniform cost basis
+    // must keep the hoodie the pricier line.
+    const cfg = structuredClone(CFG);
+    delete cfg.products.CLASICA.prices.two_sides;
+    const r = calculatePack(cfg, 'crew_full', opt);
+    const [tshirt, hoodie] = r.breakdown[0].components;
+    expect(hoodie.unit_price).toBeGreaterThan(tshirt.unit_price);
+    const sum = r.breakdown[0].components.reduce((s, c) => s + c.subtotal, 0);
+    expect(Math.round(sum * 100) / 100).toBe(Math.round(r.subtotal * 100) / 100);
+    // Split ratio matches the garment-cost ratio (same basis for both).
+    const tier = getTier(cfg, 24);
+    const costT = calculateGarmentCost(cfg, 'BEAGLE', 2, tier, 24).total;
+    const costH = calculateGarmentCost(cfg, 'CLASICA', 2, tier, 24).total;
+    expect(hoodie.subtotal / tshirt.subtotal).toBeCloseTo(costH / costT, 1);
+  });
+
+  test('extras_lines lists each selected addon with a VAT-inc unit price', () => {
+    const r = calculatePack(CFG, 'crew_full', { ...opt, addons: { name: 12 } });
+    expect(Array.isArray(r.extras_lines)).toBe(true);
+    expect(r.extras_lines).toHaveLength(1);
+    const line = r.extras_lines[0];
+    expect(line.id).toBe('name');
+    expect(line.quantity).toBe(12);
+    // addon 'name' price 1.5 ex-VAT → 1.5 * 1.21 = 1.815 VAT-inc
+    expect(line.unit_price).toBeCloseTo(1.815, 3);
+    expect(line.vat_included).toBe(false);
+  });
+
+  test('surcharge_lines itemize each large size present, VAT-inc', () => {
+    const r = calculatePack(CFG, 'crew_full', { ...opt, qty_4xl: 2, qty_5xl: 1 });
+    expect(Array.isArray(r.surcharge_lines)).toBe(true);
+    expect(r.surcharge_lines).toHaveLength(2);
+    const [s4, s5] = r.surcharge_lines;
+    expect(s4).toMatchObject({ size: '4XL', quantity: 2, unit_price: CFG.parameters.surcharge_4xl_eur });
+    expect(s5).toMatchObject({ size: '5XL+', quantity: 1, unit_price: CFG.parameters.surcharge_5xl_eur });
+    const sum = r.surcharge_lines.reduce((s, l) => s + l.subtotal, 0);
+    expect(sum).toBeCloseTo(r.surcharges, 2);
+  });
+
+  test('surcharge_lines is empty when no large sizes', () => {
+    const r = calculatePack(CFG, 'crew_full', opt);
+    expect(r.surcharge_lines).toEqual([]);
+  });
+
+  test('calculateAddons exposes per-addon lines (VAT-inc unit/subtotal)', () => {
+    const r = calculateAddons(CFG, { name: 4 });
+    expect(r.lines).toHaveLength(1);
+    expect(r.lines[0]).toMatchObject({ id: 'name', quantity: 4, vat_included: false });
+    expect(r.lines[0].unit_price).toBeCloseTo(1.815, 3);
+    expect(r.lines[0].subtotal).toBeCloseTo(7.26, 2);
+  });
+});
