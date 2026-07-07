@@ -8,7 +8,7 @@
 > salvo tres estados nuevos (conflicto, encolado, pendiente).
 
 **Release:** `v5.1.0-beta` · **Fecha:** 2026-06-25 · **Tests:** 1104 verdes
-(al cierre de este tramo) · **Tamaño .exe:** pendiente de medir en el build de release
+(al cierre de este tramo) · **Tamaño .exe:** 75,4 MB
 
 > Nota de release: la `v5.1.0-beta` publicada empaqueta los capítulos **14**
 > (marca + instalador + auto-update), este **15** y el **16** (PDF con desglose

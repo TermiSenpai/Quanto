@@ -8,7 +8,7 @@
 > cliente de taller puede repasar con una calculadora en la mano.
 
 **Release:** `v5.1.0-beta` · **Fecha:** 2026-07-07 · **Tests:** 1143 verdes ·
-**Tamaño .exe:** pendiente de medir en el build de release
+**Tamaño .exe:** 75,4 MB
 
 > Nota de release: la `v5.1.0-beta` publicada empaqueta los capítulos **14**
 > (marca + instalador + auto-update), **15** (presupuestos compartidos) y este

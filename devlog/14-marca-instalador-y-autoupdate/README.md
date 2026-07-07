@@ -12,8 +12,8 @@
 > nada a mano.
 
 **Release:** `v5.1.0-beta` · **Fecha:** 2026-06-24 · **Tests:** 934 verdes
-(al cierre de este tramo) · **Tamaño .exe:** ~85 MB (instalador NSIS;
-pendiente de medir en el build de release)
+(al cierre de este tramo) · **Tamaño .exe:** 75,4 MB (instalador NSIS,
+medido en el build de release)
 
 > Nota de versión: la `v5.1.0-beta` publicada empaqueta este capítulo junto con
 > el **15** (presupuestos compartidos) y el **16** (PDF con desglose sin IVA), y
