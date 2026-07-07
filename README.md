@@ -4,7 +4,7 @@
 
 Desktop calculator for quoting **DTF (Direct-to-Film) textile customization packs**. Each PC runs an installed app (per-user installer); the shared catalog lives either in a single `config.js` on the company NAS **or** in **Cloudflare D1 inside the customer's own account** — the two are interchangeable at any time, with **no developer backend** in between.
 
-> Current status: **beta** (`5.0.0-beta`). In internal use; the v5 cloud-sync (optional Cloudflare D1 storage, in the customer's own account) is in progress. Not yet tagged V1.
+> Current status: **beta** (`5.1.0-beta`). In internal use; the v5 cloud-sync (optional Cloudflare D1 storage, in the customer's own account) is shipped and in beta, and updates install themselves via GitHub Releases. Not yet tagged V1.
 
 ---
 

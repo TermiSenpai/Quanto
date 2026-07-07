@@ -4,7 +4,7 @@
 
 Calculadora de escritorio para presupuestar **packs de personalización textil DTF** (Direct-to-Film). Cada PC ejecuta una app instalada (instalador por-usuario); el catálogo compartido vive en un único `config.js` en el NAS **o** en **Cloudflare D1 dentro de la propia cuenta del cliente** — ambos intercambiables en cualquier momento, **sin ningún backend del desarrollador** por medio.
 
-> Estado actual: **beta** (`5.0.0-beta`). En uso interno; el cloud-sync v5 (almacenamiento opcional en Cloudflare D1, en la cuenta del propio cliente) está en curso. Aún sin marcar V1.
+> Estado actual: **beta** (`5.1.0-beta`). En uso interno; el cloud-sync v5 (almacenamiento opcional en Cloudflare D1, en la cuenta del propio cliente) está entregado y en beta, y las actualizaciones se instalan solas vía GitHub Releases. Aún sin marcar V1.
 
 ---
 
