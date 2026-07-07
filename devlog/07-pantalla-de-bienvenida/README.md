@@ -8,11 +8,11 @@
 
 ## Cuándo aparece
 
-La pantalla de bienvenida se muestra **solo si no existe `%APPDATA%\packprice\settings.json`**. Es decir:
+La pantalla de bienvenida se muestra **solo si no existe `%APPDATA%\Quanto\settings.json`**. Es decir:
 
-- Primer arranque de PackPrice en un PC nuevo.
+- Primer arranque de Quanto en un PC nuevo.
 - Si alguien borró manualmente el `settings.json` (intencionado o por accidente).
-- Si la carpeta `%APPDATA%\packprice\` se perdió por reinstalación de Windows.
+- Si la carpeta `%APPDATA%\Quanto\` se perdió por reinstalación de Windows.
 
 En los tres casos, el flujo es idéntico: pide nombre, pide ruta, valida, guarda, arranca la calculadora.
 
@@ -51,7 +51,7 @@ Y hay otra razón pragmática: el panel oscuro reutiliza la `dark-card` que apar
   </div>
 
   <p class="hint hint--info">
-    Si el archivo no existe, PackPrice puede crearlo con valores por defecto al guardar la primera vez.
+    Si el archivo no existe, Quanto puede crearlo con valores por defecto al guardar la primera vez.
   </p>
 </form>
 ```
@@ -87,7 +87,7 @@ Tres partes:
 
 ```
 ┌──┐
-│ P│  PackPrice
+│ P│  Quanto
 └──┘
 ```
 
@@ -144,7 +144,7 @@ Cuando el usuario pulsa "Empezar":
 
 1. Se valida nuevamente que el config se puede leer.
 2. Se llama `await window.packprice.settingsWrite({ usuario, config_path })`.
-3. `main.js` escribe `%APPDATA%\packprice\settings.json`.
+3. `main.js` escribe `%APPDATA%\Quanto\settings.json`.
 4. Se oculta `#pantalla-bienvenida`, se muestra `#pantalla-seleccion-pack`.
 5. La app entra en su flujo normal.
 

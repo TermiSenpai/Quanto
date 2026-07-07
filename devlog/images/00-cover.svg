@@ -14,7 +14,7 @@
   <g transform="translate(80,160)">
     <rect x="0" y="0" width="56" height="56" rx="14" fill="#3D7BD9"/>
     <text x="14" y="38" fill="#FFFFFF" font-size="28" font-weight="700">P</text>
-    <text x="80" y="36" fill="#FFFFFF" font-size="22" font-weight="600" letter-spacing="0.5">PackPrice</text>
+    <text x="80" y="36" fill="#FFFFFF" font-size="22" font-weight="600" letter-spacing="0.5">Quanto</text>
     <text x="0" y="120" fill="#FFFFFF" font-size="64" font-weight="700" letter-spacing="-1">Devlog · de Excel a una</text>
     <text x="0" y="190" fill="#FFFFFF" font-size="64" font-weight="700" letter-spacing="-1">app de escritorio.</text>
     <text x="0" y="245" fill="#A6B0C2" font-size="22" font-weight="400">La crónica completa de cómo se diseñó y se construyó</text>

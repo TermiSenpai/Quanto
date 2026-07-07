@@ -8,7 +8,7 @@
 
 ## La fórmula maestra
 
-PackPrice resuelve la misma ecuación una y otra vez. Para cualquier prenda terminada del taller:
+Quanto resuelve la misma ecuación una y otra vez. Para cualquier prenda terminada del taller:
 
 ```
 coste_prenda = base_roly
@@ -77,7 +77,7 @@ Esa última regla es importante porque genera un descuento natural. Un cliente q
 
 ![Los cinco packs en su estado por defecto y un ejemplo de pack mixto](images/packs-grid.svg)
 
-PackPrice ofrece cinco modalidades, todas con **mínimo 10 unidades**:
+Quanto ofrece cinco modalidades, todas con **mínimo 10 unidades**:
 
 1. **Pack peña completa** — camiseta + sudadera por persona. Es el producto estrella. El cliente elige tipo de sudadera (CLASICA o URBAN) y caras estampadas (1 o 2). La regla operativa: 1 cara siempre vale 3 € menos que 2 caras.
 
@@ -93,7 +93,7 @@ PackPrice ofrece cinco modalidades, todas con **mínimo 10 unidades**:
 
 ## Recargos al cliente vs. amortización interna
 
-Una decisión sutil que distingue PackPrice de calculadoras genéricas: **no todos los costes extra se trasladan al cliente**.
+Una decisión sutil que distingue Quanto de calculadoras genéricas: **no todos los costes extra se trasladan al cliente**.
 
 - El **buffer 3XL+** (0,40 €/pack peña) es **interno**. Cubre el sobrecoste medio que tiene el taller cuando el mix de tallas incluye 3XL. El cliente no lo ve. Si el mix real sube por encima del 25 % de tallas grandes, hay que subir el buffer en config; el PVP no cambia.
 - El **recargo 4XL** (+3 €/prenda) y **5XL+** (+5 €/prenda) sí son **directos al cliente**. Aparecen en el desglose, suman al subtotal, generan IVA repercutido. El usuario los introduce en la pantalla de datos y los ve aplicarse en el resultado.
@@ -104,7 +104,7 @@ La razón es comercial: 3XL es relativamente común; 4XL y 5XL+ son excepcionale
 
 ## El IVA y la tesorería
 
-PackPrice trata el IVA como un **pase**: el coste interno **no incluye** el IVA soportado en compras (Roly, DTF, envío). Ese IVA se deduce trimestralmente en el modelo 303 contra el IVA repercutido al cliente. No es coste, es flujo.
+Quanto trata el IVA como un **pase**: el coste interno **no incluye** el IVA soportado en compras (Roly, DTF, envío). Ese IVA se deduce trimestralmente en el modelo 303 contra el IVA repercutido al cliente. No es coste, es flujo.
 
 La app sí refleja el efecto **tesorería**: pagas Roly con IVA antes de cobrar al cliente. El saldo entre IVA soportado y repercutido determina cuánto líquido se mueve, pero no afecta el margen del pedido.
 

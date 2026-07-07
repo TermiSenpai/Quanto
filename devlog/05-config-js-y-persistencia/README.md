@@ -1,6 +1,6 @@
 # Capítulo 05 · `config.js` y persistencia
 
-> En PackPrice, los datos viven en dos sitios y solo dos. El `config.js` del NAS es la verdad de negocio: PVP, tramos, parámetros, modelos. El `settings.json` local es identidad y ruta. Ningún dato del cliente se guarda en ningún lado todavía: la app calcula y olvida. Este capítulo explica el porqué.
+> En Quanto, los datos viven en dos sitios y solo dos. El `config.js` del NAS es la verdad de negocio: PVP, tramos, parámetros, modelos. El `settings.json` local es identidad y ruta. Ningún dato del cliente se guarda en ningún lado todavía: la app calcula y olvida. Este capítulo explica el porqué.
 
 ![Las dos zonas de persistencia: settings local y config en NAS](images/persistence-layout.svg)
 
@@ -10,7 +10,7 @@
 
 Es la pregunta más común y la respuesta más sutil del proyecto.
 
-JSON es el formato natural para "diccionario serializado". Pero PackPrice elige **JavaScript plano** por tres razones:
+JSON es el formato natural para "diccionario serializado". Pero Quanto elige **JavaScript plano** por tres razones:
 
 1. **Permite comentarios**. Un humano que abre `config.js` con notepad encuentra `// PVP packs T1, IVA incluido` arriba de cada bloque. Eso vale oro cuando el archivo lo edita alguien que no es developer.
 
@@ -112,7 +112,7 @@ Tres protecciones acumuladas:
 
 ## Settings local: identidad y ruta
 
-El segundo almacén es **`%APPDATA%\packprice\settings.json`**. Es texto plano, JSON puro, una sola responsabilidad: **decirle a la app quién es el usuario y dónde está el config**.
+El segundo almacén es **`%APPDATA%\Quanto\settings.json`**. Es texto plano, JSON puro, una sola responsabilidad: **decirle a la app quién es el usuario y dónde está el config**.
 
 ```json
 {
@@ -174,7 +174,7 @@ El sistema ya hace backup automático de cada escritura, así que una migración
 
 ## Lo que no se persiste
 
-Hoy PackPrice **no guarda presupuestos**. Calcula y olvida. Esa es una decisión deliberada para la beta:
+Hoy Quanto **no guarda presupuestos**. Calcula y olvida. Esa es una decisión deliberada para la beta:
 
 - Los presupuestos son datos del cliente. Guardarlos exige decidir dónde (NAS o local), cuánto tiempo y con qué política de privacidad.
 - Sin presupuestos guardados, la app no maneja datos personales. Eso simplifica todo: GDPR, copia, retención, exportación.

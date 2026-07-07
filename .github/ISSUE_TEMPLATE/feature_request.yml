@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a change. Note that Quanto optimizes for YAGNI.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Quanto is deliberately small (CLAUDE.md). Most "new data" (packs,
+        models, prices) is a `config.js` change, **not** code. Changes that add
+        dependencies, frameworks, or new architecture need a debate first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What real, current pain does this solve? Who hits it and how often?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What you'd like to happen.
+    validations:
+      required: true
+  - type: dropdown
+    id: nature
+    attributes:
+      label: Is this data or code?
+      description: New pack/model/price is usually data. See ARCHITECTURE.md §10.
+      options:
+        - Data only (config.js — no code change)
+        - Code change following existing patterns
+        - Needs a debate (new dep / framework / architecture)
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including "do nothing / handle it in config".

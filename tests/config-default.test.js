@@ -1,76 +1,83 @@
 // ============================================================
-// Tests del schema por defecto (config.default.js)
+// Default config tests (config.default.js) — empty-config builder
 // ============================================================
-// Defensa contra refactores que pierden silenciosamente claves
-// estructurales que el resto de la app espera.
+// There is no longer a default catalog: config.default.js exports a
+// schema version, the cost-parameter key list, and buildEmptyConfig()
+// (a schema-shaped but EMPTY scaffold the first-run wizard fills).
+// These guard the new exports and the "empty but shaped" contract.
 // ============================================================
-import { describe, test, expect } from 'vitest';
-import { buildDefaultConfig, VERSION, ADMIN_CLAVE_DEFAULT } from '../config.default.js';
+import { describe, it, expect } from 'vitest';
+import * as configDefault from '../config.default.js';
+import {
+  SCHEMA_VERSION,
+  PARAMETER_KEYS,
+  buildEmptyConfig
+} from '../config.default.js';
+import { validateConfigSchema } from '../lib/config-schema.js';
 
-describe('buildDefaultConfig', () => {
-  test('devuelve la versión y campos meta', () => {
-    const cfg = buildDefaultConfig();
-    expect(cfg.version).toBe(VERSION);
-    expect(typeof cfg.fecha_actualizacion).toBe('string');
-    expect(typeof cfg.modificado_por).toBe('string');
+describe('config.default (empty-config builder)', () => {
+  it('exposes the v4 schema version', () => {
+    expect(SCHEMA_VERSION).toBe('4.0.0');
   });
 
-  test('incluye clave admin por defecto', () => {
-    expect(buildDefaultConfig().admin.clave).toBe(ADMIN_CLAVE_DEFAULT);
+  it('no longer exports buildDefaultConfig (no default catalog)', () => {
+    expect(configDefault.buildDefaultConfig).toBeUndefined();
   });
 
-  test('contiene los packs esperados', () => {
-    const cfg = buildDefaultConfig();
-    for (const id of [
-      'pena_completa',
-      'solo_camisetas',
-      'solo_clasica',
-      'solo_urban',
-      'sudaderas_mixto',
-      'personalizado'
-    ]) {
-      expect(cfg.packs[id]).toBeDefined();
+  it('buildEmptyConfig has the full v4 shape with EMPTY collections', () => {
+    const cfg = buildEmptyConfig();
+    expect(cfg.version).toBe('4.0.0');
+    expect(cfg.suppliers).toEqual({});
+    expect(cfg.products).toEqual({});
+    expect(cfg.packs).toEqual({});
+    expect(cfg.addons).toEqual({});
+    expect(cfg.tiers).toEqual([]);
+    expect(cfg.company).toBeTypeOf('object');
+    expect(cfg.quote_settings).toBeTypeOf('object');
+  });
+
+  it('buildEmptyConfig nulls every cost parameter', () => {
+    const cfg = buildEmptyConfig();
+    expect(PARAMETER_KEYS.length).toBeGreaterThan(0);
+    for (const key of PARAMETER_KEYS) {
+      expect(cfg.parameters[key], `parameters.${key}`).toBeNull();
     }
   });
 
-  test('contiene los modelos Roly esperados', () => {
-    const cfg = buildDefaultConfig();
-    for (const id of ['BEAGLE', 'CLASICA', 'URBAN']) {
-      expect(cfg.modelos_roly[id]).toBeDefined();
-      expect(typeof cfg.modelos_roly[id].precio).toBe('number');
-    }
+  it('buildEmptyConfig keeps a non-empty admin.password (schema compat)', () => {
+    expect(typeof buildEmptyConfig().admin.password).toBe('string');
+    expect(buildEmptyConfig().admin.password.length).toBeGreaterThan(0);
   });
 
-  test('cuatro tramos T1..T4 con T4 abierto por arriba', () => {
-    const cfg = buildDefaultConfig();
-    expect(cfg.tramos).toHaveLength(4);
-    expect(cfg.tramos.map(t => t.id)).toEqual(['T1', 'T2', 'T3', 'T4']);
-    expect(cfg.tramos[3].hasta).toBeNull();
-  });
+  it('buildEmptyConfig is NOT yet valid (empty catalog), but becomes valid once minimal data is added', () => {
+    expect(() => validateConfigSchema(buildEmptyConfig())).toThrow();
 
-  test('parametros incluye todos los campos numéricos críticos', () => {
-    const cfg = buildDefaultConfig();
-    const necesarios = [
-      'mo_eur_hora', 'iva', 'merma_pct', 'indirectos_eur_prenda',
-      'buffer_3xl_eur_pack', 'recargo_4xl_eur', 'recargo_5xl_eur',
-      'envio_roly_eur_bulto', 'prendas_por_bulto',
-      'dtf_eur_metro', 'dtf_metros_2caras', 'dtf_metros_1cara',
-      'planchado_eur_cara', 'minutos_2caras_base', 'minutos_1cara_base',
-      'extra_nombre_eur', 'extra_manga_corta_eur', 'extra_manga_larga_eur'
-    ];
-    for (const k of necesarios) {
-      expect(typeof cfg.parametros[k]).toBe('number');
-    }
-  });
-
-  test('cada llamada devuelve copia independiente (mutaciones no afectan)', () => {
-    const a = buildDefaultConfig();
-    const b = buildDefaultConfig();
-    a.parametros.iva = 0.99;
-    expect(b.parametros.iva).not.toBe(0.99);
-  });
-
-  test('respeta meta.modificado_por', () => {
-    expect(buildDefaultConfig({ modificado_por: 'Alberto' }).modificado_por).toBe('Alberto');
+    const cfg = buildEmptyConfig();
+    for (const key of PARAMETER_KEYS) cfg.parameters[key] = 1;
+    cfg.parameters.vat = 0.21;
+    cfg.parameters.waste_pct = 0.10;
+    cfg.parameters.default_target_margin = 0.35;
+    cfg.parameters.price_rounding_ending = 0.95;
+    cfg.tiers = [{ id: 'T1', label: 'Único', from: 1, to: null, time_reduction: 0 }];
+    cfg.suppliers = { SUP: { name: 'Prov', web: '', notes: '' } };
+    cfg.products = {
+      P: {
+        name: 'Camiseta', category: 'tshirt', extra_cost_3xl: 0.4, target_margin: 0.35,
+        suppliers: [{ supplier: 'SUP', ref: '', price: 2, min_order: 0, is_default: true }],
+        prices: { two_sides: { T1: 9.95 }, one_side: { T1: 8.95 } }
+      }
+    };
+    cfg.packs = {
+      shirts: {
+        name: 'Solo camisetas', description: '', icon: 'i-tshirt',
+        pricing_mode: 'components', min_total: 1, target_margin: 0.35,
+        options: [{ id: 'sides', label: 'Caras', values: [
+          { id: 'one_side', label: '1 cara', sides: 1 },
+          { id: 'two_sides', label: '2 caras', sides: 2 }
+        ] }],
+        components: [{ id: 'shirt', label: 'Camiseta', product: 'P' }]
+      }
+    };
+    expect(() => validateConfigSchema(cfg)).not.toThrow();
   });
 });

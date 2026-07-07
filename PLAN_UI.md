@@ -1,15 +1,15 @@
-# PLAN_UI.md — PackPrice
+# PLAN_UI.md — Quanto
 
 Plan de implementación para llevar el diseño de `pencil-new.pen` a la app
 Electron real (`renderer/index.html` + `renderer/styles.css` + JS de soporte).
 
-> Fuente visual: `pencil-new.pen` — frame raíz `GoRl1` "PackPrice — UI/UX".
+> Fuente visual: `pencil-new.pen` — frame raíz `GoRl1` "Quanto — UI/UX".
 > Fuente funcional: `PLAN_Calculadora.md`. Reglas de código: `CLAUDE.md`.
 
 Objetivo: una UI de escritorio en modo claro, con paleta gris-azulada y
 acento azul, con jerarquía visual clara, datos numéricos en mono, y
 versión mobile a 390 px. **Sin frameworks, sin build step**: HTML +
-CSS + JS vanilla, como exige `CLAUDE.md` §2.
+CSS + JS vanilla, como exige `CLAUDE.md` §3.
 
 ---
 
@@ -128,7 +128,7 @@ Markup objetivo:
 ```html
 <section id="pantalla-bienvenida" class="pantalla split hidden">
   <aside class="split-left dark-pane">
-    <div class="brand brand--inverse">…icono + "PackPrice"…</div>
+    <div class="brand brand--inverse">…icono + "Quanto"…</div>
     <div class="hero">
       <span class="badge badge--inverse">Primer arranque</span>
       <h1>Calcula precios de packs DTF en segundos.</h1>
@@ -145,7 +145,7 @@ Markup objetivo:
     <form class="form-stack">
       <div class="field">…Tu nombre…</div>
       <div class="field">…Archivo de configuración…</div>
-      <p class="hint hint--info">Si el archivo no existe, PackPrice puede crearlo…</p>
+      <p class="hint hint--info">Si el archivo no existe, Quanto puede crearlo…</p>
     </form>
     <footer class="actions actions--split">
       <a class="link-muted" href="#">¿Necesitas ayuda? Contacta con tu administrador</a>
@@ -166,7 +166,7 @@ CSS clave:
 Topbar (objetivo, reemplaza `header.topbar`):
 
 ```
-[icono 32 cuadrado dark] PackPrice  | Calculadora de packs   ·  👤 Alberto · ⏱ Config 28/4 · v2.0.0   ·  ↻ Recargar | ⚙ Ajustes | [🔒 Admin]
+[icono 32 cuadrado dark] Quanto  | Calculadora de packs   ·  👤 Alberto · ⏱ Config 28/4 · v2.0.0   ·  ↻ Recargar | ⚙ Ajustes | [🔒 Admin]
 ```
 
 - Brand wrap: icono `surface-inverse` + título 16/700 + separador vertical 1×18 `--border-strong` + tagline 13 muted.
@@ -175,7 +175,7 @@ Topbar (objetivo, reemplaza `header.topbar`):
 - En mobile (≤ 600 px): topbar mobile (`acSuh/wNwfI`): solo brand izquierda + dos botones cuadrados 36×36 a la derecha (recargar, menú). El nombre/cfg se mueve a la primera tarjeta del body (`mUserCard`).
 
 Footer:
-- Texto izquierda: `v2.0.0` (Geist Mono 11) · "Modificado por Alberto" · "PackPrice · uso interno taller".
+- Texto izquierda: `v2.0.0` (Geist Mono 11) · "Modificado por Alberto" · "Quanto · uso interno taller".
 - Punto verde + "NAS conectado" a la derecha. Si offline → punto rojo + "NAS desconectado", reusando estilo `--danger`.
 
 ### 4.3. Selección de pack (`PlDb9` / `ldkkG`)
@@ -248,7 +248,7 @@ Cambios estructurales respecto al actual:
 
 Modal **620 px** simplificado:
 - Header: icono + "Ajustes locales" + sub "Solo afectan a este PC".
-- Hint info: `accent-soft` "Guardado en %APPDATA%\packprice\settings.json. No se sincroniza con el NAS."
+- Hint info: `accent-soft` "Guardado en %APPDATA%\Quanto\settings.json. No se sincroniza con el NAS."
 - Field "Tu nombre" con hint mostrando "Aparecerás como modificador en cada cambio admin que escribas en config".
 - Field "Archivo de configuración" con botón "Cambiar..." y badge **success** "Conectado v2.0.0 · 28/4 15:32".
 - Bloque "Preferencias" con dos toggles:
@@ -306,7 +306,7 @@ fase se hace `npm run dev` y se verifica visualmente.
 
 1. **chore: tokens y tipografía** — vars CSS nuevas, `@font-face`, normalizar reset. Verifica: nada se rompe con la app actual, solo cambia la paleta a azul.
 2. **feat: componentes base** — `.btn-*`, `.field`, `.numstep`, `.badge`, `.tabs` refactor. Las pantallas existentes los heredan.
-3. **feat(ui): pantalla de bienvenida split** — replantilla `#pantalla-bienvenida` con split + hero stats. Smoke test: borrar `%APPDATA%\packprice\` y entrar.
+3. **feat(ui): pantalla de bienvenida split** — replantilla `#pantalla-bienvenida` con split + hero stats. Smoke test: borrar `%APPDATA%\Quanto\` y entrar.
 4. **feat(ui): topbar + footer de la app** — branding nuevo, info usuario+cfg, footer con estado NAS.
 5. **feat(ui): selección de pack** — `.pack-card` en grid 3×2 con estados, dark-card seleccionado, breadcrumb, badge "Desde X €".
 6. **feat(ui): datos del pedido (2 cols + preview en vivo)** — layout split con sideCol dark + tramoCard. Conectar `calcularPreview`.
@@ -320,7 +320,7 @@ fase se hace `npm run dev` y se verifica visualmente.
 
 ## 8. QA antes de release
 
-Antes de cortar release, ejecutar los casos del `CLAUDE.md` §12 + estos:
+Antes de cortar release, ejecutar los casos del `CLAUDE.md` §8 + estos:
 
 - **Tipografía**: Inter cargada (no system fallback) → comparar pantalla 03 contra `ZNFEb` exportado a PNG.
 - **Contraste**: el azul `#3D7BD9` sobre `--surface-secondary` cumple AA para texto 14+ (lo cumple, ratio 4.85). Los chips en dark-card también.

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/TermiSenpai/packs-app/blob/main/SECURITY.md
+    about: Do not file security problems as public issues — follow SECURITY.md.
+  - name: How to contribute
+    url: https://github.com/TermiSenpai/packs-app/blob/main/CONTRIBUTING.md
+    about: Setup, rules, workflow, and the definition of done.

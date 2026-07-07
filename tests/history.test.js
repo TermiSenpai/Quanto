@@ -1,5 +1,5 @@
 // ============================================================
-// Tests · lib/history.js
+// Tests · lib/history.js — v3
 // ============================================================
 import { describe, test, expect, afterAll } from 'vitest';
 import fs from 'fs';
@@ -11,9 +11,12 @@ import {
   searchQuotes,
   deleteQuote,
   getQuote,
+  updateQuote,
+  replaceQuote,
   nextIdForYear,
   historyPathFor,
-  HISTORY_FILE_NAME
+  HISTORY_FILE_NAME,
+  MAX_QUOTE_BYTES
 } from '../lib/history.js';
 
 const dirs = [];
@@ -67,13 +70,13 @@ describe('saveQuote', () => {
   test('persists the quote with assigned id and ISO date', () => {
     const dir = makeUserData();
     const quote = saveQuote(dir, {
-      usuario: 'Alberto',
-      pack: 'pena',
-      total_iva_inc: 311.40
+      user: 'Alberto',
+      pack: 'crew',
+      total_vat_inc: 311.40
     }, { now: new Date('2026-05-11T14:32:00Z') });
     expect(quote.id).toBe('PP-2026-0001');
-    expect(quote.fecha).toBe('2026-05-11T14:32:00.000Z');
-    expect(quote.total_iva_inc).toBe(311.40);
+    expect(quote.date).toBe('2026-05-11T14:32:00.000Z');
+    expect(quote.total_vat_inc).toBe(311.40);
 
     const onDisk = listQuotes(dir);
     expect(onDisk).toHaveLength(1);
@@ -84,6 +87,23 @@ describe('saveQuote', () => {
     const dir = makeUserData();
     expect(() => saveQuote(dir, null)).toThrow();
     expect(() => saveQuote(dir, 'oops')).toThrow();
+    expect(() => saveQuote(dir, [])).toThrow();
+  });
+
+  test('rejects oversized drafts and does not write them', () => {
+    const dir = makeUserData();
+    const huge = { blob: 'x'.repeat(MAX_QUOTE_BYTES + 1) };
+    expect(() => saveQuote(dir, huge)).toThrow(/demasiado grande/);
+    // nothing was persisted
+    expect(listQuotes(dir)).toEqual([]);
+  });
+
+  test('saves a normal-sized draft right under the cap', () => {
+    const dir = makeUserData();
+    const ok = { note: 'y'.repeat(1000) };
+    const saved = saveQuote(dir, ok);
+    expect(saved.id).toBeDefined();
+    expect(listQuotes(dir)).toHaveLength(1);
   });
 
   test('correlative ids reset per year', () => {
@@ -100,7 +120,7 @@ describe('listQuotes', () => {
     expect(listQuotes(makeUserData())).toEqual([]);
   });
 
-  test('newest first by fecha', () => {
+  test('newest first by date', () => {
     const dir = makeUserData();
     saveQuote(dir, { tag: 'old' }, { now: new Date('2026-01-01T10:00:00Z') });
     saveQuote(dir, { tag: 'mid' }, { now: new Date('2026-06-01T10:00:00Z') });
@@ -119,10 +139,10 @@ describe('searchQuotes', () => {
     expect(searchQuotes(dir, 'PP-2027').map(q => q.id)).toEqual(['PP-2027-0001']);
   });
 
-  test('matches by client name and user', () => {
+  test('matches by customer name and user', () => {
     const dir = makeUserData();
-    saveQuote(dir, { usuario: 'Alberto', cliente: { nombre: 'Lobito' } });
-    saveQuote(dir, { usuario: 'Carlos',  cliente: { nombre: 'Marina' } });
+    saveQuote(dir, { user: 'Alberto', customer: { name: 'Lobito' } });
+    saveQuote(dir, { user: 'Carlos',  customer: { name: 'Marina' } });
     expect(searchQuotes(dir, 'lobito')).toHaveLength(1);
     expect(searchQuotes(dir, 'carlos')).toHaveLength(1);
     expect(searchQuotes(dir, 'in')).toHaveLength(1); // 'Marina' contains 'in'
@@ -158,6 +178,242 @@ describe('getQuote', () => {
     const dir = makeUserData();
     const a = saveQuote(dir, { tag: 'unique' });
     expect(getQuote(dir, a.id)).toMatchObject({ id: a.id, tag: 'unique' });
+  });
+});
+
+describe('updateQuote', () => {
+  test('merges a patch into the stored entry and persists it', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't', customer: { name: 'X' } });
+    const updated = updateQuote(dir, a.id, { status: 'accepted', cloud_id: 'uuid-1' });
+    expect(updated).toMatchObject({ id: a.id, status: 'accepted', cloud_id: 'uuid-1', tag: 't' });
+    // Persisted across reads.
+    expect(getQuote(dir, a.id)).toMatchObject({ status: 'accepted', cloud_id: 'uuid-1' });
+  });
+
+  test('never overwrites id or date (rejects them as disallowed keys)', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    // id/date are pinned and not in the allowlist, so patching them throws.
+    expect(() => updateQuote(dir, a.id, { id: 'HACKED', status: 'rejected' })).toThrow(/no permitido/);
+    expect(() => updateQuote(dir, a.id, { date: 'nope', status: 'rejected' })).toThrow(/no permitido/);
+    // A clean status patch still pins id/date.
+    const updated = updateQuote(dir, a.id, { status: 'rejected' });
+    expect(updated.id).toBe(a.id);
+    expect(updated.date).toBe(a.date);
+    expect(updated.status).toBe('rejected');
+  });
+
+  test('returns null for an unknown id', () => {
+    const dir = makeUserData();
+    expect(updateQuote(dir, 'nope', { status: 'accepted' })).toBeNull();
+  });
+
+  test('rejects a non-object patch', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    expect(() => updateQuote(dir, a.id, null)).toThrow();
+  });
+
+  test('rejects a disallowed key', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    expect(() => updateQuote(dir, a.id, { evil: 1 })).toThrow(/no permitido/);
+    expect(() => updateQuote(dir, a.id, { total: 999 })).toThrow(/no permitido/);
+    // The disallowed patch was not persisted.
+    expect(getQuote(dir, a.id).total).toBeUndefined();
+  });
+
+  test('rejects an invalid status value', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    expect(() => updateQuote(dir, a.id, { status: 'maybe' })).toThrow();
+    expect(getQuote(dir, a.id).status).toBeUndefined();
+  });
+
+  test('rejects non-string cloud_id and status_ts', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    expect(() => updateQuote(dir, a.id, { cloud_id: 123 })).toThrow();
+    expect(() => updateQuote(dir, a.id, { status_ts: 123 })).toThrow();
+  });
+
+  test('rejects an oversized patch and does not write it', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' });
+    const huge = { cloud_id: 'x'.repeat(MAX_QUOTE_BYTES + 1) };
+    expect(() => updateQuote(dir, a.id, huge)).toThrow(/demasiado grande/);
+    expect(getQuote(dir, a.id).cloud_id).toBeUndefined();
+  });
+
+  test('accepts a valid status/status_ts/cloud_id patch and keeps id/date', () => {
+    const dir = makeUserData();
+    const a = saveQuote(dir, { tag: 't' }, { now: new Date('2026-05-11T14:32:00Z') });
+    const updated = updateQuote(dir, a.id, {
+      status: 'accepted',
+      status_ts: '2026-06-13T10:00:00.000Z',
+      cloud_id: 'uuid-9'
+    });
+    expect(updated).toMatchObject({
+      id: a.id,
+      date: a.date,
+      status: 'accepted',
+      status_ts: '2026-06-13T10:00:00.000Z',
+      cloud_id: 'uuid-9',
+      tag: 't'
+    });
+    expect(getQuote(dir, a.id)).toMatchObject({
+      status: 'accepted',
+      status_ts: '2026-06-13T10:00:00.000Z',
+      cloud_id: 'uuid-9'
+    });
+  });
+});
+
+describe('saveQuote version/updated_at stamps', () => {
+  test('stamps version=1 and updated_at equal to date', () => {
+    const dir = makeUserData();
+    const now = new Date('2026-05-11T14:32:00Z');
+    const quote = saveQuote(dir, { user: 'Alberto' }, { now });
+    expect(quote.version).toBe(1);
+    expect(quote.updated_at).toBe(quote.date);
+    expect(quote.updated_at).toBe('2026-05-11T14:32:00.000Z');
+  });
+});
+
+describe('replaceQuote', () => {
+  test('overwrites editable fields and keeps original id and date', () => {
+    const dir = makeUserData();
+    const now = new Date('2026-05-11T14:00:00Z');
+    const original = saveQuote(dir, {
+      user: 'Alberto',
+      result: { total: 100 },
+      customer: { name: 'Ana' }
+    }, { now });
+
+    const laterNow = new Date('2026-05-11T15:00:00Z');
+    const replaced = replaceQuote(dir, original.id, {
+      user: 'Alberto',
+      result: { total: 200 },
+      customer: { name: 'Beatriz' }
+    }, { now: laterNow });
+
+    // Editable fields updated.
+    expect(replaced.result).toEqual({ total: 200 });
+    expect(replaced.customer).toEqual({ name: 'Beatriz' });
+    // Identity preserved.
+    expect(replaced.id).toBe(original.id);
+    expect(replaced.date).toBe(original.date);
+    // Revision tracking updated.
+    expect(replaced.updated_at).toBe('2026-05-11T15:00:00.000Z');
+    expect(replaced.version).toBe(2); // 1 → 2
+    // Persisted correctly.
+    const onDisk = getQuote(dir, original.id);
+    expect(onDisk.result).toEqual({ total: 200 });
+    expect(onDisk.id).toBe(original.id);
+  });
+
+  test('preserves status/status_ts/cloud_id even if draft carries different values', () => {
+    const dir = makeUserData();
+    const original = saveQuote(dir, { user: 'Alberto' });
+    // Simulate the quote being accepted and synced to cloud.
+    updateQuote(dir, original.id, {
+      status: 'accepted',
+      status_ts: '2026-06-01T10:00:00.000Z',
+      cloud_id: 'uuid-abc'
+    });
+
+    // Now try to replace with a draft that includes conflicting workflow fields.
+    const replaced = replaceQuote(dir, original.id, {
+      user: 'Alberto',
+      result: { total: 999 },
+      status: 'rejected',      // should be ignored
+      status_ts: 'BAD',        // should be ignored
+      cloud_id: 'uuid-EVIL'    // should be ignored
+    });
+
+    // Workflow fields from the stored entry must be preserved.
+    expect(replaced.status).toBe('accepted');
+    expect(replaced.status_ts).toBe('2026-06-01T10:00:00.000Z');
+    expect(replaced.cloud_id).toBe('uuid-abc');
+    // Editable content updated.
+    expect(replaced.result).toEqual({ total: 999 });
+  });
+
+  test('carries the draft status when the existing entry has none', () => {
+    const dir = makeUserData();
+    // saveQuote does not stamp a status, so this stored entry has none.
+    const original = saveQuote(dir, { user: 'X' });
+    expect(original.status).toBeUndefined();
+    // The draft carries a status (as persistCurrentQuote always does).
+    const replaced = replaceQuote(dir, original.id, { user: 'X', status: 'pending' });
+    expect(replaced.status).toBe('pending');
+    expect(getQuote(dir, original.id).status).toBe('pending');
+  });
+
+  test('bumps version across repeated edits (1 -> 2 -> 3)', () => {
+    const dir = makeUserData();
+    const original = saveQuote(dir, { user: 'X', result: { total: 1 } });
+    expect(original.version).toBe(1);
+    const first = replaceQuote(dir, original.id, { user: 'X', result: { total: 2 } });
+    expect(first.version).toBe(2);
+    const second = replaceQuote(dir, original.id, { user: 'X', result: { total: 3 } });
+    expect(second.version).toBe(3);
+  });
+
+  test('returns null for an unknown id and writes nothing', () => {
+    const dir = makeUserData();
+    const before = listQuotes(dir);
+    const result = replaceQuote(dir, 'PP-2026-9999', { user: 'Ghost' });
+    expect(result).toBeNull();
+    // File unchanged — still empty.
+    expect(listQuotes(dir)).toEqual(before);
+  });
+
+  test('rejects a non-object draft', () => {
+    const dir = makeUserData();
+    const q = saveQuote(dir, { user: 'Test' });
+    expect(() => replaceQuote(dir, q.id, null)).toThrow();
+    expect(() => replaceQuote(dir, q.id, 'bad')).toThrow();
+    expect(() => replaceQuote(dir, q.id, [])).toThrow();
+  });
+});
+
+describe('lazy v2 -> v3 migration of presupuestos.json', () => {
+  test('migrates v2 entries on read and backs up the original', () => {
+    const dir = makeUserData();
+    const filePath = historyPathFor(dir);
+    const v2 = [{
+      id: 'PP-2026-0001',
+      fecha: '2026-05-01T10:00:00.000Z',
+      usuario: 'Alberto',
+      cliente: { nombre: 'Club X', telefono: '600' },
+      tipo: 'pena',
+      totales: { total_iva_inc: 311.40, base_venta: 257.36, iva: 54.04 }
+    }];
+    fs.writeFileSync(filePath, JSON.stringify(v2, null, 2), 'utf-8');
+
+    const all = listQuotes(dir);
+    expect(all).toHaveLength(1);
+    expect(all[0].date).toBe('2026-05-01T10:00:00.000Z');
+    expect(all[0].user).toBe('Alberto');
+    expect(all[0].customer).toEqual({ name: 'Club X', phone: '600' });
+    expect(all[0].totals.total_vat_inc).toBe(311.40);
+    expect(all[0].fecha).toBeUndefined();
+
+    // The original v2 file was backed up and the file rewritten as v3
+    expect(fs.existsSync(filePath + '.bak-pre-v3')).toBe(true);
+    const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    expect(onDisk[0].user).toBe('Alberto');
+    expect('usuario' in onDisk[0]).toBe(false);
+  });
+
+  test('a v3 history is not migrated again (no backup)', () => {
+    const dir = makeUserData();
+    saveQuote(dir, { user: 'A', customer: { name: 'X' } });
+    const filePath = historyPathFor(dir);
+    listQuotes(dir);
+    expect(fs.existsSync(filePath + '.bak-pre-v3')).toBe(false);
   });
 });
 

@@ -1,0 +1,16 @@
+# pnpm 10+ moved build-script approval out of package.json into this file.
+# These deps run install/build scripts we trust and need:
+#   electron → downloads the Electron binary into node_modules/electron/dist
+#   esbuild  → fetches its platform binary (used by vitest)
+allowBuilds:
+  electron: true
+  esbuild: true
+
+# Hoist node_modules flat (npm-style) so electron-builder bundles the FULL
+# production dependency tree into app.asar. With pnpm's default isolated
+# (symlinked) layout, electron-builder ships only the direct deps and drops
+# their transitive deps (e.g. electron-updater → fs-extra), so the packaged
+# app crashes on launch with "Cannot find module 'fs-extra'".
+# NOTE: pnpm 11 reads this ONLY from pnpm-workspace.yaml — `.npmrc` is now
+# auth/registry-only, so the old `node-linker=hoisted` in `.npmrc` was ignored.
+nodeLinker: hoisted

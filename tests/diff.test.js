@@ -45,9 +45,8 @@ describe('diffObjects — leaf changes', () => {
   });
 
   test('handles nested addition', () => {
-    const before = { admin: { } };
-    const after  = { admin: { tiene_clave: false } }; // not in default ignore
-    // Wait — admin.tiene_clave IS in DEFAULT_IGNORE_PATHS. Use a different one.
+    // admin.has_password is in DEFAULT_IGNORE_PATHS, so use a key
+    // that is not ignored to assert a plain nested addition.
     const before2 = { extras: { } };
     const after2  = { extras: { manga: 1.5 } };
     expect(diffObjects(before2, after2)).toEqual([
@@ -58,11 +57,11 @@ describe('diffObjects — leaf changes', () => {
 
 describe('diffObjects — arrays', () => {
   test('detects element change at index', () => {
-    const before = { tramos: [{ id: 'T1', desde: 10 }, { id: 'T2', desde: 25 }] };
-    const after  = { tramos: [{ id: 'T1', desde: 10 }, { id: 'T2', desde: 30 }] };
+    const before = { tiers: [{ id: 'T1', from: 10 }, { id: 'T2', from: 25 }] };
+    const after  = { tiers: [{ id: 'T1', from: 10 }, { id: 'T2', from: 30 }] };
     const d = diffObjects(before, after);
     expect(d).toEqual([
-      { path: 'tramos[1].desde', before: 25, after: 30, kind: 'change' }
+      { path: 'tiers[1].from', before: 25, after: 30, kind: 'change' }
     ]);
   });
 
@@ -75,44 +74,44 @@ describe('diffObjects — arrays', () => {
 });
 
 describe('diffObjects — ignore paths', () => {
-  test('default ignore skips fecha_actualizacion and modificado_por', () => {
+  test('default ignore skips updated_at and modified_by', () => {
     const before = {
-      fecha_actualizacion: '01/01/2026, 10:00:00',
-      modificado_por: 'Alberto',
-      parametros: { iva: 0.21 }
+      updated_at: '01/01/2026, 10:00:00',
+      modified_by: 'Alberto',
+      parameters: { vat: 0.21 }
     };
     const after = {
-      fecha_actualizacion: '02/01/2026, 11:00:00',
-      modificado_por: 'María',
-      parametros: { iva: 0.23 }
+      updated_at: '02/01/2026, 11:00:00',
+      modified_by: 'María',
+      parameters: { vat: 0.23 }
     };
     const d = diffObjects(before, after);
     expect(d.length).toBe(1);
-    expect(d[0].path).toBe('parametros.iva');
+    expect(d[0].path).toBe('parameters.vat');
   });
 
-  test('default ignore skips admin.clave and admin.tiene_clave', () => {
-    const before = { admin: { clave: 'old', tiene_clave: true } };
-    const after  = { admin: { clave: 'new', tiene_clave: true } };
+  test('default ignore skips admin.password and admin.has_password', () => {
+    const before = { admin: { password: 'old', has_password: true } };
+    const after  = { admin: { password: 'new', has_password: true } };
     expect(diffObjects(before, after)).toEqual([]);
   });
 
   test('custom ignore set replaces defaults', () => {
-    const before = { fecha_actualizacion: 'A', payload: 1 };
-    const after  = { fecha_actualizacion: 'B', payload: 2 };
+    const before = { updated_at: 'A', payload: 1 };
+    const after  = { updated_at: 'B', payload: 2 };
     const d = diffObjects(before, after, { ignorePaths: new Set(['payload']) });
-    // Custom ignore: payload skipped, fecha_actualizacion no longer ignored.
+    // Custom ignore: payload skipped, updated_at no longer ignored.
     expect(d.length).toBe(1);
-    expect(d[0].path).toBe('fecha_actualizacion');
+    expect(d[0].path).toBe('updated_at');
   });
 });
 
 describe('formatChangeLine', () => {
   test('renders change kind with arrow', () => {
     const line = formatChangeLine({
-      path: 'parametros.iva', before: 0.21, after: 0.23, kind: 'change'
+      path: 'parameters.vat', before: 0.21, after: 0.23, kind: 'change'
     });
-    expect(line).toMatch(/parametros\.iva/);
+    expect(line).toMatch(/parameters\.vat/);
     expect(line).toMatch(/0\.21/);
     expect(line).toMatch(/0\.23/);
     expect(line).toMatch(/→/);
@@ -126,8 +125,8 @@ describe('formatChangeLine', () => {
 
 describe('DEFAULT_IGNORE_PATHS', () => {
   test('contains the expected metadata keys', () => {
-    expect(DEFAULT_IGNORE_PATHS.has('fecha_actualizacion')).toBe(true);
-    expect(DEFAULT_IGNORE_PATHS.has('modificado_por')).toBe(true);
-    expect(DEFAULT_IGNORE_PATHS.has('admin.clave')).toBe(true);
+    expect(DEFAULT_IGNORE_PATHS.has('updated_at')).toBe(true);
+    expect(DEFAULT_IGNORE_PATHS.has('modified_by')).toBe(true);
+    expect(DEFAULT_IGNORE_PATHS.has('admin.password')).toBe(true);
   });
 });

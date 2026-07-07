@@ -8,7 +8,7 @@
 
 ## El taller y el cliente
 
-PackPrice nace para una empresa real. Un taller textil de **Guadalajara, España**, especializado en **DTF (Direct-to-Film)**: la técnica que estampa diseños sobre película de poliéster y los transfiere a la prenda con calor. Camisetas, sudaderas, polos. La mayoría de pedidos son **packs de peña**: grupos de amigos que quieren la misma prenda con un mote, un dibujo o un logo, normalmente para las fiestas patronales del verano.
+Quanto nace para una empresa real. Un taller textil de **Guadalajara, España**, especializado en **DTF (Direct-to-Film)**: la técnica que estampa diseños sobre película de poliéster y los transfiere a la prenda con calor. Camisetas, sudaderas, polos. La mayoría de pedidos son **packs de peña**: grupos de amigos que quieren la misma prenda con un mote, un dibujo o un logo, normalmente para las fiestas patronales del verano.
 
 Tres datos importantes:
 
@@ -50,7 +50,7 @@ Es la versión textil de un problema clásico: cuando una herramienta crece sobr
 
 ## Lo que se quería
 
-El objetivo de PackPrice se fijó con tres criterios duros y dos blandos:
+El objetivo de Quanto se fijó con tres criterios duros y dos blandos:
 
 **Duros** —esto tenía que funcionar sí o sí—:
 
@@ -75,7 +75,7 @@ DTF tiene tres particularidades que el modelo de costes tuvo que digerir desde e
 - **Mano de obra dominante**. El taller mide el tiempo en minutos por prenda. Cinco minutos para 2 caras, tres para 1 cara. A 15 €/hora de tasa imputada, eso son 1,25 € de coste laboral por camiseta a 2 caras. El equivalente a la mitad del precio de la prenda Roly cruda.
 - **Reducción real por volumen**. Más prendas iguales = menos cambios de plancha, mejor nesting de la película, menos fallos. Para el taller esto se traduce en una reducción del tiempo medio del 10 al 20 % según el tramo. Esa reducción tiene que verse en el PVP del cliente, o el taller no captura el ahorro.
 
-PackPrice traduce esos tres efectos en parámetros editables del config. El [Capítulo 02](../02-modelo-de-negocio/README.md) los desmenuza uno por uno.
+Quanto traduce esos tres efectos en parámetros editables del config. El [Capítulo 02](../02-modelo-de-negocio/README.md) los desmenuza uno por uno.
 
 ---
 

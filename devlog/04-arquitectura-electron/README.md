@@ -1,6 +1,6 @@
 # Capítulo 04 · Arquitectura Electron
 
-> Electron tiene un modelo de seguridad serio si lo respetas: tres procesos, una frontera estricta, comunicación tipada por convención. Este capítulo documenta cómo se separan responsabilidades en PackPrice y por qué cada llamada del renderer al filesystem hace tres saltos.
+> Electron tiene un modelo de seguridad serio si lo respetas: tres procesos, una frontera estricta, comunicación tipada por convención. Este capítulo documenta cómo se separan responsabilidades en Quanto y por qué cada llamada del renderer al filesystem hace tres saltos.
 
 ![Arquitectura: main, preload, renderer y sus responsabilidades](images/architecture-diagram.svg)
 
@@ -14,12 +14,12 @@ Una app Electron bien hecha vive en tres procesos lógicos:
 
 Es el proceso Node.js que arranca primero. Tiene **acceso real** a todo: filesystem, diálogos del sistema operativo, ventanas, menús, IPC. **Es la única zona del código con permisos**.
 
-Lo que hace `main.js` en PackPrice:
+Lo que hace `main.js` en Quanto:
 
 - Crea la ventana principal (`BrowserWindow`) con flags de seguridad estrictos.
 - Carga `renderer/index.html` localmente.
 - Registra **handlers IPC** (`ipcMain.handle`) que el renderer puede invocar.
-- Lee y escribe el filesystem: `settings.json` en `%APPDATA%\packprice\`, `config.js` en el NAS.
+- Lee y escribe el filesystem: `settings.json` en `%APPDATA%\Quanto\`, `config.js` en el NAS.
 - Calcula hashes SHA-256 para detección de conflictos.
 - Crea backups antes de cada escritura admin.
 - Abre diálogos nativos de Windows (`dialog.showOpenDialog`, `dialog.showMessageBox`).

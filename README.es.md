@@ -1,21 +1,21 @@
-# PackPrice
+# Quanto
 
 > **Idioma**: Español · [English](README.md)
 
-Calculadora de escritorio para presupuestar **packs de personalización textil DTF** (Direct-to-Film). Pensada para uso interno en taller: cada PC corre el `.exe` portable y todos comparten un único `config.js` en el NAS de la empresa.
+Calculadora de escritorio para presupuestar **packs de personalización textil DTF** (Direct-to-Film). Cada PC ejecuta una app instalada (instalador por-usuario); el catálogo compartido vive en un único `config.js` en el NAS **o** en **Cloudflare D1 dentro de la propia cuenta del cliente** — ambos intercambiables en cualquier momento, **sin ningún backend del desarrollador** por medio.
 
-> Estado actual: **beta** (`2.0.0-preview`). En uso interno, pendiente de cerrar PVPs provisionales y de varios pulidos antes de marcar V1.
+> Estado actual: **beta** (`5.1.0-beta`). En uso interno; el cloud-sync v5 (almacenamiento opcional en Cloudflare D1, en la cuenta del propio cliente) está entregado y en beta, y las actualizaciones se instalan solas vía GitHub Releases. Aún sin marcar V1.
 
 ---
 
 ## Qué hace
 
-- Calcula PVP, coste, margen e IVA para cinco modalidades de pack (peña, solo camisetas, solo sudaderas con/sin capucha, mixto de sudaderas).
+- Calcula PVP, coste, margen e IVA para las modalidades de pack del taller (peña, solo camisetas, sudaderas con/sin capucha, mixto) — todo el catálogo es configurable por el usuario (esquema v4).
 - Aplica tramos de volumen (T1–T4) con descuento por cantidad y reducción de tiempo de mano de obra.
 - Soporta recargos directos al cliente por tallas grandes (4XL, 5XL+) y un buffer interno para 3XL.
-- Modo administrador con clave compartida para editar parámetros, PVPs y modelos sin tocar código.
-- Detección de conflictos cuando dos personas editan el `config.js` a la vez (comparación `mtime + sha256`, backup automático antes de cada escritura).
-- Primer arranque guiado: pide nombre del usuario y ruta del config en el NAS, los persiste en `%APPDATA%\packprice\settings.json`, y ofrece sembrar el `config.js` con valores por defecto si no existe.
+- Editor de catálogo (productos, proveedores, extras, packs, precios, márgenes, textos del presupuesto) — todo editable desde la app, sin tocar código. La contraseña de administrador se eliminó en v5; los errores se protegen con confirmación al guardar, autor por escritura en la auditoría y vuelta atrás por snapshots.
+- Detección de conflictos cuando dos personas editan a la vez (modo local: `mtime + sha256`; modo nube: versión por entidad), con backup/snapshot automático antes de cada escritura.
+- Primer arranque guiado: pide nombre del usuario y ruta del config en el NAS, los persiste en `%APPDATA%\Quanto\settings.json`, y ofrece sembrar el `config.js` con valores por defecto si no existe.
 
 ---
 
@@ -25,10 +25,10 @@ Calculadora de escritorio para presupuestar **packs de personalización textil D
 | ----------------------- | ------------------------------------------------------------------------------------ |
 | Runtime                 | Electron + Node.js (main) + Chromium (renderer)                                      |
 | UI                      | HTML + CSS + JS vanilla (sin framework, sin build step)                              |
-| Persistencia compartida | `config.js` plano en el NAS, parseado en sandbox (`vm.runInNewContext`, timeout 1 s) |
-| Persistencia local      | `settings.json` en `%APPDATA%\packprice\`                                            |
+| Persistencia compartida | `config.js` en PC/NAS (se escanea su bloque JSON + `JSON.parse` + validación de esquema — sin `eval`/`vm`) **o** Cloudflare D1 en la cuenta del propio cliente (REST desde main, sin servidor) |
+| Persistencia local      | `settings.json` en `%APPDATA%\Quanto\`                                            |
 | Tests                   | Vitest sobre la lógica de cálculo y el parser de config                              |
-| Empaquetado             | `electron-builder` portable Windows x64                                              |
+| Empaquetado             | `electron-builder` instalador NSIS por-usuario, Windows x64                          |
 | Idioma                  | Español (dominio, comentarios, UI)                                                   |
 
 Cero dependencias en runtime. Sólo `electron`, `electron-builder` y `vitest` como `devDependencies`. Las restricciones, principios de diseño e invariantes de seguridad están en [CLAUDE.md](CLAUDE.md).
@@ -48,8 +48,8 @@ packs app/
 ├── main.js                 ← proceso principal Electron (filesystem + IPC)
 ├── preload.js              ← bridge contextual main↔renderer
 ├── config.default.js       ← semilla del config.js
-├── lib/
-│   └── config-parser.js    ← parser aislado del config en NAS
+├── lib/                    ← módulos puros y testables (parser/esquema de
+│                             config, cliente D1 nube, migraciones, pdf, auditoría…)
 ├── renderer/
 │   ├── index.html
 │   ├── app.js              ← orquestación (eventos, bootstrap, IPC)
@@ -66,29 +66,27 @@ packs app/
 ## Uso rápido
 
 ```bash
-npm install        # solo la primera vez
-npm run dev        # iterar en modo desarrollo
-npm test           # ejecutar tests
-npm run build:win  # construir el .exe portable en dist/
+pnpm install        # solo la primera vez
+pnpm dev        # iterar en modo desarrollo
+pnpm test           # ejecutar tests
+pnpm build:win  # construir el instalador por-usuario en dist/
 ```
 
 Detalles de empaquetado, distribución a otros PCs y resolución de problemas: [README-build.md](README-build.md).
 
 ---
 
-## Roadmap
+## Versiones
 
-Versiones pasadas y previstas. La V4 sólo se aborda si se cruza el umbral cuantitativo descrito; lo demás puede ocurrir antes según necesidad.
+| Versión       | Estado          | Alcance                                                                          |
+| ------------- | --------------- | -------------------------------------------------------------------------------- |
+| V1 (web)      | Cerrada         | Prototipo en navegador, sin persistencia compartida                              |
+| V2 (Electron) | Cerrada         | App de escritorio, `config.js` en NAS, conflictos, backups                       |
+| V3            | Cerrada         | Historial de presupuestos por PC + exportación a PDF                             |
+| V4            | Cerrada         | Catálogo totalmente configurable por el usuario (productos, proveedores, extras, packs) |
+| V5            | **Beta actual** | Almacenamiento opcional en Cloudflare D1 en la cuenta del propio cliente (sin backend), estadísticas en la app, auditoría + snapshots, productización (repo público, Apache-2.0); contraseña de admin eliminada |
 
-| Versión       | Estado          | Alcance                                                                                                                                 |
-| ------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| V1 (web)      | Cerrada         | Prototipo en navegador, sin persistencia compartida                                                                                     |
-| V2 (Electron) | **Beta actual** | App de escritorio, `config.js` en NAS, modo admin, conflictos, backups                                                                  |
-| V2.x          | En curso        | Cierre de PVPs provisionales (sudaderas), pulido UI, más tests                                                                          |
-| V3            | Planificado     | Historial de presupuestos por PC (`localStorage`), exportación a PDF                                                                    |
-| V4            | Condicional     | Backend HTTP local (Node + Express + SQLite) si se superan ~5 usuarios o se piden reportes cross-PC. Auto-update con `electron-updater` |
-
-Decisiones contempladas pero **deliberadamente fuera de alcance hoy**: TypeScript, frameworks UI (React/Vue/Svelte), bundlers, telemetría, internacionalización. Justificación y criterios para reconsiderar: [CLAUDE.md §11](CLAUDE.md).
+Deliberadamente **fuera de alcance**: un servidor/backend propio, TypeScript, frameworks UI, bundlers, telemetría de negocio. Justificación y los debates documentados: [CLAUDE.md](CLAUDE.md).
 
 ---
 
@@ -98,7 +96,7 @@ Proyecto interno de empresa pequeña (2–3 usuarios). No se aceptan PRs de terc
 
 1. Lee [CLAUDE.md](CLAUDE.md) (convenciones, principios, qué NO hacer).
 2. Lee [PLAN_Calculadora.md](PLAN_Calculadora.md) si vas a tocar lógica de negocio.
-3. Ejecuta `npm test` antes de proponer cambios.
+3. Ejecuta `pnpm test` antes de proponer cambios.
 4. Mantén las funciones de cálculo puras y testables.
 
 ---
@@ -111,16 +109,16 @@ Proyecto interno de empresa pequeña (2–3 usuarios). No se aceptan PRs de terc
 
 ## About
 
-**PackPrice** nace en un taller de personalización textil DTF en Guadalajara (España) con más de 25 años en el sector. La meta es muy concreta: presupuestar en segundos los "packs de peña" típicos de verano, manteniendo márgenes sanos y comunicando precios consistentes con descuento por volumen, sin depender de hojas de cálculo dispersas ni de la memoria del que coge el teléfono.
+**Quanto** nace en un taller de personalización textil DTF en Guadalajara (España) con más de 25 años en el sector. La meta es muy concreta: presupuestar en segundos los "packs de peña" típicos de verano, manteniendo márgenes sanos y comunicando precios consistentes con descuento por volumen, sin depender de hojas de cálculo dispersas ni de la memoria del que coge el teléfono.
 
 El diseño prioriza **claridad sobre flexibilidad**, **datos fuera del código** y **mínimo mantenimiento**: si un PVP cambia, el cambio es de datos, no de despliegue. La app debe seguir siendo entendible y editable por una sola persona dentro de cinco años.
 
 - **Autor**: Alejandro Escarpa Prieto
-- **Contexto**: empresa, uso interno, sin telemetría ni servicios en la nube
+- **Contexto**: empresa, uso interno, sin telemetría de negocio; nube opcional solo en la cuenta del propio cliente (sin backend del desarrollador)
 - **Principios**: YAGNI, fail-fast, español en el dominio, cero build step
 
 ---
 
 ## Tags
 
-`electron` · `desktop-app` · `windows` · `portable-exe` · `vanilla-js` · `nodejs` · `pricing-calculator` · `quote-calculator` · `dtf-printing` · `direct-to-film` · `textile` · `apparel` · `merchandise` · `print-shop` · `small-business` · `internal-tool` · `nas-shared-config` · `electron-builder` · `vitest` · `spanish` · `es-ES`
+`electron` · `desktop-app` · `windows` · `nsis-installer` · `vanilla-js` · `nodejs` · `pricing-calculator` · `quote-calculator` · `dtf-printing` · `direct-to-film` · `textile` · `apparel` · `merchandise` · `print-shop` · `small-business` · `internal-tool` · `nas-shared-config` · `electron-builder` · `vitest` · `spanish` · `es-ES`

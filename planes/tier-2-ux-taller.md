@@ -38,7 +38,7 @@
 
 **Alcance**:
 
-- Archivo `%APPDATA%\packprice\clientes.json` con array simple:
+- Archivo `%APPDATA%\Quanto\clientes.json` con array simple:
   ```js
   { id, nombre, contacto, notas, fecha_alta }
   ```

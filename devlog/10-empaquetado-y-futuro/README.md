@@ -1,6 +1,6 @@
 # Capítulo 10 · Empaquetado, distribución y futuro
 
-> Una app que solo corre en `npm run dev` no existe para el taller. PackPrice empaqueta a un `.exe` portable Windows x64, sin instalador, sin firma, sin auto-update. Distribución manual: copia y ejecuta. Este capítulo documenta cómo se construye, cómo se distribuye y qué viene después.
+> Una app que solo corre en `npm run dev` no existe para el taller. Quanto empaqueta a un `.exe` portable Windows x64, sin instalador, sin firma, sin auto-update. Distribución manual: copia y ejecuta. Este capítulo documenta cómo se construye, cómo se distribuye y qué viene después.
 
 ![Roadmap V0 → V5 con comandos de ciclo de vida](images/roadmap-versions.svg)
 
@@ -19,8 +19,8 @@ El último comando llama a `electron-builder --win --x64`, que lee la sección `
 ```json
 {
   "build": {
-    "appId": "com.packprice.calculadora",
-    "productName": "PackPrice",
+    "appId": "com.quanto.calculadora",
+    "productName": "Quanto",
     "directories": { "output": "dist" },
     "files": [
       "main.js",
@@ -35,13 +35,13 @@ El último comando llama a `electron-builder --win --x64`, que lee la sección `
       "icon": "icon.png"
     },
     "portable": {
-      "artifactName": "PackPrice-${version}-preliminar.exe"
+      "artifactName": "Quanto-${version}-preliminar.exe"
     }
   }
 }
 ```
 
-Resultado: `dist/PackPrice-2.0.0-preview-preliminar.exe`. Un solo archivo de ~85 MB que contiene Chromium, Node, el código de PackPrice, el icono y nada más. **Sin instalador**. Se ejecuta directamente con doble clic.
+Resultado: `dist/Quanto-2.0.0-preview-preliminar.exe`. Un solo archivo de ~85 MB que contiene Chromium, Node, el código de Quanto, el icono y nada más. **Sin instalador**. Se ejecuta directamente con doble clic.
 
 **Por qué portable y no installer**:
 
@@ -58,8 +58,8 @@ Resultado: `dist/PackPrice-2.0.0-preview-preliminar.exe`. Un solo archivo de ~85
 Hoy son 2-3 PCs, así que la distribución es manual:
 
 1. Construir en un PC: `npm run build:win`.
-2. Copiar `dist/PackPrice-*.exe` a un USB o al NAS.
-3. En cada PC del taller: copiar el `.exe` a `C:\Apps\PackPrice\` (carpeta convenida).
+2. Copiar `dist/Quanto-*.exe` a un USB o al NAS.
+3. En cada PC del taller: copiar el `.exe` a `C:\Apps\Quanto\` (carpeta convenida).
 4. Doble clic. Windows SmartScreen avisa la primera vez (no hay firma digital). El usuario pulsa "Más información → Ejecutar de todas formas". Solo la primera vez por PC.
 
 **Por qué no firma digital**: un certificado de code signing legítimo cuesta 200-400 €/año. Para una app interna de tres usuarios, no compensa. SmartScreen solo molesta una vez. El día que la app se distribuya fuera del taller, se replantea.
@@ -88,7 +88,7 @@ Cuando se cortes una release real:
 
 ## Cero dependencias en runtime
 
-Una propiedad que merece su párrafo. PackPrice tiene **dos dependencias** y ambas son `devDependencies`:
+Una propiedad que merece su párrafo. Quanto tiene **dos dependencias** y ambas son `devDependencies`:
 
 ```json
 {
@@ -216,7 +216,7 @@ Tras la distribución:
 
 ## Cierre del devlog
 
-Este es el último capítulo. Si has llegado hasta aquí, el modelo mental completo de PackPrice ya cabe en tu cabeza:
+Este es el último capítulo. Si has llegado hasta aquí, el modelo mental completo de Quanto ya cabe en tu cabeza:
 
 - Una app Electron de tres pantallas, sin frameworks, sin build step.
 - Un `config.js` plano en el NAS como punto único de verdad.

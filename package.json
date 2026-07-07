@@ -1,15 +1,17 @@
 {
-  "name": "packprice",
-  "version": "2.0.0-preview",
-  "description": "PackPrice - calculadora de packs (app de escritorio)",
+  "name": "quanto",
+  "version": "5.1.0-beta",
+  "description": "Quanto - calculadora de packs (app de escritorio)",
   "main": "main.js",
-  "author": "PackPrice",
+  "author": "xkoistudio",
+  "license": "Apache-2.0",
   "private": true,
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
     "build:win": "electron-builder --win --x64",
     "build:win-portable": "electron-builder --win portable --x64",
+    "build:win-publish": "electron-builder --win --x64 --publish always",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "node -e \"const fs=require('fs');for(const d of ['dist','out','build']){try{fs.rmSync(d,{recursive:true,force:true});}catch(e){}}\""
@@ -20,16 +22,20 @@
     "vitest": "^2.1.0"
   },
   "build": {
-    "appId": "com.packprice.calculadora",
-    "productName": "PackPrice",
+    "appId": "com.quanto.calculadora",
+    "productName": "Quanto",
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      { "provider": "github", "owner": "TermiSenpai", "repo": "Quanto" }
+    ],
     "files": [
       "main.js",
       "preload.js",
       "config.default.js",
       "lib/**/*",
+      "db/**/*",
       "renderer/**/*",
       "icon.png",
       "package.json"
@@ -37,19 +43,28 @@
     "win": {
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ],
-      "icon": "icon.png"
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Quanto",
+      "artifactName": "Quanto-${version}-setup.${ext}"
     },
     "portable": {
-      "artifactName": "PackPrice-${version}-preliminar.exe"
+      "artifactName": "Quanto-${version}-preliminar.exe"
     }
   },
   "dependencies": {
-    "electron-log": "^5.4.3"
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.9"
   }
 }

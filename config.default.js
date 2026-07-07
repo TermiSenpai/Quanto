@@ -1,187 +1,91 @@
 // ============================================================
-// PackPrice - Configuración por defecto
+// Quanto - Config bootstrap (empty scaffold + schema version)
 // ============================================================
-// Estos son los valores iniciales con los que se creará el
-// archivo config.js en el NAS si no existe en el primer arranque.
+// There is NO default catalog. A fresh install builds its whole
+// catalog from blank through the first-run wizard (renderer/
+// catalog-wizard.js). This module only provides:
+//   - SCHEMA_VERSION : the v4 schema tag stamped into new configs and
+//                      the cloud migration ledger.
+//   - PARAMETER_KEYS : the cost parameters the wizard's "Costes" step
+//                      must fill (buildEmptyConfig nulls them all).
+//   - buildEmptyConfig(meta): a schema-SHAPED but EMPTY config — the
+//     in-memory scaffold the wizard fills. It is NOT valid until the
+//     wizard adds the required minimums (>=1 tier/supplier/product/pack).
 //
-// Fuente: PLAN_Calculadora.md (secciones 2 y 3) y los valores
-// reales en uso del config test (CONFIG TEST/config.js).
-//
-// Este módulo se usa SOLO en el proceso principal (main.js).
-// El renderer trabaja siempre con la copia leída de disco.
+// Used in the main process (main.js). The renderer receives the empty
+// scaffold over IPC (`config:empty`), already renderer-shaped
+// (has_password instead of the raw password).
 // ============================================================
 
 'use strict';
 
-const VERSION = '2.0.0';
-const ADMIN_CLAVE_DEFAULT = 'fuzfuz2026';
+const SCHEMA_VERSION = '4.0.0';
 
-// --- Parámetros base (sección 2.1 del plan) ---
-const PARAMETROS = {
-  mo_eur_hora:           15,
-  iva:                   0.21,
-  merma_pct:             0.10,
-  indirectos_eur_prenda: 0.30,
-  buffer_3xl_eur_pack:   0.40,
-  recargo_4xl_eur:       3,
-  recargo_5xl_eur:       5,
-  envio_roly_eur_bulto:  5.90,
-  prendas_por_bulto:     40,
-  dtf_eur_metro:         1.25,
-  dtf_metros_2caras:     0.40,
-  dtf_metros_1cara:      0.20,
-  planchado_eur_cara:    0.30,
-  minutos_2caras_base:   7,
-  minutos_1cara_base:    5,
-  // Extras opcionales (precios SIN IVA — se les aplica IVA al sumarlos al total)
-  extra_nombre_eur:      1.5,
-  extra_manga_corta_eur: 1.5,
-  extra_manga_larga_eur: 3
-};
+// The canonical default profit margin (0.35 = 35%) stamped onto new
+// entities and into `parameters.default_target_margin`. There is no
+// default catalog any more, but this schema-level constant is still the
+// single source of truth the v2/v3→v4 migration (lib/migrations.js)
+// reads when it back-fills the margin fields a legacy config lacks.
+const DEFAULT_TARGET_MARGIN = 0.35;
 
-// --- Modelos Roly (sección 2.2 del plan) ---
-const MODELOS_ROLY = {
-  BEAGLE: {
-    nombre: 'Camiseta',
-    ref:    'CA65540558',
-    precio: 1.7325
-  },
-  CLASICA: {
-    nombre: 'Sudadera sin capucha',
-    ref:    'SU10700558',
-    precio: 6.2475
-  },
-  URBAN: {
-    nombre: 'Sudadera con capucha',
-    ref:    'SU1067050258',
-    precio: 7.8750
-  }
-};
+// Dead-code compatibility: the admin password gate is removed (CLAUDE.md
+// §9 / v5), but validateConfigSchema still requires a non-empty
+// admin.password (or has_password=true). We keep a placeholder purely to
+// satisfy the schema until the admin-password field is migrated out. It
+// grants no access — the editor opens directly.
+const ADMIN_PASSWORD_PLACEHOLDER = 'quanto';
 
-// --- Tramos de volumen (sección 2.3 del plan) ---
-const TRAMOS = [
-  { id: 'T1', etiqueta: '10-24 uds',  desde: 10,  hasta: 24,   reduccion_tiempo: 0    },
-  { id: 'T2', etiqueta: '25-49 uds',  desde: 25,  hasta: 49,   reduccion_tiempo: 0.10 },
-  { id: 'T3', etiqueta: '50-99 uds',  desde: 50,  hasta: 99,   reduccion_tiempo: 0.15 },
-  { id: 'T4', etiqueta: '100+ uds',   desde: 100, hasta: null, reduccion_tiempo: 0.20 }
+// Every cost parameter the user fills in the wizard's "Costes" step.
+const PARAMETER_KEYS = [
+  'labor_eur_hour', 'vat', 'waste_pct', 'overhead_eur_garment',
+  'surcharge_4xl_eur', 'surcharge_5xl_eur', 'roly_shipping_eur_bundle',
+  'garments_per_bundle', 'dtf_eur_meter', 'dtf_meters_two_sides',
+  'dtf_meters_one_side', 'pressing_eur_side', 'minutes_two_sides_base',
+  'minutes_one_side_base', 'default_target_margin', 'price_rounding_ending'
 ];
 
-// --- Packs comerciales (sección 3 del plan) ---
-const PACKS = {
-  pena_completa: {
-    tipo:   'pena',
-    nombre: 'Pack Peña (camiseta + sudadera)',
-    min:    10,
-    pvp: {
-      sin_capucha: {
-        dos_caras: { T1: 25.95, T2: 24.95, T3: 23.95, T4: 22.95 },
-        una_cara:  { T1: 22.95, T2: 21.95, T3: 20.95, T4: 19.95 }
-      },
-      con_capucha: {
-        dos_caras: { T1: 28.95, T2: 27.95, T3: 26.95, T4: 25.95 },
-        una_cara:  { T1: 25.95, T2: 24.95, T3: 23.95, T4: 22.95 }
-      }
-    }
-  },
-
-  solo_camisetas: {
-    tipo:   'individual',
-    nombre: 'Pack solo camisetas',
-    min:    10,
-    modelo: 'BEAGLE',
-    pvp: {
-      dos_caras: { T1: 11.99, T2: 10.99, T3: 9.99, T4: 8.99 },
-      una_cara:  { T1: 9.99,  T2: 8.99,  T3: 8.45, T4: 7.99 }
-    }
-  },
-
-  solo_clasica: {
-    tipo:   'individual',
-    nombre: 'Pack solo sudaderas sin capucha',
-    min:    10,
-    modelo: 'CLASICA',
-    pvp: {
-      dos_caras: { T1: 14.95, T2: 13.95, T3: 12.95, T4: 12.45 },
-      una_cara:  { T1: 12.95, T2: 11.95, T3: 10.95, T4: 10.45 }
-    }
-  },
-
-  solo_urban: {
-    tipo:   'individual',
-    nombre: 'Pack solo sudaderas con capucha',
-    min:    10,
-    modelo: 'URBAN',
-    pvp: {
-      dos_caras: { T1: 16.95, T2: 15.95, T3: 14.95, T4: 13.95 },
-      una_cara:  { T1: 14.95, T2: 13.95, T3: 12.95, T4: 11.95 }
-    }
-  },
-
-  sudaderas_mixto: {
-    tipo:      'mixto',
-    nombre:    'Pack mixto sudaderas (capucha + sin capucha)',
-    min_total: 10,
-    packs_referencia: {
-      CLASICA: 'solo_clasica',
-      URBAN:   'solo_urban'
-    }
-  },
-
-  personalizado: {
-    tipo:      'personalizado',
-    nombre:    'Pack personalizado',
-    min_total: 10,
-    // Cada modelo Roly se factura al PVP del pack individual indicado
-    // aquí. Si en el futuro entra un modelo nuevo, añadir su pareja.
-    modelos_referencia: {
-      BEAGLE:  'solo_camisetas',
-      CLASICA: 'solo_clasica',
-      URBAN:   'solo_urban'
-    }
-  }
-};
-
-// --- Empresa y plantilla de presupuesto (usadas en el PDF) ---
-const EMPRESA = {
-  nombre:    'Mi Taller DTF',
-  cif:       '',
-  direccion: '',
-  telefono:  '',
-  email:     '',
-  web:       ''
-};
-
-const PRESUPUESTO = {
-  validez_dias: 30,
-  condiciones:  'Precios IVA incluido. Validez 30 días desde la fecha de emisión. La aceptación implica conformidad con las condiciones del taller.'
-};
+function blankParameters() {
+  const p = {};
+  for (const k of PARAMETER_KEYS) p[k] = null;
+  return p;
+}
 
 /**
- * Devuelve un objeto de configuración nuevo con los defaults del plan.
- * Cada llamada devuelve una copia independiente, segura para mutar.
+ * Returns a fresh, schema-SHAPED but EMPTY v4 configuration: blank cost
+ * parameters and empty suppliers/products/tiers/packs/addons. It is the
+ * scaffold the first-run wizard fills; it carries no business numbers and
+ * does NOT pass validateConfigSchema until the wizard adds the minimums.
  *
- * @param {object} [meta] - metadatos opcionales (modificado_por, etc.)
- * @returns {object} configuración lista para serializar a config.js
+ * @param {object} [meta] - optional { modified_by, updated_at }
+ * @returns {object} config object ready to be filled
  */
-function buildDefaultConfig(meta = {}) {
+function buildEmptyConfig(meta = {}) {
   return {
-    version:             VERSION,
-    fecha_actualizacion: meta.fecha_actualizacion || new Date().toLocaleString('es-ES'),
-    modificado_por:      meta.modificado_por || 'sistema (auto)',
-    admin: {
-      clave: ADMIN_CLAVE_DEFAULT
+    version:     SCHEMA_VERSION,
+    updated_at:  meta.updated_at || new Date().toLocaleString('es-ES'),
+    modified_by: meta.modified_by || 'sistema (alta)',
+    admin:       { password: ADMIN_PASSWORD_PLACEHOLDER },
+    parameters:  blankParameters(),
+    suppliers:   {},
+    products:    {},
+    tiers:       [],
+    addons:      {},
+    packs:       {},
+    company: {
+      name: '', tax_id: '', address: '', phone: '', email: '', web: '',
+      pdf_template: 'clasica', brand_color: '#3D7BD9'
     },
-    parametros:   JSON.parse(JSON.stringify(PARAMETROS)),
-    modelos_roly: JSON.parse(JSON.stringify(MODELOS_ROLY)),
-    tramos:       JSON.parse(JSON.stringify(TRAMOS)),
-    packs:        JSON.parse(JSON.stringify(PACKS)),
-    empresa:      JSON.parse(JSON.stringify(EMPRESA)),
-    presupuesto:  JSON.parse(JSON.stringify(PRESUPUESTO))
+    quote_settings: {
+      validity_days: 30,
+      terms: 'Precios IVA incluido. Validez 30 días desde la fecha de emisión.'
+    }
   };
 }
 
 module.exports = {
-  buildDefaultConfig,
-  VERSION,
-  ADMIN_CLAVE_DEFAULT
+  SCHEMA_VERSION,
+  ADMIN_PASSWORD_PLACEHOLDER,
+  DEFAULT_TARGET_MARGIN,
+  PARAMETER_KEYS,
+  buildEmptyConfig
 };

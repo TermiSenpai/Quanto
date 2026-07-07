@@ -62,7 +62,7 @@
       <rect width="500" height="120" rx="14" fill="#F1F4F8"/>
       <text x="24" y="40" fill="#0F1A2B" font-size="32" font-weight="700">Inter — Pack peña</text>
       <text x="24" y="78" fill="#5A6478" font-size="14">Cuerpo 14, line-height 1.5. Sans humanista, perfecta a baja resolución.</text>
-      <text x="24" y="106" fill="#5A6478" font-size="13" font-style="italic">"PackPrice — calculadora de packs DTF"</text>
+      <text x="24" y="106" fill="#5A6478" font-size="13" font-style="italic">"Quanto — calculadora de packs DTF"</text>
     </g>
     <g transform="translate(520,60)">
       <rect width="500" height="120" rx="14" fill="#0F1A2B"/>

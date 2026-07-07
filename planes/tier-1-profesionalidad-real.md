@@ -43,7 +43,7 @@
 **Alcance**:
 
 - Añadir `electron-log` como **dependencia de runtime** (la primera; documentarlo en `CLAUDE.md` §8.3).
-- Logs en `%APPDATA%\packprice\logs\main.log` con rotación por tamaño (5 MB, 3 archivos).
+- Logs en `%APPDATA%\Quanto\logs\main.log` con rotación por tamaño (5 MB, 3 archivos).
 - Niveles: `info` en arranque (versión, ruta de config, usuario), `warn` en conflicto detectado, `error` en cualquier fallo de IPC handler.
 - Exponer un handler `log:read-last` para que un admin pueda ver los últimos N logs desde la UI (botón en modo admin → "Ver logs").
 
@@ -94,7 +94,7 @@
 
 **Alcance**:
 
-- Almacenamiento en `%APPDATA%\packprice\presupuestos.json` (JSON Lines o array, indiferente para <10k entradas).
+- Almacenamiento en `%APPDATA%\Quanto\presupuestos.json` (JSON Lines o array, indiferente para <10k entradas).
 - Numeración correlativa: `PP-AAAA-NNNN` reiniciando el contador cada año.
 - Esquema por entrada:
   ```js

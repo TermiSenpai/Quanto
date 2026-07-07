@@ -3,13 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';">
-  <title>PackPrice · Calculadora de packs</title>
+  <title>Quanto · Calculadora de packs</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
   <!-- ================== ICON SPRITE ================== -->
   <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+    <!-- Quanto wordmark (outlined). Q ring + letters use currentColor (theme ink/inverse);
+         the tail "price line" + node stay brand indigo. See assets/brand/quanto-wordmark.svg. -->
+    <symbol id="i-wordmark" viewBox="0 0 180 64">
+      <circle cx="31" cy="29" r="15" stroke="currentColor" stroke-width="7" fill="none"/>
+      <path d="M40 38 C 45 45, 50 50, 58 50 L 165.2 50" stroke="#3D5AF1" stroke-width="5" stroke-linecap="round" fill="none"/>
+      <circle cx="171.2" cy="50" r="5" fill="#3D5AF1"/>
+      <g fill="currentColor">
+        <path transform="translate(51,42)" d="M2.5,-21.8359375L8.359375,-21.8359375 8.359375,-8.96484375C8.359375,-7.61067676544189 8.7109375,-6.54947900772095 9.4140625,-5.78125 10.1171875,-5.01302051544189 11.0807285308838,-4.62890625 12.3046875,-4.62890625 13.1380205154419,-4.62890625 13.8736972808838,-4.80794239044189 14.51171875,-5.166015625 15.1497383117676,-5.52408838272095 15.6477851867676,-6.044921875 16.005859375,-6.728515625 16.3639316558838,-7.412109375 16.54296875,-8.23567676544189 16.54296875,-9.19921875L16.54296875,-21.8359375 22.421875,-21.8359375 22.421875,9.31322574615479E-08 16.875,9.31322574615479E-08 16.81640625,-4.55078125C16.2565097808838,-3.14453125 15.48828125,-2.03125 14.51171875,-1.2109375 13.3268222808838,-0.221354186534882 11.8294267654419,0.2734375 10.01953125,0.2734375 8.50911426544189,0.2734375 7.1875,-0.0553385615348816 6.0546875,-0.712890565395355 4.921875,-1.37044262886047 4.04622364044189,-2.314453125 3.427734375,-3.544921875 2.80924463272095,-4.775390625 2.5,-6.24348926544189 2.5,-7.94921875L2.5,-21.8359375z"/>
+        <path transform="translate(75.9,42)" d="M14.90234375,-10.17578125C14.7330722808838,-10.0455722808838 14.4726552963257,-9.92838478088379 14.12109375,-9.82421875 13.7695302963257,-9.72005176544189 13.3789052963257,-9.62890625 12.94921875,-9.55078125 12.5195302963257,-9.47265625 12.0963535308838,-9.40104103088379 11.6796875,-9.3359375 11.2630205154419,-9.27083301544189 10.8919267654419,-9.21875 10.56640625,-9.1796875 9.85025978088379,-9.07552051544189 9.21875,-8.90625 8.671875,-8.671875 8.125,-8.4375 7.70182228088379,-8.12825489044189 7.40234375,-7.744140625 7.10286426544189,-7.36002588272095 6.953125,-6.86848926544189 6.953125,-6.26953125 6.953125,-5.70963525772095 7.09635400772095,-5.23762989044189 7.3828125,-4.853515625 7.66927051544189,-4.46940088272095 8.05989551544189,-4.1796875 8.5546875,-3.984375 9.04947853088379,-3.78906226158142 9.61588478088379,-3.69140601158142 10.25390625,-3.69140625 11.1783847808838,-3.69140601158142 11.9889316558838,-3.87369775772095 12.685546875,-4.23828125 13.3821611404419,-4.60286426544189 13.92578125,-5.09765625 14.31640625,-5.72265625 14.70703125,-6.34765625 14.90234375,-7.04427051544189 14.90234375,-7.8125L14.90234375,-10.17578125z M11.46484375,-22.109375C12.63671875,-22.109375 13.7760410308838,-21.9694004058838 14.8828125,-21.689453125 15.9895830154419,-21.4095039367676 16.982421875,-20.9765625 17.861328125,-20.390625 18.740234375,-19.8046875 19.4368476867676,-19.0397129058838 19.951171875,-18.095703125 20.4654941558838,-17.1516914367676 20.72265625,-16.0221347808838 20.72265625,-14.70703125L20.72265625,-8.14907252788544E-08 15.17578125,-8.14907252788544E-08 15.17578125,-3.02734375 14.98046875,-3.02734375C14.62890625,-2.35026025772095 14.16015625,-1.75455725193024 13.57421875,-1.240234375 12.98828125,-0.725911438465118 12.2819004058838,-0.319010376930237 11.455078125,-0.0195312444120646 10.6282548904419,0.279947906732559 9.67447853088379,0.4296875 8.59375,0.4296875 7.21354150772095,0.4296875 5.97330713272095,0.185546845197678 4.873046875,-0.30273425579071 3.77278614044189,-0.791015565395355 2.90690088272095,-1.52018225193024 2.275390625,-2.49023461341858 1.64388012886047,-3.46028637886047 1.328125,-4.66796875 1.32812511920929,-6.11328125 1.328125,-7.32421875 1.552734375,-8.33984375 2.001953125,-9.16015625 2.451171875,-9.98046875 3.06315088272095,-10.6380205154419 3.837890625,-11.1328125 4.61262989044189,-11.6276035308838 5.49153614044189,-12.0052080154419 6.474609375,-12.265625 7.45768213272095,-12.5260410308838 8.48958301544189,-12.7083320617676 9.5703125,-12.8125 10.8333330154419,-12.9427070617676 11.8522129058838,-13.0631504058838 12.626953125,-13.173828125 13.4016923904419,-13.2845048904419 13.9680986404419,-13.4602861404419 14.326171875,-13.701171875 14.6842441558838,-13.9420566558838 14.86328125,-14.2968740463257 14.86328125,-14.765625L14.86328125,-14.86328125C14.86328125,-15.48828125 14.7330722808838,-16.015625 14.47265625,-16.4453125 14.2122392654419,-16.875 13.8248691558838,-17.2037754058838 13.310546875,-17.431640625 12.7962226867676,-17.6595039367676 12.1744785308838,-17.7734375 11.4453125,-17.7734375 10.6901035308838,-17.7734375 10.0325517654419,-17.6595039367676 9.47265625,-17.431640625 8.91275978088379,-17.2037754058838 8.45703125,-16.9010410308838 8.10546875,-16.5234375 7.75390625,-16.1458320617676 7.49348926544189,-15.72265625 7.32421875,-15.25390625L1.953125,-16.1328125C2.33072900772095,-17.4088535308838 2.95572900772095,-18.4895820617676 3.828125,-19.375 4.70052051544189,-20.2604160308838 5.78450489044189,-20.9375 7.080078125,-21.40625 8.37565040588379,-21.875 9.83723926544189,-22.109375 11.46484375,-22.109375z"/>
+        <path transform="translate(99.12,42)" d="M14.90234375,-22.109375C16.4127597808838,-22.109375 17.7311191558838,-21.7805976867676 18.857421875,-21.123046875 19.9837226867676,-20.4654941558838 20.8561191558838,-19.521484375 21.474609375,-18.291015625 22.0930976867676,-17.060546875 22.40234375,-15.5924472808838 22.40234375,-13.88671875L22.40234375,0 16.54296875,0 16.54296875,-12.87109375C16.54296875,-14.2252597808838 16.1946601867676,-15.2864580154419 15.498046875,-16.0546875 14.8014316558838,-16.8229160308838 13.8346347808838,-17.20703125 12.59765625,-17.20703125 11.77734375,-17.20703125 11.044921875,-17.0279941558838 10.400390625,-16.669921875 9.755859375,-16.3118476867676 9.25455665588379,-15.7942705154419 8.896484375,-15.1171875 8.53841114044189,-14.4401035308838 8.359375,-13.61328125 8.359375,-12.63671875L8.359375,0 2.5,0 2.5,-21.8359375 8.02734375,-21.8359375 8.10546875,-17.32421875C8.66536426544189,-18.7044258117676 9.42708301544189,-19.8046875 10.390625,-20.625 11.5494785308838,-21.6145820617676 13.0533847808838,-22.109375 14.90234375,-22.109375z"/>
+        <path transform="translate(124.03,42)" d="M3.3984375,-27.03125L9.2578125,-27.03125 9.2578125,-21.8359375 13.33984375,-21.8359375 13.33984375,-17.36328125 9.2578125,-17.36328125 9.2578125,-6.38671875C9.2578125,-5.69661426544189 9.41080665588379,-5.185546875 9.716796875,-4.853515625 10.0227861404419,-4.521484375 10.5338535308838,-4.35546875 11.25,-4.35546875 11.4713535308838,-4.35546875 11.7838535308838,-4.384765625 12.1875,-4.443359375 12.5911455154419,-4.501953125 12.8971347808838,-4.55729150772095 13.10546875,-4.609375L13.9453125,-0.214843600988388C13.2942705154419,-0.0195312574505806 12.646484375,0.1171875 12.001953125,0.195312663912773 11.357421875,0.2734375 10.7421875,0.3125 10.15625,0.3125 7.96875,0.3125 6.29557275772095,-0.221354186534882 5.13671875,-1.2890625 3.97786426544189,-2.35677075386047 3.39843726158142,-3.88671875 3.3984375,-5.87890625L3.3984375,-17.36328125 0.39062511920929,-17.36328125 0.39062511920929,-21.8359375 3.3984375,-21.8359375 3.3984375,-27.03125z"/>
+        <path transform="translate(138.68,42)" d="M12.265625,-17.5C11.2239580154419,-17.5 10.3548173904419,-17.2135410308838 9.658203125,-16.640625 8.96158790588379,-16.0677070617676 8.4375,-15.2799472808838 8.0859375,-14.27734375 7.73437452316284,-13.2747383117676 7.55859327316284,-12.1289052963257 7.55859375,-10.83984375 7.55859327316284,-9.57682228088379 7.73437452316284,-8.44075489044189 8.0859375,-7.431640625 8.4375,-6.42252588272095 8.96158790588379,-5.62825489044189 9.658203125,-5.048828125 10.3548173904419,-4.46940088272095 11.2239580154419,-4.1796875 12.265625,-4.1796875 13.3072910308838,-4.1796875 14.1796865463257,-4.46940088272095 14.8828125,-5.048828125 15.5859365463257,-5.62825489044189 16.11328125,-6.42252588272095 16.46484375,-7.431640625 16.81640625,-8.44075489044189 16.9921875,-9.57682228088379 16.9921875,-10.83984375 16.9921875,-12.1289052963257 16.81640625,-13.2747383117676 16.46484375,-14.27734375 16.11328125,-15.2799472808838 15.5859365463257,-16.0677070617676 14.8828125,-16.640625 14.1796865463257,-17.2135410308838 13.3072910308838,-17.5 12.265625,-17.5z M12.265625,-22.109375C14.4661455154419,-22.109375 16.3639316558838,-21.6373691558838 17.958984375,-20.693359375 19.5540351867676,-19.7493476867676 20.7845039367676,-18.4342441558838 21.650390625,-16.748046875 22.5162754058838,-15.0618486404419 22.94921875,-13.0859375 22.94921875,-10.8203125 22.94921875,-8.58072853088379 22.5162754058838,-6.61783838272095 21.650390625,-4.931640625 20.7845039367676,-3.24544262886047 19.5540351867676,-1.93033838272095 17.958984375,-0.986327946186066 16.3639316558838,-0.0423177480697632 14.4661455154419,0.4296875 12.265625,0.4296875 10.078125,0.4296875 8.18359375,-0.0423177480697632 6.58203125,-0.986327946186066 4.98046875,-1.93033838272095 3.74674463272095,-3.24544262886047 2.880859375,-4.931640625 2.01497387886047,-6.61783838272095 1.58203113079071,-8.58072853088379 1.58203125,-10.8203125 1.58203113079071,-13.0859375 2.01497387886047,-15.0618486404419 2.880859375,-16.748046875 3.74674463272095,-18.4342441558838 4.98046875,-19.7493476867676 6.58203125,-20.693359375 8.18359375,-21.6373691558838 10.078125,-22.109375 12.265625,-22.109375z"/>
+      </g>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
     <symbol id="i-pack" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
       <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
@@ -132,8 +147,7 @@
   <section id="pantalla-bienvenida" class="pantalla split hidden">
     <aside class="split__left">
       <div class="topbar__brand">
-        <span class="topbar__brand-icon"><svg class="icon icon--lg"><use href="#i-pack"/></svg></span>
-        <span class="topbar__brand-title">PackPrice</span>
+        <svg class="topbar__brand-wordmark topbar__brand-wordmark--lg" viewBox="0 0 180 64" role="img" aria-label="Quanto"><use href="#i-wordmark"/></svg>
       </div>
 
       <div class="split__hero">
@@ -148,7 +162,7 @@
           <div class="stat"><strong>3</strong><span>Modelos Roly</span></div>
           <div class="stat"><strong>4</strong><span>Tramos por volumen</span></div>
         </div>
-        <p class="split__foot-line text-mono" style="margin-top: 16px;">v2.0.0 · uso interno taller</p>
+        <p class="split__foot-line text-mono" style="margin-top: 16px;" id="bv-version"></p>
       </div>
     </aside>
 
@@ -176,7 +190,7 @@
 
         <div class="alert alert-info">
           <svg class="icon"><use href="#i-info"/></svg>
-          <span>Si el archivo no existe, PackPrice puede crearlo con valores por defecto al continuar.</span>
+          <span>Si el archivo no existe, Quanto puede crearlo con valores por defecto al continuar.</span>
         </div>
 
         <div id="bv-error" class="alert alert-error hidden"></div>
@@ -191,15 +205,248 @@
     </main>
   </section>
 
+  <!-- ================== PANTALLA: ASISTENTE PRIMER ARRANQUE ================== -->
+  <!-- v5: shown when no data source is configured (no data_source in
+       settings and no legacy config path). Two choices — Local (file
+       mode, reuses the existing path picker) and Nube (Cloudflare D1,
+       3 guided steps). English ids; Spanish copy from UI-UX §2.0. -->
+  <section id="setup-wizard" class="pantalla split hidden">
+    <aside class="split__left">
+      <div class="topbar__brand">
+        <svg class="topbar__brand-wordmark topbar__brand-wordmark--lg" viewBox="0 0 180 64" role="img" aria-label="Quanto"><use href="#i-wordmark"/></svg>
+      </div>
+
+      <div class="split__hero">
+        <span class="badge badge--inverse"><svg class="icon"><use href="#i-info"/></svg> Primer arranque</span>
+        <h1>¿Dónde guardamos tus datos?</h1>
+        <p>Elige una vez. Podrás cambiar de origen más adelante desde los ajustes — local y nube son intercambiables.</p>
+      </div>
+
+      <div>
+        <p class="split__foot-line text-mono">v4.0.0-beta</p>
+      </div>
+    </aside>
+
+    <main class="split__right">
+
+      <!-- Paso 0: elegir Local vs Nube -->
+      <div id="wizard-choice" class="wizard-view">
+        <header>
+          <h2>Elige cómo trabajar</h2>
+          <p class="text-secondary" style="margin-top: 6px;">Las dos opciones son válidas y reversibles.</p>
+        </header>
+
+        <div class="wizard-cards">
+          <button id="wizard-pick-local" class="wizard-card" type="button">
+            <span class="wizard-card__icon"><svg class="icon icon--lg"><use href="#i-folder"/></svg></span>
+            <span class="wizard-card__title">Local</span>
+            <span class="wizard-card__desc">En este equipo o en una carpeta de red (NAS).</span>
+            <span class="wizard-card__cta">Elegir local <svg class="icon"><use href="#i-arrow-right"/></svg></span>
+          </button>
+
+          <button id="wizard-pick-cloud" class="wizard-card" type="button">
+            <span class="wizard-card__icon"><svg class="icon icon--lg"><use href="#i-layers"/></svg></span>
+            <span class="wizard-card__title">Nube</span>
+            <span class="wizard-card__desc">En tu cuenta de Cloudflare (gratis), accesible desde todos tus equipos.</span>
+            <span class="wizard-card__cta">Elegir nube <svg class="icon"><use href="#i-arrow-right"/></svg></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Rama Local: nombre + selector de ruta (modo archivo actual) -->
+      <div id="wizard-local" class="wizard-view hidden">
+        <div class="back-row">
+          <button id="btn-wizard-local-back" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#i-chevron-left"/></svg> Volver
+          </button>
+          <span class="label-eyebrow">MODO LOCAL</span>
+        </div>
+
+        <header>
+          <h2>Configuración local</h2>
+          <p class="text-secondary" style="margin-top: 6px;">Indica tu nombre y la carpeta donde guardar los datos.</p>
+        </header>
+
+        <form class="form-stack" onsubmit="return false;">
+          <div class="field">
+            <label class="field__label" for="wiz-nombre">Tu nombre</label>
+            <input type="text" id="wiz-nombre" class="input" placeholder="Ej: Alberto, Fede, …" autocomplete="off">
+          </div>
+
+          <div class="field">
+            <div class="field__row">
+              <input type="text" id="wiz-ruta" class="input input--mono" aria-label="Carpeta de datos" placeholder="Carpeta donde guardar los datos…">
+              <button id="btn-wiz-explorar" class="btn btn-secondary" type="button">
+                <svg class="icon"><use href="#i-folder"/></svg> Explorar
+              </button>
+            </div>
+          </div>
+
+          <div id="wiz-local-error" class="alert alert-error hidden"></div>
+        </form>
+
+        <div class="split__right-actions">
+          <span class="help">¿Necesitas ayuda? Contacta con tu administrador</span>
+          <button id="btn-wiz-local-empezar" class="btn btn-primary" disabled>
+            Empezar <svg class="icon"><use href="#i-arrow-right"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Rama Nube: 3 pasos guiados con barra de progreso -->
+      <div id="wizard-cloud" class="wizard-view hidden">
+        <div class="back-row">
+          <button id="btn-wizard-cloud-back" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#i-chevron-left"/></svg> Volver
+          </button>
+          <span class="label-eyebrow">MODO NUBE</span>
+        </div>
+
+        <div class="wizard-steps" id="wizard-steps">
+          <span class="wizard-steps__dot is-current" data-step="1">1</span>
+          <span class="wizard-steps__line"></span>
+          <span class="wizard-steps__dot" data-step="2">2</span>
+          <span class="wizard-steps__line"></span>
+          <span class="wizard-steps__dot" data-step="3">3</span>
+        </div>
+
+        <!-- Paso 1: cuenta -->
+        <div id="cloud-step-1" class="cloud-step">
+          <header>
+            <h2>¿Tienes cuenta de Cloudflare?</h2>
+            <p class="text-secondary" style="margin-top: 6px;">Es gratis. Si aún no tienes una, créala en un minuto y vuelve aquí.</p>
+          </header>
+
+          <div class="field">
+            <label class="field__label" for="cloud-nombre">Tu nombre</label>
+            <input type="text" id="cloud-nombre" class="input" placeholder="Ej: Alberto, Fede, …" autocomplete="off">
+            <span class="field__hint">Quedará registrado como autor de los cambios.</span>
+          </div>
+
+          <div class="split__right-actions">
+            <button id="btn-cloud-signup" class="btn btn-ghost" type="button">
+              <svg class="icon"><use href="#i-share"/></svg> Crear cuenta de Cloudflare
+            </button>
+            <button id="btn-cloud-step1-next" class="btn btn-primary" type="button">
+              Ya tengo cuenta <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Paso 2: clave de acceso (token) -->
+        <div id="cloud-step-2" class="cloud-step hidden">
+          <header>
+            <h2>Crea tu clave de acceso</h2>
+            <p class="text-secondary" style="margin-top: 6px;">Abre la página del token, créala con la plantilla indicada y pégala aquí. La comprobamos al instante.</p>
+          </header>
+
+          <div class="split__right-actions" style="justify-content: flex-start;">
+            <button id="btn-cloud-open-token" class="btn btn-secondary" type="button">
+              <svg class="icon"><use href="#i-key"/></svg> Abrir la página del token
+            </button>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="cloud-token">Pega aquí tu clave</label>
+            <input type="password" id="cloud-token" class="input input--mono" placeholder="Clave de acceso de Cloudflare" autocomplete="off">
+            <span class="field__hint">La clave se guarda solo en este equipo y nunca se comparte.</span>
+          </div>
+
+          <div id="cloud-token-error" class="alert alert-error hidden"></div>
+
+          <div class="split__right-actions">
+            <button id="btn-cloud-step2-back" class="btn btn-ghost" type="button">
+              <svg class="icon"><use href="#i-chevron-left"/></svg> Atrás
+            </button>
+            <button id="btn-cloud-step2-next" class="btn btn-primary" type="button" disabled>
+              Comprobar clave <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Paso 3: automático (cuenta + aprovisionamiento) -->
+        <div id="cloud-step-3" class="cloud-step hidden">
+          <header>
+            <h2>Conectando tu base de datos</h2>
+            <p class="text-secondary" style="margin-top: 6px;">Sin preguntas técnicas: lo hacemos por ti.</p>
+          </header>
+
+          <!-- Selector de cuenta (solo si el token da acceso a varias) -->
+          <div id="cloud-account-pick" class="field hidden">
+            <label class="field__label" for="cloud-account">Tu clave da acceso a varias cuentas. Elige una:</label>
+            <select id="cloud-account" class="input"></select>
+            <div class="split__right-actions" style="margin-top: 12px;">
+              <button id="btn-cloud-step3-back" class="btn btn-ghost" type="button">
+                <svg class="icon"><use href="#i-chevron-left"/></svg> Atrás
+              </button>
+              <button id="btn-cloud-provision" class="btn btn-primary" type="button">
+                Conectar <svg class="icon"><use href="#i-arrow-right"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Progreso del aprovisionamiento -->
+          <div id="cloud-progress" class="cloud-progress hidden">
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="cloud-progress-msg" aria-live="polite">Buscando tu base de datos…</span>
+          </div>
+
+          <div id="cloud-step3-error" class="alert alert-error hidden"></div>
+
+          <!-- Acciones tras un fallo de aprovisionamiento (cualquier
+               causa): reintentar en el sitio o volver al paso del token.
+               Visibles para 1 o varias cuentas, nunca un callejón sin
+               salida (UI-UX §2.0). -->
+          <div id="cloud-step3-fail-actions" class="split__right-actions hidden">
+            <button id="btn-cloud-step3-back-fail" class="btn btn-ghost" type="button">
+              <svg class="icon"><use href="#i-chevron-left"/></svg> Atrás
+            </button>
+            <button id="btn-cloud-step3-retry" class="btn btn-primary" type="button">
+              <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </section>
+
+  <!-- ================== PANTALLA: ASISTENTE DE CATÁLOGO ================== -->
+  <!-- First-run CATALOG wizard: build the whole catalog from blank.
+       Shown after storage (local/cloud) is ready, before the app.
+       Hidden via the `hidden` class (the repo's show()/hide() convention).
+       Ids are load-bearing for renderer/catalog-wizard.js (Task 7). -->
+  <section id="catalog-wizard" class="pantalla hidden">
+    <div class="wizard-shell">
+      <header class="wizard-head">
+        <h1 class="wizard-title">Configura tu catálogo</h1>
+        <p class="wizard-subtitle">Introduce tus costes y tu catálogo. Nada viene rellenado: todo parte de tu negocio.</p>
+        <ol id="catwiz-steps" class="wizard-steps" aria-label="Pasos"></ol>
+      </header>
+
+      <!-- The current step's editor renders here (reuses the admin editor). -->
+      <div id="catwiz-body" class="wizard-body"></div>
+
+      <!-- Per-step blocking errors. -->
+      <p id="catwiz-error" class="alert alert-error hidden"></p>
+
+      <footer class="wizard-nav">
+        <button id="btn-catwiz-back" class="btn btn-secondary" type="button">Atrás</button>
+        <button id="btn-catwiz-next" class="btn btn-primary" type="button">Siguiente</button>
+        <button id="btn-catwiz-finish" class="btn btn-primary hidden" type="button">Crear catálogo</button>
+      </footer>
+    </div>
+  </section>
+
   <!-- ================== PANTALLA: ERROR DE CARGA ================== -->
   <section id="pantalla-error" class="pantalla pantalla-centro hidden">
     <div class="error-card">
       <div class="error-card__head">
         <span class="error-card__icon"><svg class="icon icon--lg"><use href="#i-warn"/></svg></span>
-        <h2>No se pudo cargar la configuración</h2>
+        <h2 id="error-titulo">No se pudo cargar la configuración</h2>
       </div>
       <p id="error-detalle" class="alert alert-error"></p>
-      <p class="text-secondary">Comprueba que el NAS está accesible y la ruta del config es correcta.</p>
+      <p id="error-hint" class="text-secondary">Comprueba que el NAS está accesible y la ruta del config es correcta.</p>
       <div class="error-card__actions">
         <button id="btn-error-reintentar" class="btn btn-primary">
           <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
@@ -210,6 +457,10 @@
         <button id="btn-error-cambiar-ruta" class="btn btn-ghost">
           <svg class="icon"><use href="#i-folder"/></svg> Cambiar ubicación…
         </button>
+        <!-- v5 cloud: shown only on NO_CLOUD_NO_CACHE (UI-UX §2.4) -->
+        <button id="btn-error-modo-local" class="btn btn-secondary hidden">
+          <svg class="icon"><use href="#i-folder"/></svg> Usar modo local…
+        </button>
       </div>
     </div>
   </section>
@@ -219,13 +470,19 @@
 
     <header class="topbar">
       <div class="topbar__brand">
-        <span class="topbar__brand-icon"><svg class="icon"><use href="#i-pack"/></svg></span>
-        <span class="topbar__brand-title">PackPrice</span>
+        <svg class="topbar__brand-wordmark" viewBox="0 0 180 64" role="img" aria-label="Quanto"><use href="#i-wordmark"/></svg>
         <span class="topbar__brand-sep" aria-hidden="true"></span>
         <span class="topbar__brand-tag">Calculadora de packs</span>
       </div>
 
       <div class="topbar__info">
+        <!-- v5: data-status indicator (UI-UX §2.1). Hidden in file
+             mode by default; app.js shows + fills it per data_source.
+             Distinguished by text + icon, not colour alone (§2.8). -->
+        <span id="data-status" class="badge badge--neutral badge--dot hidden" role="status" aria-live="polite">
+          <svg class="icon"><use href="#i-folder"/></svg>
+          <span id="data-status-label">Modo local</span>
+        </span>
         <span class="topbar__chip"><svg class="icon"><use href="#i-user"/></svg><span id="info-usuario">-</span></span>
         <span class="topbar__chip"><svg class="icon"><use href="#i-clock"/></svg>Config <span id="info-fecha-cfg">-</span></span>
         <span class="topbar__chip text-mono">v<span id="cfg-version">-</span></span>
@@ -234,6 +491,16 @@
       <div class="topbar__actions">
         <button id="btn-historial" class="btn btn-ghost" title="Ver presupuestos guardados">
           <svg class="icon"><use href="#i-clipboard"/></svg> Historial
+        </button>
+        <!-- v5: estadísticas (UI-UX §2.7). Visible siempre; en modo archivo
+             la pantalla informa de que requiere modo nube. -->
+        <button id="btn-estadisticas" class="btn btn-ghost" title="Ver estadísticas del taller">
+          <svg class="icon"><use href="#i-trend"/></svg> Estadísticas
+        </button>
+        <!-- v5: cloud refresh (UI-UX §2.1). Hidden in file mode; the
+             legacy "Recargar" button below remains the file-mode reload. -->
+        <button id="refresh-catalog" class="btn btn-ghost hidden" title="Comprobar si hay datos nuevos en la nube">
+          <svg class="icon"><use href="#i-refresh"/></svg> <span id="refresh-catalog-label">Actualizar</span>
         </button>
         <button id="btn-recargar" class="btn btn-ghost" title="Vuelve a leer config.js del NAS">
           <svg class="icon"><use href="#i-refresh"/></svg> Recargar
@@ -246,6 +513,46 @@
         </button>
       </div>
     </header>
+
+    <!-- v5: read-only offline banner (UI-UX §2.2). Persistent under the
+         topbar when the catalog came from the local cache. role="status"
+         so screen readers announce it; copy filled in by app.js. -->
+    <div id="offline-banner" class="offline-banner hidden" role="status">
+      <svg class="icon"><use href="#i-warn"/></svg>
+      <span class="offline-banner__text">
+        <strong>Sin conexión.</strong>
+        Estás viendo precios del <strong id="offline-banner-date">—</strong>.
+        Puedes presupuestar, pero no editar el catálogo.
+      </span>
+      <button id="btn-offline-retry" class="btn btn-secondary btn-sm" type="button">
+        <svg class="icon"><use href="#i-refresh"/></svg> Reintentar
+      </button>
+    </div>
+
+    <!-- v5: recordatorio de presupuestos al arrancar (UI-UX §2.7). No
+         bloquea: es un aviso discreto que lleva al historial y se
+         descarta por el día. Texto rellenado por app.js. -->
+    <div id="quote-reminder" class="reminder-banner hidden" role="status">
+      <svg class="icon"><use href="#i-clock"/></svg>
+      <span class="reminder-banner__text" id="quote-reminder-text">—</span>
+      <button id="btn-reminder-review" class="btn btn-secondary btn-sm" type="button">Revisar</button>
+      <button id="btn-reminder-dismiss" class="reminder-banner__close" type="button" aria-label="Descartar">
+        <svg class="icon"><use href="#i-x"/></svg>
+      </button>
+    </div>
+
+    <!-- Aviso no bloqueante de actualización (PRD R15). La descarga es
+         automática; el banner muestra progreso y, al estar lista, el botón
+         «Reiniciar e instalar ahora». Texto/estado rellenado por app.js
+         (applyUpdateState); se descarta al cerrarlo. -->
+    <div id="update-banner" class="reminder-banner hidden" role="status">
+      <svg class="icon"><use href="#i-refresh"/></svg>
+      <span class="reminder-banner__text" id="update-banner-text">—</span>
+      <button id="btn-update-restart" class="btn btn-secondary btn-sm hidden" type="button">Reiniciar e instalar ahora</button>
+      <button id="btn-update-dismiss" class="reminder-banner__close" type="button" aria-label="Descartar">
+        <svg class="icon"><use href="#i-x"/></svg>
+      </button>
+    </div>
 
     <main class="app-body">
 
@@ -305,51 +612,38 @@
 
               <div class="tallas-row">
                 <div class="field">
+                  <label class="field__label" for="cant_3xl">
+                    3XL <span class="field__hint">(colchón interno · no se factura)</span>
+                  </label>
+                  <input type="number" id="cant_3xl" min="0" value="0">
+                </div>
+                <div class="field">
                   <label class="field__label" for="cant_4xl">
-                    4XL <span class="field__hint">(+<span data-cfg="recargo_4xl_eur">3</span> €/prenda)</span>
+                    4XL <span class="field__hint">(+<span data-cfg="surcharge_4xl_eur">3</span> €/prenda)</span>
                   </label>
                   <input type="number" id="cant_4xl" min="0" value="0">
                 </div>
                 <div class="field">
                   <label class="field__label" for="cant_5xl">
-                    5XL+ <span class="field__hint">(+<span data-cfg="recargo_5xl_eur">5</span> €/prenda)</span>
+                    5XL+ <span class="field__hint">(+<span data-cfg="surcharge_5xl_eur">5</span> €/prenda)</span>
                   </label>
                   <input type="number" id="cant_5xl" min="0" value="0">
                 </div>
               </div>
             </article>
 
-            <article class="section-card">
+            <article class="section-card" id="addons-card">
               <div class="section-card__head">
                 <div>
                   <h2 class="h-card">Extras opcionales</h2>
                   <p class="text-secondary" style="margin-top: 4px; font-size: 13px;">
-                    Personalización extra. Precios sin IVA: se suman al subtotal y se aplica el IVA al total.
+                    Personalización extra. Precios sin IVA salvo indicación: se suman al subtotal y se aplica el IVA al total.
                   </p>
                 </div>
                 <span class="badge badge--neutral">IVA no incluido</span>
               </div>
 
-              <div class="form-grid-3">
-                <div class="field">
-                  <label class="field__label" for="cant_nombres">
-                    Nombre <span class="field__hint">(+<span data-cfg="extra_nombre_eur">1.5</span> €/ud)</span>
-                  </label>
-                  <input type="number" id="cant_nombres" min="0" value="0">
-                </div>
-                <div class="field">
-                  <label class="field__label" for="cant_mangas_cortas">
-                    Mangas cortas <span class="field__hint">(+<span data-cfg="extra_manga_corta_eur">1.5</span> €/manga)</span>
-                  </label>
-                  <input type="number" id="cant_mangas_cortas" min="0" value="0">
-                </div>
-                <div class="field">
-                  <label class="field__label" for="cant_mangas_largas">
-                    Manga larga <span class="field__hint">(+<span data-cfg="extra_manga_larga_eur">3</span> €/manga)</span>
-                  </label>
-                  <input type="number" id="cant_mangas_largas" min="0" value="0">
-                </div>
-              </div>
+              <div class="form-grid-3" id="addons-container"></div>
             </article>
 
             <div id="error-msg" class="alert alert-error hidden"></div>
@@ -407,7 +701,76 @@
           </div>
         </div>
 
+        <!-- Datos del cliente (obligatorios, validación en línea · UI-UX §2.7).
+             Viajan al historial, a D1 y al PDF junto con la validez de 15 días. -->
+        <article class="section-card" id="cliente-card" style="margin-top: 16px;">
+          <div class="section-card__head">
+            <div>
+              <h2 class="h-card">Datos del cliente</h2>
+              <p class="text-secondary" style="margin-top: 4px; font-size: 13px;">
+                Obligatorios para guardar o exportar el presupuesto. <span id="cliente-validez" class="text-muted"></span>
+              </p>
+            </div>
+            <span class="badge badge--neutral"><svg class="icon"><use href="#i-user"/></svg> Cliente</span>
+          </div>
+          <div class="form-grid-2">
+            <div class="field">
+              <label class="field__label" for="cliente-nombre">Nombre del cliente</label>
+              <input type="text" id="cliente-nombre" class="input" placeholder="Ej: Peña El Barril" autocomplete="off"
+                     aria-describedby="cliente-nombre-error">
+              <span id="cliente-nombre-error" class="field__error hidden" role="alert">Indica el nombre del cliente.</span>
+            </div>
+            <div class="field">
+              <label class="field__label" for="cliente-telefono">Teléfono del cliente</label>
+              <input type="tel" id="cliente-telefono" class="input" placeholder="Ej: 600 123 456" autocomplete="off"
+                     aria-describedby="cliente-telefono-error">
+              <span id="cliente-telefono-error" class="field__error hidden" role="alert">Indica el teléfono del cliente.</span>
+            </div>
+          </div>
+        </article>
+
         <div id="resultado-content" style="margin-top: 16px;"></div>
+      </section>
+
+      <!-- Paso (pantalla): Estadísticas (UI-UX §2.7). Solo modo nube; en
+           modo archivo muestra el aviso de que requiere la nube. -->
+      <section id="seccion-estadisticas" class="hidden">
+        <div class="back-row">
+          <button id="btn-stats-volver" class="btn btn-ghost" type="button">
+            <svg class="icon"><use href="#i-chevron-left"/></svg> Volver a la calculadora
+          </button>
+          <span class="label-eyebrow">ESTADÍSTICAS</span>
+        </div>
+
+        <div class="stats-head" style="margin-top: 16px;">
+          <div>
+            <h1>Estadísticas del taller</h1>
+            <p class="text-secondary">Datos de todos los equipos. ¿Qué se usa y qué se vende?</p>
+          </div>
+          <div class="stats-period" id="stats-period" role="group" aria-label="Periodo">
+            <button class="stats-period__btn is-active" type="button" data-period="season">Temporada</button>
+            <button class="stats-period__btn" type="button" data-period="30d">30 días</button>
+            <button class="stats-period__btn" type="button" data-period="year">Año</button>
+            <button class="stats-period__btn" type="button" data-period="range">Rango…</button>
+          </div>
+        </div>
+
+        <!-- Selector de rango (visible solo con "Rango…") -->
+        <div id="stats-range" class="stats-range hidden">
+          <div class="field">
+            <label class="field__label" for="stats-from">Desde</label>
+            <input type="date" id="stats-from" class="input">
+          </div>
+          <div class="field">
+            <label class="field__label" for="stats-to">Hasta</label>
+            <input type="date" id="stats-to" class="input">
+          </div>
+          <button id="btn-stats-apply" class="btn btn-primary" type="button">
+            <svg class="icon"><use href="#i-trend"/></svg> Aplicar
+          </button>
+        </div>
+
+        <div id="stats-body" style="margin-top: 16px;"></div>
       </section>
 
     </main>
@@ -429,44 +792,41 @@
         </button>
       </header>
 
-      <!-- Login -->
-      <div id="admin-login" class="admin-login">
-        <p class="text-secondary">Introduce la clave de administrador para continuar:</p>
-        <div class="field__row">
-          <input type="password" id="admin-clave" class="input" placeholder="Clave">
-          <button id="btn-admin-login" class="btn btn-primary" type="button">
-            <svg class="icon"><use href="#i-key"/></svg> Entrar
-          </button>
-        </div>
-        <div id="admin-login-error" class="alert alert-error hidden">
-          <svg class="icon"><use href="#i-warn"/></svg>
-          <span>Clave incorrecta</span>
-        </div>
-      </div>
-
       <!-- Editor -->
       <div id="admin-editor" class="hidden" style="display: contents;">
+        <!-- v5 cloud (UI-UX §2.5): the password gate is gone; the author
+             that will be recorded is shown instead. Hidden in file mode. -->
+        <div id="admin-editor-author" class="modal__author hidden">
+          <svg class="icon"><use href="#i-user"/></svg>
+          <span>Editando como <strong id="admin-editor-author-name">—</strong></span>
+        </div>
         <div class="modal__warn">
           <svg class="icon"><use href="#i-warn"/></svg>
-          <span>Los demás usuarios verán los cambios al pulsar «Recargar» en su PackPrice. Se hace backup automático antes de cada escritura.</span>
+          <span>Los demás usuarios verán los cambios al pulsar «Recargar» en su Quanto. Se hace backup automático antes de cada escritura.</span>
         </div>
 
         <div class="modal__body">
           <nav class="admin-nav" id="admin-nav">
-            <button class="admin-nav__item is-active" data-tab="parametros" type="button">
+            <button class="admin-nav__item is-active" data-tab="parameters" type="button">
               <svg class="icon"><use href="#i-sliders"/></svg> Parámetros
             </button>
-            <button class="admin-nav__item" data-tab="modelos" type="button">
-              <svg class="icon"><use href="#i-shirt"/></svg> Modelos Roly
+            <button class="admin-nav__item" data-tab="suppliers" type="button">
+              <svg class="icon"><use href="#i-folder"/></svg> Proveedores
             </button>
-            <button class="admin-nav__item" data-tab="tramos" type="button">
+            <button class="admin-nav__item" data-tab="products" type="button">
+              <svg class="icon"><use href="#i-shirt"/></svg> Productos
+            </button>
+            <button class="admin-nav__item" data-tab="addons" type="button">
+              <svg class="icon"><use href="#i-layers"/></svg> Complementos
+            </button>
+            <button class="admin-nav__item" data-tab="tiers" type="button">
               <svg class="icon"><use href="#i-trend"/></svg> Tramos por volumen
             </button>
             <button class="admin-nav__item" data-tab="packs" type="button">
-              <svg class="icon"><use href="#i-tag"/></svg> Packs (PVP)
+              <svg class="icon"><use href="#i-tag"/></svg> Packs
             </button>
-            <button class="admin-nav__item" data-tab="auditoria" type="button">
-              <svg class="icon"><use href="#i-clock"/></svg> Auditoría
+            <button class="admin-nav__item" data-tab="audit" type="button">
+              <svg class="icon"><use href="#i-clock"/></svg> Historial
             </button>
           </nav>
 
@@ -521,6 +881,70 @@
           <button id="btn-diff-cancelar" class="btn btn-ghost" type="button">Cancelar</button>
           <button id="btn-diff-confirmar" class="btn btn-primary" type="button">
             <svg class="icon"><use href="#i-save"/></svg> Confirmar y guardar
+          </button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ================== MODAL: GUARDADO CORRECTO ================== -->
+  <!-- In-app success confirmation after an admin save. Replaces the
+       native «Guardado» dialog; single «Aceptar» exit. -->
+  <div id="saved-overlay" class="overlay hidden">
+    <div class="modal modal--sm" role="dialog" aria-labelledby="saved-title">
+      <header class="modal__head">
+        <div class="modal__head-title">
+          <span class="modal__head-icon modal__head-icon--ok"><svg class="icon icon--lg"><use href="#i-check"/></svg></span>
+          <div class="modal__head-text">
+            <h2 id="saved-title">Guardado</h2>
+            <p id="saved-subtitle">Cambios guardados correctamente</p>
+          </div>
+        </div>
+        <button id="btn-cerrar-saved" class="modal__close" type="button" aria-label="Cerrar">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div id="saved-body"></div>
+      </div>
+      <footer class="modal__foot">
+        <span class="modal__foot-left"></span>
+        <div class="modal__foot-right">
+          <button id="btn-saved-aceptar" class="btn btn-primary" type="button">Aceptar</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ================== MODAL: CONFLICTO POR ENTIDAD (CLOUD) ================== -->
+  <!-- v5 (UI-UX §2.3): per-entity save conflict. Same modal style as the
+       admin diff; shows the server value vs yours and three exits. -->
+  <div id="conflict-overlay" class="overlay hidden">
+    <div class="modal modal--sm" role="dialog" aria-labelledby="conflict-title">
+      <header class="modal__head">
+        <div class="modal__head-title">
+          <span class="modal__head-icon"><svg class="icon icon--lg"><use href="#i-warn"/></svg></span>
+          <div class="modal__head-text">
+            <h2 id="conflict-title">Conflicto de edición</h2>
+            <p id="conflict-subtitle">Otro equipo modificó esta entidad mientras editabas.</p>
+          </div>
+        </div>
+        <button id="btn-cerrar-conflict" class="modal__close" type="button" aria-label="Cerrar">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div id="conflict-body"></div>
+      </div>
+      <footer class="modal__foot">
+        <span class="modal__foot-left" id="conflict-progress"></span>
+        <div class="modal__foot-right">
+          <button id="btn-conflict-cancelar" class="btn btn-ghost" type="button">Cancelar</button>
+          <button id="btn-conflict-load-server" class="btn btn-secondary" type="button">
+            <svg class="icon"><use href="#i-refresh"/></svg> Cargar versión del servidor
+          </button>
+          <button id="btn-conflict-overwrite" class="btn btn-primary" type="button">
+            <svg class="icon"><use href="#i-save"/></svg> Sobrescribir con la mía
           </button>
         </div>
       </footer>
@@ -586,7 +1010,7 @@
 
   <!-- ================== MODAL: AJUSTES LOCALES ================== -->
   <div id="ajustes-overlay" class="overlay hidden">
-    <div class="modal modal--sm" role="dialog" aria-labelledby="ajustes-title">
+    <div class="modal" role="dialog" aria-labelledby="ajustes-title">
       <header class="modal__head">
         <div class="modal__head-title">
           <span class="modal__head-icon"><svg class="icon icon--lg"><use href="#i-settings"/></svg></span>
@@ -604,7 +1028,7 @@
         <div class="stack">
           <div class="alert alert-info">
             <svg class="icon"><use href="#i-info"/></svg>
-            <span>Guardado en <code class="text-mono">%APPDATA%\packprice\settings.json</code>. No se sincroniza con el NAS.</span>
+            <span>Guardado en <code class="text-mono">%APPDATA%\Quanto\settings.json</code>. No se sincroniza con el NAS.</span>
           </div>
 
           <div class="field">
@@ -614,7 +1038,7 @@
           </div>
 
           <div class="field">
-            <label class="field__label" for="aj-ruta">Archivo de configuración (config.js)</label>
+            <label class="field__label" for="aj-ruta">Carpeta de datos</label>
             <div class="field__row">
               <input type="text" id="aj-ruta" class="input input--mono">
               <button id="btn-aj-explorar" class="btn btn-secondary" type="button">
@@ -650,6 +1074,137 @@
               <input type="checkbox" id="aj-mostrar-iva" checked>
               <span class="toggle__slider"></span>
             </label>
+          </div>
+
+          <hr class="divider">
+
+          <!-- PDF template gallery + preview + brand color (Plan 6 · UI-UX §2.5).
+               Shared data (company.pdf_template / company.brand_color), so all
+               PCs print alike. The preview is a SANDBOXED iframe (no scripts);
+               its HTML comes from main (pdf:preview), never injected here. -->
+          <div id="aj-pdf-section">
+            <div class="pdf-tpl__head">
+              <span class="modal__head-icon"><svg class="icon"><use href="#i-clipboard"/></svg></span>
+              <div>
+                <h3 class="h-card" style="margin-bottom: 2px;">Plantilla de presupuesto</h3>
+                <p class="text-secondary" style="font-size: 12px; margin: 0;">El diseño del PDF para todos los equipos. Elige una plantilla y previsualízala con un presupuesto de ejemplo.</p>
+              </div>
+            </div>
+
+            <div class="pdf-tpl">
+              <div class="pdf-tpl__gallery" id="aj-tpl-gallery" role="radiogroup" aria-label="Plantilla de presupuesto">
+                <!-- cards rendered by app.js (renderPdfTemplateGallery) -->
+              </div>
+
+              <div class="pdf-tpl__side">
+                <div class="field">
+                  <label class="field__label" for="aj-brand-color">Color de marca</label>
+                  <div class="field__row">
+                    <input type="color" id="aj-brand-color" class="color-input" value="#3D7BD9" aria-label="Color de marca">
+                    <span class="field__hint" style="margin: 0;">Las plantillas con color (Moderna, Corporativa) usan este tono; el oscuro y el suave se derivan solos.</span>
+                  </div>
+                </div>
+
+                <div class="pdf-tpl__preview">
+                  <div class="pdf-tpl__preview-label">Vista previa</div>
+                  <!-- sandbox WITHOUT allow-scripts: srcdoc renders isolated,
+                       same-origin about:srcdoc under default-src 'self'. -->
+                  <iframe id="aj-tpl-preview" class="pdf-tpl__frame" sandbox title="Vista previa del presupuesto"></iframe>
+                </div>
+              </div>
+            </div>
+
+            <!-- Custom templates are a cloud feature. The add button shows
+                 only in cloud mode; file mode shows the note instead. -->
+            <div class="pdf-tpl__custom">
+              <button id="btn-aj-tpl-add" class="btn btn-secondary hidden" type="button">
+                <svg class="icon"><use href="#i-plus"/></svg> Añadir plantilla personalizada…
+              </button>
+              <p id="aj-tpl-custom-note" class="field__hint hidden">Las plantillas personalizadas necesitan el modo nube. En modo local solo están disponibles las 6 integradas.</p>
+            </div>
+
+            <!-- Inline importer for a custom HTML+CSS template (cloud mode).
+                 Hidden until «Añadir…» is clicked. -->
+            <div id="aj-tpl-add-form" class="pdf-tpl__addform hidden">
+              <div class="field">
+                <label class="field__label" for="aj-tpl-name">Nombre de la plantilla</label>
+                <input type="text" id="aj-tpl-name" class="input" placeholder="Mi plantilla">
+              </div>
+              <div class="field">
+                <label class="field__label" for="aj-tpl-html">HTML + CSS de la plantilla</label>
+                <textarea id="aj-tpl-html" class="input input--mono" rows="6" placeholder="<!doctype html>… (usa &#123;&#123;company.name&#125;&#125;, &#123;&#123;totals.total&#125;&#125;, etc.)"></textarea>
+                <span class="field__hint">Se valida al guardar: se rechazan scripts, iframes y recursos externos. El CSS va en una etiqueta &lt;style&gt; dentro del HTML.</span>
+              </div>
+              <div id="aj-tpl-add-error" class="field__error hidden"></div>
+              <div class="field__row" style="justify-content: flex-end;">
+                <button id="btn-aj-tpl-add-cancel" class="btn btn-ghost" type="button">Cancelar</button>
+                <button id="btn-aj-tpl-add-save" class="btn btn-primary" type="button">
+                  <svg class="icon"><use href="#i-save"/></svg> Guardar plantilla
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Updates (UI-UX §2.6 · PRD R15). The check + download run in
+               main via electron-updater (CSP intact); progress and the
+               terminal result are painted here by applyUpdateState. The
+               update downloads automatically and installs on restart. -->
+          <div id="aj-updates-section">
+            <div>
+              <h3 class="h-card" style="margin-bottom: 6px;">Actualizaciones</h3>
+              <p class="text-secondary" style="font-size: 12px;">Comprueba si hay una versión más reciente. Se descarga sola y te avisa para reiniciar e instalar.</p>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row__text">
+                <strong>Buscar actualizaciones al iniciar</strong>
+                <span>Al abrir la app, comprueba en segundo plano si hay una versión nueva.</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="aj-check-updates" checked>
+                <span class="toggle__slider"></span>
+              </label>
+            </div>
+
+            <div class="field__row" style="margin-top: 12px; align-items: center;">
+              <button id="btn-aj-buscar-update" class="btn btn-secondary" type="button">
+                <svg class="icon"><use href="#i-refresh"/></svg> Buscar ahora
+              </button>
+              <span id="aj-update-result" class="field__hint" style="margin: 0;"></span>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Privacy (Plan 7B · UI-UX §2.6 · PRD R19/R17). The error-report
+               toggle is opt-OUT (default on); the helper text states EXACTLY
+               what is sent. «Exportar diagnóstico» builds a support bundle in
+               main (no token, no business data). -->
+          <div id="aj-privacy-section">
+            <div>
+              <h3 class="h-card" style="margin-bottom: 6px;">Privacidad</h3>
+              <p class="text-secondary" style="font-size: 12px;">Quanto solo se conecta a internet para dos cosas: comprobar si hay una versión nueva (GitHub) y, si lo permites, enviar informes de error. Nunca se envían tus precios, clientes ni catálogo.</p>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-row__text">
+                <strong>Enviar informes de error</strong>
+                <span>Cuando algo falla, se envía solo el error técnico, la versión de la app y el sistema operativo — <strong>nunca</strong> precios, clientes ni catálogo. Así podemos arreglarlo antes de que te afecte. Más detalle en el manual de usuario.</span>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="aj-error-reports" checked>
+                <span class="toggle__slider"></span>
+              </label>
+            </div>
+
+            <div class="field__row" style="margin-top: 12px;">
+              <button id="btn-aj-diagnostico" class="btn btn-secondary" type="button">
+                <svg class="icon"><use href="#i-share"/></svg> Exportar diagnóstico
+              </button>
+              <span class="field__hint" style="margin: 0;">Genera un archivo (sin token ni datos de negocio) para enviar a soporte.</span>
+            </div>
           </div>
         </div>
       </div>

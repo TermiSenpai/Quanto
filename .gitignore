@@ -41,3 +41,6 @@ coverage/
 CONFIG TEST/
 config.js
 !config.default.js
+
+# Carpeta local de pruebas (catalogo + utilidades locales, no se versiona)
+LocalData/

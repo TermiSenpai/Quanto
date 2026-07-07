@@ -1,4 +1,4 @@
-# PackPrice · Plan completo (calculadora de packs)
+# Quanto · Plan completo (calculadora de packs)
 
 > Documento de referencia con todas las decisiones, parámetros, fórmulas, riesgos y arquitectura del proyecto. Generado al cierre de la sesión de diseño y entrega de V1 web + V2 Electron.
 
@@ -6,7 +6,7 @@
 
 ## 1. Contexto y objetivo
 
-**Cliente / proyecto**: empresa de personalización textil DTF en Guadalajara (España), más de 25 años en el sector. La calculadora interna se llama **PackPrice**.
+**Cliente / proyecto**: empresa de personalización textil DTF en Guadalajara (España), más de 25 años en el sector. La calculadora interna se llama **Quanto**.
 
 **Objetivo del proyecto**: dotar al taller de una calculadora interna para presupuestar rápidamente "packs de peña" (encargos típicos de grupos de amigos en verano) con varias modalidades, manteniendo márgenes sanos y permitiendo comunicar precios públicos consistentes con descuento por volumen.
 
@@ -33,22 +33,32 @@
 | Merma materiales            | 10%                        | A revisar con datos reales            |
 | Indirectos                  | 0,30 €/prenda              | Luz, mantenimiento, packaging         |
 | Envío Roly                  | 5,90 €/bulto (~40 prendas) | Se prorratea entre prendas del pedido |
-| Buffer 3XL                  | 0,40 €/pack peña           | Amortiza recargo 3XL en mix típico    |
+| Coste 3XL                   | por producto (`extra_cost_3xl`) | Coste interno por prenda 3XL, NO se factura (ver 2.4) |
 | Recargo 4XL                 | +3 €/prenda                | Directo al cliente                    |
 | Recargo 5XL+                | +5 €/prenda                | Directo al cliente                    |
 | IVA                         | 21%                        | Tratado por separado del coste        |
+| Margen objetivo por defecto | 35% (`default_target_margin`) | Para el PVP recomendado (ver 2.5)  |
+| Redondeo psicológico        | a `x,95` (`price_rounding_ending`) | El PVP recomendado redondea hacia arriba |
+
+> **Nota (esquema v4)**: a partir de v4 todos estos parámetros, los productos, los proveedores, los packs y los complementos son **editables desde el modo admin**. El antiguo "Buffer 3XL" fijo de 0,40 €/pack desaparece; el coste 3XL pasa a ser un coste real por prenda configurable en cada producto (`extra_cost_3xl`). Ver §2.4 y §15 (historial v4).
+
+> **Nota (primer arranque, sin semilla)**: ya **no existe ningún catálogo por defecto**. En una instalación nueva (modo archivo sin `config.js` o nube con D1 recién creada y vacía) un **asistente guiado** recoge todo el catálogo desde cero — costes, tramos, proveedores, productos, packs, complementos y empresa, con cada campo en blanco. **Todos los valores de esta tabla los teclea el usuario en el asistente** (incluido el DTF por cara: 0,30/0,60 ya no se siembra). El asistente solo persiste cuando el config cumple los mínimos del esquema. Los números de esta tabla son los del cliente nº 1 a modo de referencia, no una semilla. Ver §11 (V5) y el diseño en `docs/superpowers/specs/2026-06-16-first-run-catalog-wizard-design.md`.
 
 **Sobre el IVA**: el IVA soportado en compras (Roly, DTF, envío) NO se incluye como coste al calcular el margen. Se deduce trimestralmente en el Modelo 303 contra el IVA repercutido. Lo que sí afecta es la tesorería entre que pagas Roly con IVA y cobras al cliente con IVA repercutido.
 
-### 2.2. Modelos Roly utilizados
+### 2.2. Productos y proveedores
 
-| Modelo  | Referencia   | Precio   | Uso                  |
-| ------- | ------------ | -------- | -------------------- |
-| BEAGLE  | CA65540558   | 1,7325 € | Camiseta             |
-| CLASICA | SU10700558   | 6,2475 € | Sudadera sin capucha |
-| URBAN   | SU1067050258 | 7,8750 € | Sudadera con capucha |
+En v4 cada **producto** (garment) tiene una `category`, un coste 3XL propio (`extra_cost_3xl`), un margen objetivo, su propia tabla de PVP (caras × tramo) y una lista de **proveedores** (`suppliers`), de los cuales exactamente uno es el predeterminado (`is_default`). El precio del proveedor predeterminado es el que alimenta el coste. Los proveedores se registran aparte en la sección `suppliers` (Roly y, en el futuro, otros).
 
-Precios sin recargo por talla 2XL. Tallas 3XL+ tienen recargo en Roly que se amortiza con el buffer y los recargos directos al cliente.
+Productos de referencia del cliente nº 1 (proveedor predeterminado: Roly) — son un ejemplo del modelo, no una semilla; en una instalación nueva los teclea el usuario en el asistente:
+
+| Producto | Categoría | Ref. Roly    | Precio   | Coste 3XL | Uso                  |
+| -------- | --------- | ------------ | -------- | --------- | -------------------- |
+| BEAGLE   | tshirt    | CA65540558   | 1,7325 € | 0,40 €    | Camiseta             |
+| CLASICA  | hoodie    | SU10700558   | 6,2475 € | 0,60 €    | Sudadera sin capucha |
+| URBAN    | hoodie    | SU1067050258 | 7,8750 € | 0,60 €    | Sudadera con capucha |
+
+Precios sin recargo por talla 2XL. El recargo de Roly por tallas 3XL+ se cubre con el coste interno `extra_cost_3xl` por producto (3XL, no facturado) y con los recargos directos al cliente (4XL/5XL+). Ver §2.4.
 
 ### 2.3. Tramos de volumen
 
@@ -61,11 +71,35 @@ Precios sin recargo por talla 2XL. Tallas 3XL+ tienen recargo en Roly que se amo
 
 El "uds" es packs en pack peña, prendas individuales en los demás packs, o suma de sudaderas en el pack mixto.
 
+### 2.4. Tratamiento de tallas grandes (3XL / 4XL / 5XL+)
+
+- **3XL — coste interno, NO se factura.** En v4 no hay buffer fijo por pack. Cada producto declara su `extra_cost_3xl` (coste real del recargo de Roly en esa talla). Para un pedido, el sistema añade al coste interno `qty_3xl × MAX(extra_cost_3xl de los productos del pedido)`. El **MAX** es deliberadamente conservador: si el pedido mezcla camisetas (0,40 €) y sudaderas (0,60 €), se imputa 0,60 € a cada unidad 3XL, para no perder dinero nunca con el mix de tallas. El cliente paga el mismo PVP.
+- **4XL / 5XL+ — recargo directo al cliente.** Siguen siendo recargos al cliente (+3 € / +5 € por prenda), sumados al total IVA incluido.
+- Las cantidades `qty_3xl + qty_4xl + qty_5xl` no pueden superar el número de prendas del pedido.
+
+### 2.5. PVP recomendado
+
+El admin puede pedir un **PVP recomendado** para cualquier celda de precio (botón "Aplicar PVP recomendado"):
+
+```
+pvp_recomendado = redondear_arriba( coste / (1 − margen_objetivo) )  hasta el siguiente x,95
+```
+
+- `margen_objetivo` por defecto es `default_target_margin` (35%); cada producto/pack puede llevar el suyo.
+- El redondeo sube al siguiente valor terminado en `price_rounding_ending` (0,95 → 15,38 → 15,95).
+- El sistema informa del **margen real** que queda tras el redondeo. El PVP sigue siendo editable a mano; la sugerencia no se impone.
+
+### 2.6. Complementos (addons)
+
+Los extras opcionales (nombre, manga corta, manga larga, …) se configuran en la sección `addons`. Cada uno tiene `label`, `price` (con o sin IVA según `vat_included`), `cost` (coste interno real, para que el margen sea honesto) y `applies_to` (categorías de producto a las que aplica, o `*` para todas). Sustituyen a los antiguos parámetros fijos `extra_*_eur`.
+
 ---
 
 ## 3. Packs comerciales
 
-Cinco packs configurados. Mínimo 10 unidades en todos. Pedidos por debajo de 10 quedan **fuera de la app**, fuera de la oferta peña, y se cotizan como "mini-grupo" manualmente con precios más altos para compensar el coste fijo de gestión.
+Packs de referencia del cliente nº 1 (no una semilla por defecto: en una instalación nueva los crea el usuario en el asistente de primer arranque). Mínimo 10 unidades en todos. Pedidos por debajo de 10 quedan **fuera de la app**, fuera de la oferta peña, y se cotizan como "mini-grupo" manualmente con precios más altos para compensar el coste fijo de gestión.
+
+> **Modelo de packs en v4**: cada pack declara un `pricing_mode`. Los packs **`bundle`** (como el Pack Peña) se venden como unidad con su propia tabla `bundle_prices` indexada por combinación de opciones × tramo; el input es el número de packs. Los packs **`components`** (camisetas, sudaderas, mixto, personalizado) facturan cada componente al PVP de su producto; el input es la cantidad por componente y el tramo se calcula sobre la suma. Las opciones (caras, capucha, …) se declaran en la config; el pack personalizado usa `free_components` para añadir líneas libres. Un solo motor genérico (`calculatePack`) cubre todos los casos; ya no hay calculadoras codificadas por tipo de pack. Todos los packs son **editables desde el modo admin** en v4.
 
 ### 3.1. Pack Peña (camiseta + sudadera)
 
@@ -152,25 +186,33 @@ Donde:
 - `mano_obra` = `(minutos × (1 − reducción_tramo) / 60) × 15 €`
 - `indirectos` = 0,30 € fijos
 
-### 4.3. Coste por pack (pack peña)
+### 4.3. Coste total del pedido
 
 ```
-coste_pack_pena = coste_camiseta + coste_sudadera + buffer_3xl
-buffer_3xl = 0,40 €/pack
+coste_prendas = Σ (cantidad_línea × coste_prenda)        # por cada componente
+coste_3xl     = qty_3xl × MAX(extra_cost_3xl del pedido)  # ver 2.4
+coste_addons  = Σ (cantidad_addon × addon.cost)
+coste_total   = coste_prendas + coste_3xl + coste_addons
 ```
+
+Ya no existe un buffer 3XL fijo por pack: el coste 3XL se escala por la cantidad de unidades 3XL reales (§2.4).
 
 ### 4.4. Total final al cliente
 
 ```
-subtotal       = cantidad × pvp_unitario
-recargos       = (4xl × 3 €) + (5xl+ × 5 €)
-total_iva_inc  = subtotal + recargos
-base_imponible = total_iva_inc / 1,21
-iva_repercutido = total_iva_inc − base_imponible
+subtotal        = ingreso de las líneas + complementos (IVA incl.)
+                  · pack 'bundle'     → nº_packs × pvp_del_pack(combo, tramo)
+                  · pack 'components' → Σ (cantidad × pvp_producto(caras, tramo))
+recargos        = (4xl × 3 €) + (5xl+ × 5 €)
+total_iva_inc   = subtotal + recargos + addons_iva_inc
+base_venta      = total_iva_inc / 1,21
+iva_repercutido = total_iva_inc − base_venta
 
-margen € = base_imponible − coste_total
-margen % = margen € / total_iva_inc
+margen € = base_venta − coste_total
+margen % = margen € / base_venta        # sobre la base neta, NO sobre el total con IVA
 ```
+
+> **Corrección v4**: el `margen %` se calcula sobre la **base de venta** (sin IVA), no sobre el total con IVA repercutido. Esto da la lectura correcta del margen comercial.
 
 ---
 
@@ -223,7 +265,7 @@ margen % = margen € / total_iva_inc
 - **Electron** (proceso principal en Node.js + renderer en Chromium)
 - **HTML + CSS + JavaScript vanilla** en el renderer (sin React/Vue)
 - **Node.js fs** para acceso al filesystem
-- **vm.runInNewContext** para parsear el `config.js` de forma segura
+- **Escáner del bloque JSON + `JSON.parse`** para leer el `config.js` de forma segura (sin `eval`/`Function`/`vm`/`require`; ver `lib/config-parser.js`)
 - **crypto SHA-256** para hash de detección de conflictos
 - **electron-builder** para empaquetar el `.exe` portable
 - **config.js** (JavaScript plano) como almacén de datos en NAS, no SQLite
@@ -248,7 +290,7 @@ packs app/
 En cada PC, además, Electron crea automáticamente:
 
 ```
-%APPDATA%\packprice\
+%APPDATA%\Quanto\
 └── settings.json             ← ruta del config + nombre del usuario
 ```
 
@@ -266,9 +308,10 @@ En el NAS, la primera vez que alguien guarda desde modo admin se crea:
 
 - `contextIsolation: true` y `nodeIntegration: false`: el renderer no tiene acceso directo a Node ni al filesystem
 - `preload.js` expone solo APIs específicas vía `contextBridge`
-- Toda operación de filesystem va por IPC al proceso principal
-- Lectura de `config.js` se hace en sandbox `vm.runInNewContext` con timeout 1s
-- CSP restrictivo en HTML
+- Toda operación de filesystem va por IPC al proceso principal, con lista blanca de rutas (`lib/path-guard.js`)
+- Lectura de `config.js`: se escanea su bloque JSON y se hace `JSON.parse`. **Nunca** `eval`/`Function`/`vm`/`require` sobre el archivo externo (sería una puerta a RCE)
+- Todo config leído pasa por `validateConfigSchema` (v4) antes de llegar al renderer; escrituras de config atómicas (`.tmp` + rename); límite de intentos en la verificación de la clave admin
+- CSP restrictivo en HTML (`default-src 'self'`, `script-src 'self'`). Se mantiene `style-src 'unsafe-inline'` de forma deliberada porque la UI usa estilos inline; es un compromiso aceptado para una app de LAN sin red
 - La clave de admin (texto plano en config) es **protección anti-clic-accidental, no seguridad real**
 
 ---
@@ -406,12 +449,12 @@ App de escritorio empaquetada como `.exe` portable. Lee y escribe directamente e
 En la carpeta del proyecto descomprimido:
 
 ```bash
-npm install              # instalar dependencias (solo primera vez)
-npm run dev              # ejecutar en modo desarrollo (sin construir .exe)
-npm run build:win        # generar .exe portable en dist/
+pnpm install              # instalar dependencias (solo primera vez)
+pnpm dev              # ejecutar en modo desarrollo (sin construir .exe)
+pnpm build:win        # generar .exe portable en dist/
 ```
 
-El `.exe` resultante: `dist/PackPrice-2.0.0-portable.exe`.
+El `.exe` resultante: `dist/Quanto-2.0.0-portable.exe`.
 
 ---
 
@@ -419,7 +462,7 @@ El `.exe` resultante: `dist/PackPrice-2.0.0-portable.exe`.
 
 | Problema                              | Causa probable                     | Solución                                                                                |
 | ------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------- |
-| `npm install` falla con permisos      | Terminal sin permisos              | Ejecutar como administrador                                                             |
+| `pnpm install` falla con permisos      | Terminal sin permisos              | Ejecutar como administrador                                                             |
 | Build avisa de "code signing"         | .exe no firmado                    | Para uso interno no hace falta firmar; añadir `"sign": null` en package.json si bloquea |
 | Windows SmartScreen avisa al ejecutar | .exe sin firma digital             | "Más información" → "Ejecutar de todas formas". Solo primera vez por PC                 |
 | App no encuentra config.js            | NAS desconectado o ruta incorrecta | Comprobar unidad mapeada o usar Ajustes para cambiar ruta                               |
@@ -433,7 +476,10 @@ El `.exe` resultante: `dist/PackPrice-2.0.0-portable.exe`.
 1. Sesión 1 — Estudio Excel + DOCX. Estudio de costes, márgenes y riesgos. Calculadora Excel y dos DOCX (hoja de pedido + estudio interno).
 2. Sesión 2 — Diseño de la app. Aclaración de constraints reales (NAS solo de archivos, 2 usuarios). Iteración de decisiones técnicas: SQLite descartado a favor de JSON. Web `file://` descartada por limitaciones del navegador. Electron elegido.
 3. Sesión 2 (cont.) — Implementación V2 Electron. Filesystem real, settings local en `%APPDATA%`, detección de conflictos por hash, backups automáticos, diálogos nativos.
-4. Pendiente — Pruebas locales con `npm run dev`, validación de comportamiento, ajuste fino de PVP de packs nuevos, distribución del `.exe` al segundo PC.
+4. Tier-1 — Profesionalidad real: validación de esquema, logs (`electron-log`), auditoría con diff, historial de presupuestos, exportación PDF. Inicio de la migración del código a inglés.
+5. **Esquema y motor v4 — Configurabilidad total.** El catálogo entero pasa a ser editable desde el admin: nuevas secciones `suppliers`, `products` (sustituye `roly_models`, con tabla de precios propia, multi-proveedor y `extra_cost_3xl`) y `addons` (sustituye los `extra_*_eur` fijos). Las cuatro calculadoras codificadas se unifican en un solo `calculatePack` dirigido por `pricing_mode` (`bundle`/`components`) y opciones declaradas. El buffer 3XL fijo desaparece (coste 3XL real por producto, MAX sobre el pedido, no facturado). PVP recomendado (coste + margen objetivo + redondeo a `x,95`). Correcciones: guard de tramo nulo, `margen %` sobre la base neta, tallas grandes acotadas al pedido. Migración v3→v4 idempotente (`lib/migrations.js`). Endurecimiento de seguridad (lista blanca de rutas IPC, validación de payloads, límite de intentos admin, escrituras atómicas). Migración del tooling a **pnpm**.
+6. **Primer arranque desde cero (sin semilla).** Se elimina el catálogo por defecto (`buildDefaultConfig` sale del producto). `config.default.js` exporta solo la versión de esquema y `buildEmptyConfig` (forma válida, colecciones vacías y `parameters` en blanco). En modo archivo (sin `config.js`) y en nube (D1 recién creada y vacía) un **asistente guiado** (`renderer/catalog-wizard.js`) recoge todo el catálogo paso a paso — Costes → Tramos → Proveedores → Productos → Packs → Complementos → Empresa — con cada campo en blanco y validación de mínimos por paso (`renderer/wizard-validation.js`), reutilizando los formularios del editor admin. El config se ensambla en memoria y solo se persiste al pasar `validateConfigSchema` (archivo: `config:create` atómico + backup; nube: provisión sin seed + `catalog:seed-initial`). El antiguo catálogo del cliente nº 1 se conserva como fixture de tests (`tests/fixtures/config-v4-full.js`). Sin botón de "cargar ejemplo". Diseño: `docs/superpowers/specs/2026-06-16-first-run-catalog-wizard-design.md`.
+7. Pendiente — Pruebas locales con `pnpm dev`, validación de comportamiento, ajuste fino de PVP de packs nuevos, distribución del `.exe` al segundo PC.
 
 ---
 
