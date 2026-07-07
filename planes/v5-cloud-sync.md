@@ -269,7 +269,7 @@ Cada fase termina con `pnpm test` verde y es entregable por sí sola.
 | **Logo de empresa en el PDF** (lo pedirá todo cliente) | Campo de imagen en `company` + render en `pdf-template` | Dato, no código; aditivo |
 | **Multi-tenant SaaS real** (decenas de empresas y querer gestión central) | `tenant_id` en tablas + servicio central | Migración aditiva más un debate completo; hoy el aislamiento por cuenta es mejor y más barato |
 
-Cualquiera de estas requiere su línea en el debate de `CLAUDE.md` §2 antes de
+Cualquiera de estas requiere su línea en los debates de `CLAUDE.md` §9 antes de
 empezar.
 
 ## 10. Riesgos y rollback

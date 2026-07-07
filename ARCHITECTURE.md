@@ -7,30 +7,38 @@ depth. `AGENTS.md` describes *how to work* on this code with Claude Code.
 
 > **Operative, not aspirational.** If the code diverges from this document,
 > fix the code or fix this document — never leave a silent gap. Every rule here
-> exists to keep a tiny app (2–3 users, one workshop, one NAS) cheap to own for
-> years. Optimise for **deletability and readability**, not for cleverness.
+> exists to keep a tiny app (2–3 users per company, storage they own) cheap to
+> own for years. Optimise for **deletability and readability**, not for
+> cleverness.
 
 ---
 
 ## 1. System context
 
 Quanto is an **Electron desktop app** that prices DTF (Direct-to-Film)
-textile customization packs. Each workshop PC runs a portable `.exe`; all PCs
-share one `config.js` on the company NAS.
+textile customization packs. Each workshop PC runs an installed `.exe`
+(per-user NSIS). All PCs of one company share one catalog + quote store through
+the storage that company chose (`settings.data_source`): a flat `config.js` on
+a PC/NAS path (**file mode**) or Cloudflare D1 in the customer's own account
+(**cloud mode**). The two are interchangeable.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Workshop LAN (no public internet, no telemetry, no backend) │
-│                                                               │
-│   PC-A ──┐                                                    │
-│   PC-B ──┼──►  \\172.26.0.154\Paep\Packs\config.js  (truth)   │
-│   PC-C ──┘                      └─ backups\         (safety)  │
-│                                                               │
-│   each PC also keeps local, per-machine state in %APPDATA%    │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  One company's PCs (per-PC state + caches + outbox in %APPDATA%)    │
+│                                                                      │
+│  file mode:  PC-A/B/C ──► \\NAS\...\config.js + presupuestos\ (truth)│
+│                                    └─ backups\            (safety)  │
+│  cloud mode: PC-A/B/C ──► customer's Cloudflare D1        (truth)   │
+│              (REST from main; local cache + outbox when offline)     │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-- **No multi-tenant, no auth server, no network API.** The NAS file *is* the backend.
+- **No multi-tenant, no auth server, no server-side code of ours.** The shared
+  store (NAS file or the customer's D1) *is* the backend.
+- **Internet egress happens only in the main process**, and only for three
+  sanctioned things: the customer's own D1 (cloud mode), GitHub Releases
+  (auto-update), and opt-out scrubbed error reports. The renderer has no
+  network beyond `'self'`.
 - **Business data lives in data, not code** (see §6).
 - The full business model is specified in `PLAN_Calculadora.md` (source of truth
   for numbers and pricing rules).
@@ -89,32 +97,78 @@ packs app/
 ├── preload.js              ← the port: window.packprice.* whitelist
 ├── config.default.js       ← schema version + empty scaffold (buildEmptyConfig); NO catalog seed
 │
-├── lib/                    ← pure, testable, framework-free modules (CommonJS, English)
-│   ├── config-parser.js    ← extract/serialize the JSON block of config.js (legacy ES identifiers)
-│   ├── config-schema.js    ← strict v4 schema validation, dotted-path errors (EN)
-│   ├── config-store.js     ← read+migrate+validate, atomic write (.tmp+rename) (EN)
-│   ├── migrations.js       ← migrateConfig (v2→v3→v4) / Quote / Settings, normalizeAuditEntry (EN)
-│   ├── path-guard.js       ← IPC path allow-list (isPathAllowed)             (EN)
-│   ├── diff.js             ← flat object diff for audit + admin preview      (EN)
-│   ├── audit.js            ← append-only audit log writer/reader             (EN)
-│   ├── history.js          ← local quote history store                       (EN)
-│   ├── pdf-template.js     ← quote → HTML for printToPDF                      (EN)
-│   └── logger.js           ← electron-log wrapper                            (EN)
+├── db/migrations/          ← bundled additive-only SQL migrations for cloud (D1) mode
+│
+├── lib/                    ← testable CommonJS modules (English), grouped by concern
+│   │ · file config backend
+│   ├── config-parser.js    ← extract/serialize the JSON block of config.js (some legacy ES identifiers)
+│   ├── config-schema.js    ← strict v4 schema validation, dotted-path errors
+│   ├── config-store.js     ← read+migrate+validate, atomic write (.tmp+rename)
+│   ├── migrations.js       ← the ONE place that knows old local shapes (config/quote/settings/audit)
+│   ├── path-guard.js       ← IPC path allow-list (isPathAllowed)
+│   │ · cloud (D1) backend — main-process only, injectable fetch
+│   ├── d1-client.js        ← zero-dep Cloudflare D1 REST client (token never reaches renderer)
+│   ├── db-migrator.js      ← idempotent SQL migration runner + schema_migrations ledger
+│   ├── migration-loader.js ← reads bundled db/migrations/*.sql (only cloud module touching fs)
+│   ├── cloud-bootstrap.js  ← factory wiring the whole cloud flow behind 3 lines of main.js
+│   ├── cloud-catalog.js    ← cloud catalog read path + one-shot initial seed
+│   ├── catalog-writer.js   ← per-entity version-guarded writes + audit + snapshot
+│   ├── catalog-assembler.js ← cfg ↔ D1 entity rows, both directions (also the local↔cloud migrator)
+│   ├── catalog-cache.js    ← last-good catalog mirror for offline read-only boot
+│   ├── cloud-history.js    ← D1 audit log + snapshot restore (through the guarded writer)
+│   │ · shared quote store — one quotes:* contract, two backends (§4.3b)
+│   ├── quote-repo-file.js  ← file backend: <configDir>/presupuestos/<id>.json, atomic writes
+│   ├── quote-repo-cloud.js ← cloud backend façade (same interface) over cloud-quotes.js
+│   ├── cloud-quotes.js     ← D1 data access for the quote tables
+│   ├── quote-cache.js      ← per-PC read mirror (fast list + offline view; NOT a write buffer)
+│   ├── quote-outbox.js     ← offline outbox for cloud writes, drained on reconnect
+│   ├── quote-drain.js      ← pure reconnect-drain routing (queued CREATE vs EDIT)
+│   ├── quote-migrate-local.js ← one-time legacy presupuestos.json → shared store (idempotent)
+│   ├── quote-store-helpers.js ← pure helpers (provisional PP-PENDING ids, …)
+│   ├── history.js          ← legacy per-PC quote store (migrated on boot, being retired)
+│   │ · audit & diff
+│   ├── audit.js            ← append-only audit log writer/reader (file mode)
+│   ├── diff.js             ← flat object diff for audit + admin preview
+│   │ · PDF
+│   ├── pdf-templates.js    ← built-in A4 quote templates + render pipeline (renderQuote)
+│   ├── pdf-lines.js        ← pure ex-VAT presentation lines, reconciled to sale_base
+│   ├── template-engine.js  ← tiny QWeb-style engine; output always HTML-escaped
+│   ├── template-sanitizer.js ← rejects unsafe custom templates (scripts/external refs)
+│   ├── cloud-pdf-templates.js ← custom templates stored in D1 (untrusted; sanitized on load)
+│   │ · app infrastructure
+│   ├── stats.js            ← pure statistics aggregator (computeStats)
+│   ├── settings-validator.js ← validates settings:write payloads (known fields, bounds)
+│   ├── settings-privacy.js ← redacts the D1 token out of settings:read
+│   ├── logger.js           ← electron-log wrapper (rotating main.log)
+│   ├── diagnostics.js      ← redacted support bundle (no token, no business data)
+│   ├── error-scrubber.js   ← whitelist scrub of error payloads (never business data)
+│   ├── error-reporter.js   ← opt-out scrubbed error reports via plain fetch
+│   ├── app-updater.js      ← electron-updater events → renderer update:state
+│   ├── userdata-migration.js ← one-time %APPDATA%\PackPrice → Quanto copy
+│   └── admin-throttle.js   ← rate-limit for auth:verify-admin (dead UI path — §7)
 │
 ├── renderer/               ← UI + pure calculation (no Node)
 │   ├── index.html          ← single page; screens toggled via .hidden
-│   ├── app.js              ← orchestration: DOM events, IPC calls (legacy ES)
-│   ├── calculo.js          ← PURE v4 pricing: calculatePack + helpers (EN identifiers)
-│   ├── admin.js            ← admin editor / catalog builder (data-cfg-path driven, EN)
-│   ├── admin-extras.js     ← audit log rendering                      (EN)
-│   ├── catalog-wizard.js   ← first-run wizard chrome (reuses admin render/mutation) (EN)
-│   ├── wizard-validation.js ← pure per-step minimum gating (WIZARD_STEPS, wizardReady) (EN)
-│   ├── history.js          ← quote history UI                         (EN)
-│   ├── quote-inputs.js     ← pure inverse of collectInputs: planInputs/optFromPlan (EN)
-│   ├── format.js           ← DOM/format helpers                       (legacy ES)
+│   ├── app.js              ← orchestration: DOM events, all IPC calls (legacy ES)
+│   ├── calculo.js          ← PURE v4 pricing engine: calculatePack + helpers
+│   ├── admin.js            ← catalog editor: pure renderers + controlled mutations (data-cfg-path)
+│   ├── admin-extras.js     ← audit log / logs viewer / diff preview rendering
+│   ├── change-format.js    ← diff entries → friendly Spanish (save/conflict/audit views)
+│   ├── save-summary.js     ← old/new catalog diff grouped by entity (confirm-save modal)
+│   ├── catalog-wizard.js   ← first-run wizard chrome (reuses admin render/mutation)
+│   ├── wizard-validation.js ← pure per-step minimum gating (WIZARD_STEPS, wizardReady)
+│   ├── history.js          ← quote history UI
+│   ├── quote-inputs.js     ← pure inverse of collectInputs: planInputs/optFromPlan
+│   ├── quote-reminder.js   ← startup banner: stale/expiring open quotes (pure seam)
+│   ├── charts.js           ← hand-rolled SVG chart builders (no chart libraries)
+│   ├── stats-view.js       ← stats object → chart inputs + KPI tiles (pure adapter)
+│   ├── pdf-gallery.js      ← view-model for the PDF-template gallery (IPC-fed)
+│   ├── data-status.js      ← data-source badge state machine (file/cloud/cache)
+│   ├── dropdown.js         ← progressive-enhancement dropdown over native <select>
+│   ├── format.js           ← DOM/format helpers (legacy ES)
 │   └── styles.css          ← design tokens in :root, BEM-lite classes
 │
-└── tests/                  ← Vitest, English. One file per lib/renderer module.
+└── tests/                  ← Vitest, English. One file per lib/renderer module (~57 files).
 ```
 
 ### Dependency rule (enforced, not optional)
@@ -129,10 +183,14 @@ renderer/app.js ──► renderer/calculo.js ──► (CFG object, pure)
                                                      └──► lib/* never require Electron, fs is fine only where noted
 ```
 
-- `lib/*` modules are **pure where they can be**: `config-schema.js`, `diff.js`,
-  `pdf-template.js`, `migrations.js`, `path-guard.js` must not touch `fs`,
-  Electron, or globals. `audit.js`, `history.js`, `logger.js`, `config-store.js`
-  may touch `fs` (they are stores) but must not import Electron UI.
+- `lib/*` modules are **pure where they can be** (e.g. `config-schema.js`,
+  `diff.js`, `migrations.js`, `path-guard.js`, `stats.js`, `pdf-lines.js`,
+  `template-engine.js`, `catalog-assembler.js`, `quote-drain.js`): no `fs`, no
+  Electron, no globals. Store modules (`audit.js`, `history.js`, `logger.js`,
+  `config-store.js`, `catalog-cache.js`, `quote-cache.js`, `quote-outbox.js`,
+  `migration-loader.js`) may touch `fs` but must not import Electron UI.
+  Network modules (`d1-client.js`, `error-reporter.js`) use an **injectable
+  `fetch`** and run in main only.
 - `renderer/calculo.js` depends **only** on a `cfg` object passed in. No DOM,
   no globals beyond the injected config. This is what makes pricing testable.
 - `main.js` is the only file allowed to wire `lib/*` to the filesystem and IPC.
@@ -192,11 +250,12 @@ through scattered `fs` calls:
 
 | Artifact | Module | Location | API shape |
 |---|---|---|---|
-| Business config | `config:*` handlers + `config-parser.js` | NAS `config.js` | read / write / force-write / info |
+| Business config (catalog) | file: `config-store.js` + `config-parser.js`; cloud: `cloud-bootstrap.js` → `cloud-catalog.js` / `catalog-writer.js` — each `config:*` handler routes on `settings.data_source` | NAS `config.js` **or** D1 entity tables | read / write / force-write / info |
 | Saved quotes (shared) | `lib/quote-repo-file.js` / `lib/quote-repo-cloud.js` behind `quoteRepo(settings)` | folder of `<id>.json` next to `config.js`, **or** D1 `quote_payloads` | `create` / `get` / `list` / `search` / `replace` / `setStatus` / `delete` |
 | Legacy per-PC quotes | `lib/history.js` | per-PC `presupuestos.json` | `save` / `list` / … — migrated into the shared store on boot, then retired |
-| Audit log | `lib/audit.js` | NAS append-only | `appendAuditEntry` / `readRecentEntries` |
-| Local settings | `settings:*` handlers | `%APPDATA%` JSON | read / write |
+| Audit log | file: `lib/audit.js`; cloud: `lib/cloud-history.js` (audit + snapshots + restore) | NAS append-only file **or** D1 `audit_log`/snapshots | `appendAuditEntry` / `readRecentEntries` / restore |
+| Custom PDF templates | `lib/cloud-pdf-templates.js` + `lib/template-sanitizer.js` | D1 `pdf_templates` (untrusted shared HTML) | list / save — sanitized on load |
+| Local settings | `settings:*` handlers + `settings-validator.js` / `settings-privacy.js` | `%APPDATA%` JSON | read (token redacted) / write |
 
 The shared quote store is detailed in **§4.3b**; the record shape is below.
 
@@ -389,6 +448,9 @@ admin.js collects edits via data-cfg-path
   → return ok / conflict
 ```
 
+(File mode shown. In cloud mode the same `config:write` routes to per-entity,
+version-guarded D1 writes with audit + snapshot — `lib/catalog-writer.js`, §10.)
+
 **Admin catalog tab render (list ↔ editor):**
 
 The four catalog tabs (products / packs / suppliers / addons) have two views
@@ -578,19 +640,24 @@ config must pass `validateConfigSchema` before reaching the renderer.
 | CSP `default-src 'self'`, `script-src 'self'` | block external/inline scripts |
 | narrow `preload.js` surface | each exposed fn is attack surface; no `fs`/`ipcRenderer` leak |
 | IPC path allow-list (`lib/path-guard.js`) | filesystem IPC only touches blessed paths (config + per-PC settings), never arbitrary user paths |
-| `settings:write` / `quotes:save` input validation | reject malformed payloads at the IPC boundary |
-| admin-password verify rate-limit | throttle/lock repeated `auth:verify-admin` attempts |
+| `settings:write` / `quotes:save` input validation (`lib/settings-validator.js`) | reject malformed payloads at the IPC boundary |
+| D1 API token lives in per-PC `settings.json`, main only; redacted from `settings:read` and diagnostics (`lib/settings-privacy.js`, `lib/diagnostics.js`) | the renderer — and any exported bundle — never sees the customer's Cloudflare token |
 | no `eval`/`Function`/`vm`/dynamic `require` on user paths | prevent RCE via config |
 | schema validation on every read | bad data fails fast, never produces `NaN` prices |
+| PDF rendering only via the escaping engine (`lib/template-engine.js`); custom templates sanitized on load (`lib/template-sanitizer.js`) | shared, untrusted template HTML can never run script or load external resources |
+| error reports whitelist-scrubbed (`lib/error-scrubber.js`), opt-out in settings | telemetry can never carry business data |
+| auto-update reads only public GitHub Releases over HTTPS, main process only (`lib/app-updater.js`) | no private feed, no renderer involvement; trust anchor is HTTPS + GitHub |
 | atomic config write (`.tmp` + rename) | an interrupted write leaves the original intact |
 | backup before every admin write | recoverable from corruption or bad edit |
-| conflict check before write | no silent overwrite of another user's edit |
-| `admin.password` stored in plaintext | it is **anti-accidental-click**, *not* security (documented in `PLAN_Calculadora.md` §7.1). Admin password is stripped before config reaches the renderer. |
+| conflict check before write (file: mtime+sha256; cloud: entity version) | no silent overwrite of another user's edit |
+| admin password: **gate removed** — `auth:verify-admin`, its rate-limit (`lib/admin-throttle.js`) and the plaintext `admin.password` field are dead code pending a schema migration | it was anti-accidental-click, never security (`PLAN_Calculadora.md` §7.1); protection is now save-confirmation + audit + snapshot rollback. The password is still stripped before the config reaches the renderer. |
 
-**Threat posture:** the app runs on a trusted LAN with trusted users. The real
-risks are (a) a malformed/hostile `config.js` reaching code execution, and (b)
-data loss. Both are mitigated above. Do not add auth, crypto, or hardening that
-the threat model doesn't justify — that is its own kind of debt.
+**Threat posture:** trusted users operating on storage they own (a LAN file or
+their own Cloudflare account). The real risks are (a) a malformed/hostile
+`config.js` or custom PDF template reaching code execution, (b) data loss, and
+(c) the customer's API token or business data leaking outward. All are
+mitigated above. Do not add auth, crypto, or hardening that the threat model
+doesn't justify — that is its own kind of debt.
 
 > **Accepted deferral — CSP `style-src 'unsafe-inline'`.** The CSP keeps
 > `style-src 'self' 'unsafe-inline'` because the UI uses inline `style="..."`
@@ -601,8 +668,8 @@ the threat model doesn't justify — that is its own kind of debt.
 
 **Never** sign the `.exe` with a borrowed or expired certificate. Publishing
 is owner-sanctioned since 2026-06-12 (public GitHub repo, `.exe` on Releases —
-see the debate in `CLAUDE.md` §2); what must **never** be published: secrets,
-tokens, the real NAS `config.js`, or any customer's D1 data.
+see the decision log in `CLAUDE.md` §9); what must **never** be published:
+secrets, tokens, the real NAS `config.js`, or any customer's D1 data.
 
 ---
 
@@ -616,8 +683,9 @@ tokens, the real NAS `config.js`, or any customer's D1 data.
   filenames. **User-visible strings in Spanish** (UI, error dialogs, PDF text).
   Legacy Spanish identifiers are migrated progressively, never in a big-bang.
 - IPC channels: `<resource>:<action>` in kebab-case, English
-  (`config:read`, `quotes:save`, `pdf:export`). Legacy Spanish channels stay
-  alive until the renderer migration retires them.
+  (`config:read`, `quotes:save`, `pdf:export`). All channel *names* are English
+  already; some *payload field* names are still Spanish (`ruta`, `clave`,
+  `titulo`…) until their migration wave retires them.
 - HTML ids in `kebab-case`; `data-*` to bind config paths; CSS tokens in `:root`,
   BEM-lite class names — no utility-first frameworks.
 - Comments explain **why**, never **what**. Three similar lines beat a premature
@@ -644,14 +712,19 @@ tokens, the real NAS `config.js`, or any customer's D1 data.
   9. `migrations.*` — round-trip v2→v3→v4, idempotency, missing-field errors.
 - **Rule:** any change touching calculation or config schema ships with tests.
   Pure functions (§4.1) make this cheap — there is no excuse to skip it.
+- **Intentionally untested:** thin DOM/orchestration files (`renderer/app.js`,
+  `catalog-wizard.js`, `dropdown.js`, `format.js`, the history modal wiring)
+  and `main.js`/`preload.js`. Logic worth testing gets extracted into a pure
+  module first — don't write DOM tests, extract instead.
 - E2E (Playwright on the packaged `.exe`) is deferred until the app justifies it.
 
 ---
 
 ## 10. Scalability & evolution path
 
-The app is built for **2–3 users + one NAS**. These are the *only* sanctioned
-growth seams; anything beyond them needs a debate and a `CLAUDE.md` update.
+The app is built for **2–3 users per company + the storage they own** (a NAS
+file or their own D1). These are the *only* sanctioned growth seams; anything
+beyond them needs a debate and a `CLAUDE.md` update.
 
 ### Cheap, supported by design (data-only, from the admin UI)
 - New supplier: add `suppliers.<ID>`.
@@ -670,24 +743,27 @@ growth seams; anything beyond them needs a debate and a `CLAUDE.md` update.
   (file folder or D1 `quote_payloads`; §4.3b). The repository API already hid the
   per-PC→shared swap; pagination/lazy reads over years of quotes are deferred to a
   real trigger.
-- **Cloud storage (v5 — approved 2026-06-12, in progress):** the catalog (and
-  quotes) can live in Cloudflare D1 (normalized tables) in *the customer's
-  own account*, accessed **directly over Cloudflare's REST API — no Worker,
-  no server-side code**; the app self-provisions the database on first run
-  and applies bundled SQL migrations itself (additive-only, automatic
-  pre-migration backup + restore fallback). The design keeps every invariant
-  above: network only in the main process behind a `lib/config-backend.js`
-  interface (adapters: `file` = today's config-store, `d1` = new
-  `lib/d1-client.js`, native `fetch`); a pure `lib/catalog-assembler.js`
-  converts entities ↔ the same v4 `cfg` object **in both directions** (it is
-  also the local↔cloud migrator), so `calculo.js` and `validateConfigSchema`
-  are untouched; writes are per-entity diffs (`lib/diff.js`) guarded by
-  optimistic version checks (`UPDATE … WHERE version = ?`); offline =
-  read-only from an atomic local cache in `%APPDATA%` plus an outbox for
-  quotes. Debate in `CLAUDE.md` §2; full plan in `planes/v5-cloud-sync.md`;
-  requirements in `docs/PRD.md`. Until the workshop's transition ships, the
-  NAS file remains the production source of truth and everything else in
-  this document applies unchanged.
+- **Cloud storage (v5 — debated 2026-06-12, shipped in the 5.0.0-beta line):**
+  the catalog and quotes can live in Cloudflare D1 (normalized tables) in
+  *the customer's own account*, accessed **directly over Cloudflare's REST
+  API — no Worker, no server-side code**; the app self-provisions the
+  database on first run and applies bundled SQL migrations itself
+  (`db/migrations/`, additive-only, idempotent, run by `lib/db-migrator.js`).
+  Every invariant above holds: network only in the main process
+  (`lib/d1-client.js`, injectable `fetch`), wired through
+  `lib/cloud-bootstrap.js`; each `config:*`/`quotes:*` IPC handler routes on
+  `settings.data_source` (`'file' | 'cloud'`) — there is no separate
+  `config-backend.js` seam, the branch lives in the handlers; a pure
+  `lib/catalog-assembler.js` converts entities ↔ the same v4 `cfg` object
+  **in both directions** (it is also the local↔cloud migrator), so
+  `calculo.js` and `validateConfigSchema` are untouched; writes are
+  per-entity diffs (`lib/diff.js`) guarded by optimistic version checks
+  (`UPDATE … WHERE version = ?`, `lib/catalog-writer.js`); offline =
+  read-only from atomic local caches in `%APPDATA%` plus an outbox for
+  quotes. Decision log in `CLAUDE.md` §9; full plan in
+  `planes/v5-cloud-sync.md`; requirements in `docs/PRD.md`. The original
+  workshop still runs file mode on its NAS; both modes are first-class and
+  interchangeable at any time.
 - **i18n:** all strings are Spanish today. If ever sold abroad: extract to
   `renderer/i18n/<lang>.json` + a tiny `T(key)` lookup. No i18n framework for ~50
   strings.

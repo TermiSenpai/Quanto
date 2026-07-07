@@ -11,7 +11,7 @@ sigue intacto.
 
 **Spec:** `planes/v5-cloud-sync.md` §4, §5b(no), §3 (tablas
 `audit_log`/`snapshots`/versiones) · `docs/UI-UX.md` §2.3, §2.5 · PRD R8, R9,
-R18 · CLAUDE.md §2 (debate: v5 quita el gate de admin).
+R18 · CLAUDE.md §9 (debate: v5 quita el gate de admin).
 
 **Reglas:** cero deps; red solo en main; English code / Spanish UI; TDD;
 fail-fast.

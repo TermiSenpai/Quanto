@@ -1,6 +1,6 @@
 # Plan · Migración del código a inglés (alcance completo)
 
-Aplica CLAUDE.md §2: **todo el código en inglés**. Los **strings visibles al usuario siguen en español** (mensajes, botones, labels, contenido del PDF). Como ahora el alcance incluye claves persistidas (`config.js` del NAS, `presupuestos.json` local, `audit.log`, `settings.json`), el plan añade una migración de esquema **idempotente, versionada y con backup** que corre la primera vez que un PC abre un archivo en el formato antiguo.
+Aplica CLAUDE.md §3: **todo el código en inglés**. Los **strings visibles al usuario siguen en español** (mensajes, botones, labels, contenido del PDF). Como ahora el alcance incluye claves persistidas (`config.js` del NAS, `presupuestos.json` local, `audit.log`, `settings.json`), el plan añade una migración de esquema **idempotente, versionada y con backup** que corre la primera vez que un PC abre un archivo en el formato antiguo.
 
 > **Documento operativo, no aspiracional.** Cada onda deja la app en estado verde. Si una onda se aplaza, déjalo anotado al final ("Estado").
 
@@ -666,7 +666,7 @@ export function calculateCrewPack(cfg, opt) {
 **IDs HTML**: en esta onda se **MANTIENEN los IDs v2** porque renombrar el HTML está en Onda 11. `app.js` aún hace `document.getElementById('pantalla-bienvenida')`.
 
 **Aceptación** (al cerrar las tres sub-ondas):
-- Smoke completo de CLAUDE.md §12.
+- Smoke completo de CLAUDE.md §8.
 - Eliminar alias de `window.packprice` (Onda 4) y de `format.js` (Onda 5).
 - Eliminar bridge `bridgeResultV2` (Onda 6).
 
@@ -803,7 +803,7 @@ Total: 13 PRs. Cada uno reviewable en <1h. Estimado: 8–10 jornadas en serie, 4
 ## 10. Criterios de finalización global
 
 - `npm test` verde.
-- Smoke manual completo (CLAUDE.md §12) verde.
+- Smoke manual completo (CLAUDE.md §8) verde.
 - Migración v2→v3 ejercitada contra el `config.js` real de producción, en un entorno de test con copia del NAS — verificado que el resultado es idéntico al `buildDefaultConfig()` re-tipado a v3.
 - Versión bumpeada a `3.0.0-beta` (mantener sufijo según memoria del proyecto).
 - CLAUDE.md, PLAN_Calculadora.md y README-build.md actualizados.

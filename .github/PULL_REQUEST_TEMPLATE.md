@@ -21,7 +21,7 @@ Keep PRs small and scoped. The English migration is wave-based: one wave per PR
 - [ ] `pnpm test` is green (new tests added for calculation/schema changes)
 - [ ] Smoke-tested with `pnpm dev` (CLAUDE.md §8: first run, crew pack T1
       with/without hood, mixed pack with two quantities, admin conflict)
-- [ ] No hard rule violated (CLAUDE.md §3) — security invariants intact, no domain
+- [ ] No hard rule violated (CLAUDE.md §2) — security invariants intact, no domain
       numbers in code, renderer doesn't touch Node/fs, no swallowed errors
 - [ ] Minimal diff; no unrelated reformatting; **no new dependencies**
 - [ ] Code in English, user-visible strings in Spanish; renames follow the

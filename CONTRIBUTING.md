@@ -21,12 +21,13 @@ pnpm test          # vitest run
 pnpm test:watch    # vitest in watch mode
 ```
 
-The production `config.js` lives on the NAS and is **not** in this repo. On first
-run the app seeds a local config from `config.default.js`.
+The production `config.js` lives on the NAS and is **not** in this repo. There
+is no seed catalog: on first run the app launches a wizard that builds the
+catalog from blank (`config.default.js` only exports an empty scaffold).
 
 ## The non-negotiables
 
-Full list and rationale in `CLAUDE.md` §3. The ones that cause *major* problems:
+Full list and rationale in `CLAUDE.md` §2. The ones that cause *major* problems:
 
 - **Security invariants are sacred** — `contextIsolation: true`,
   `nodeIntegration: false`, CSP `default-src 'self'`, narrow preload surface, no

@@ -9,7 +9,7 @@ Electron real (`renderer/index.html` + `renderer/styles.css` + JS de soporte).
 Objetivo: una UI de escritorio en modo claro, con paleta gris-azulada y
 acento azul, con jerarquía visual clara, datos numéricos en mono, y
 versión mobile a 390 px. **Sin frameworks, sin build step**: HTML +
-CSS + JS vanilla, como exige `CLAUDE.md` §2.
+CSS + JS vanilla, como exige `CLAUDE.md` §3.
 
 ---
 
@@ -320,7 +320,7 @@ fase se hace `npm run dev` y se verifica visualmente.
 
 ## 8. QA antes de release
 
-Antes de cortar release, ejecutar los casos del `CLAUDE.md` §12 + estos:
+Antes de cortar release, ejecutar los casos del `CLAUDE.md` §8 + estos:
 
 - **Tipografía**: Inter cargada (no system fallback) → comparar pantalla 03 contra `ZNFEb` exportado a PNG.
 - **Contraste**: el azul `#3D7BD9` sobre `--surface-secondary` cumple AA para texto 14+ (lo cumple, ratio 4.85). Los chips en dark-card también.

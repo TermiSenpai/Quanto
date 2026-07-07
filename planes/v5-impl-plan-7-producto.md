@@ -9,7 +9,7 @@ negocio), exportar diagnóstico para soporte a ciegas, y los toggles de
 actualización; más el manual de usuario y la entrada de devlog de la release.
 
 **Spec:** `docs/PRD.md` R15, R17, R19, §1b (principio rector), §4b (D3 firma) ·
-`planes/v5-cloud-sync.md` §5b (telemetría de errores) · CLAUDE.md §2 (debate
+`planes/v5-cloud-sync.md` §5b (telemetría de errores) · CLAUDE.md §9 (debate
 productización). **R16 (semilla demo) NO se implementa aquí** — ver §0.
 
 **Reglas:** cero deps; la telemetría usa `fetch` propio (protocolo
