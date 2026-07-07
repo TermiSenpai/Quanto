@@ -7,9 +7,13 @@
 > control de conflicto y a salvo sin conexión. Al usuario no le cambia la UI
 > salvo tres estados nuevos (conflicto, encolado, pendiente).
 
-**Release:** `vX.Y.Z` (pendiente de fijar al empaquetar) · **Fecha:** 2026-06-25 ·
-**Tests:** 1104 verdes · **Tamaño .exe:** pendiente de medir en el build de release
+**Release:** `v5.1.0-beta` · **Fecha:** 2026-06-25 · **Tests:** 1104 verdes
+(al cierre de este tramo) · **Tamaño .exe:** pendiente de medir en el build de release
 
+> Nota de release: la `v5.1.0-beta` publicada empaqueta los capítulos **14**
+> (marca + instalador + auto-update), este **15** y el **16** (PDF con desglose
+> sin IVA), y sale con **1143 tests verdes**.
+>
 > Capturas: **pendientes** (capturar en una sesión manual con GUI — este trabajo
 > se hizo en un entorno automatizado sin poder lanzar la app).
 

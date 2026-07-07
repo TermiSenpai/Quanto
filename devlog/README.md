@@ -33,6 +33,9 @@ También hace algo más útil para un equipo pequeño: **bloquea decisiones**. U
 | 11  | [Tier-1 profesionalidad real](11-tier-1-profesionalidad-real/README.md)               | Validación, logs, auditoría con diff, historial e PDF.              |
 | 12  | [Configurabilidad total (v4)](12-v4-configurabilidad-total/README.md)                 | Catálogo editable, motor unificado, 3XL real, PVP recomendado, pnpm. |
 | 13  | [La v5: nube sin servidor y producto](13-v5-cloud-y-producto/README.md)               | Local o Cloudflare D1 sin servidor, sin gate de admin, auditoría + rollback, presupuestos + estadísticas, plantillas PDF, telemetría opt-out. |
+| 14  | [Marca, instalador y auto-update](14-marca-instalador-y-autoupdate/README.md)         | Rebrand a Quanto, instalador NSIS, editor de catálogo navegable (lista/búsqueda/editor enfocado), resúmenes de cambios legibles, primer arranque desde cero y auto-update con electron-updater. |
+| 15  | [Presupuestos compartidos](15-presupuestos-compartidos/README.md)                     | La fuente de verdad del presupuesto pasa a un almacén compartido (carpeta junto al config o D1), reabrir/editar entre PCs, conflicto por versión, caché + outbox offline. |
+| 16  | [PDF con desglose sin IVA](16-pdf-desglose-sin-iva/README.md)                         | Cada prenda y cada extra en su línea (también en packs bundle, con reparto que cuadra al céntimo), precios netos que cierran, totales Subtotal/IVA/Total, fuera el "precio por persona". |
 
 ---
 
@@ -66,4 +69,4 @@ Para el resto, [`CLAUDE.md`](../CLAUDE.md) tiene la versión normativa de las re
 
 ---
 
-*Devlog por release desde la v5. Última revisión: 2026-06-13 (v5.0.0-beta).*
+*Devlog por release desde la v5. Última revisión: 2026-07-07 (v5.1.0-beta, capítulos 14–16).*
