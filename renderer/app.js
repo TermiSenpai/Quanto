@@ -2126,7 +2126,9 @@ function renderResult(r) {
   // Hero stats
   const totalTime = estimateTotalTime(r);
   const timeFmt = formatTime(totalTime);
-  const showCosts = state.isAdmin || state.showCosts;
+  // Internal costs (margin) are hidden by default even in admin mode; the
+  // only way to reveal them is the secret 3 × "." toggle (bindSecretCostShortcut).
+  const showCosts = state.showCosts;
   // For a bundle pack the headline metric is the per-pack price and the
   // number of packs; otherwise the garment count and the average PVP.
   const packsCount = isBundle && r.breakdown[0] ? r.breakdown[0].quantity : quantity;
