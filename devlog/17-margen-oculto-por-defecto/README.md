@@ -6,7 +6,7 @@
 > tres pulsaciones de `.`.
 
 **Release:** `v5.1.1-beta` · **Fecha:** 2026-07-21 · **Tests:** 1143 verdes ·
-**Tamaño .exe:** TODO medir tras el build
+**Tamaño .exe:** 75,4 MB
 
 ---
 
@@ -68,5 +68,5 @@ flowchart LR
 | Métrica | Antes | Después |
 |---|---|---|
 | Tests | 1143 | 1143 |
-| Tamaño del `.exe` | 75,4 MB | TODO medir |
+| Tamaño del `.exe` | 75,4 MB | 75,4 MB |
 | Líneas cambiadas (fix) | — | 1 (+comentario) |
