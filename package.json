@@ -1,6 +1,6 @@
 {
   "name": "quanto",
-  "version": "5.1.0-beta",
+  "version": "5.1.1-beta",
   "description": "Quanto - calculadora de packs (app de escritorio)",
   "main": "main.js",
   "author": "xkoistudio",
