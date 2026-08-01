@@ -17,9 +17,9 @@
     "clean": "node -e \"const fs=require('fs');for(const d of ['dist','out','build']){try{fs.rmSync(d,{recursive:true,force:true});}catch(e){}}\""
   },
   "devDependencies": {
-    "electron": "^31.0.0",
-    "electron-builder": "^24.13.0",
-    "vitest": "^2.1.0"
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "vitest": "^4.1.10"
   },
   "build": {
     "appId": "com.quanto.calculadora",
