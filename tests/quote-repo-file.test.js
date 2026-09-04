@@ -481,6 +481,51 @@ describe('setDepositPaid', () => {
     expect('deposit_paid' in q).toBe(false);
     expect('deposit_paid' in getQuote(folder, q.id).quote).toBe(false);
   });
+
+  test('a token captured BEFORE the deposit write goes stale (file mode = content hash); a forced replace keeps the pinned payment', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT, { now: new Date('2026-09-01T10:00:00Z') });
+    const token = getQuote(folder, q.id); // captured BEFORE setDepositPaid
+    setDepositPaid(folder, q.id, PAID, { now: '2026-09-04T10:00:00.000Z' });
+    // Unlike the cloud backend's version token, the file token is a content
+    // hash: the deposit write changed the file, so this now-stale token
+    // triggers the standard (spurious but safe) conflict dialog.
+    expect(replaceQuote(folder, q.id, { ...DRAFT }, token)).toEqual({ conflict: true });
+    // Sobrescribir (expected == null) forces the write; the pinned payment survives.
+    const forced = replaceQuote(folder, q.id, { ...DRAFT }, null);
+    expect(forced.quote.deposit_paid).toEqual(PAID);
+  });
+
+  test('setStatus after a paid deposit preserves deposit_paid (rejecting with a retained deposit is allowed)', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT);
+    setDepositPaid(folder, q.id, PAID, { now: '2026-09-04T10:00:00.000Z' });
+    const updated = setStatus(folder, q.id, { status: 'rejected' });
+    expect(updated.status).toBe('rejected');
+    expect(updated.deposit_paid).toEqual(PAID);
+  });
+
+  test('returns null for a traversal id and never writes outside the folder', () => {
+    const folder = makeFolder();
+    const parent = path.dirname(folder);
+    const sentinel = path.join(parent, 'SENTINEL_DEPOSIT.json');
+    fs.writeFileSync(sentinel, JSON.stringify({ status: 'pending' }), 'utf-8');
+    try {
+      expect(setDepositPaid(folder, '../SENTINEL_DEPOSIT', PAID)).toBeNull();
+      expect(JSON.parse(fs.readFileSync(sentinel, 'utf-8')).status).toBe('pending');
+    } finally {
+      fs.rmSync(sentinel, { force: true });
+    }
+  });
+
+  test('atomic write: no .tmp left behind', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT, { now: new Date('2026-06-01T10:00:00Z') });
+    setDepositPaid(folder, q.id, PAID, { now: '2026-09-04T10:00:00.000Z' });
+    const file = path.join(folder, `${q.id}.json`);
+    expect(fs.existsSync(file + '.tmp')).toBe(false);
+    expect(fs.existsSync(file)).toBe(true);
+  });
 });
 
 // ── deleteQuote ───────────────────────────────────────────────
@@ -567,6 +612,25 @@ describe('id validation (path-traversal guard)', () => {
       const onDisk = JSON.parse(fs.readFileSync(sentinel, 'utf-8'));
       expect(onDisk).toEqual({ original: true });
       // No stray .tmp left behind in the parent either.
+      expect(fs.existsSync(sentinel + '.tmp')).toBe(false);
+    } finally {
+      fs.rmSync(sentinel, { force: true });
+    }
+  });
+
+  test('setDepositPaid returns null for invalid ids and writes nothing outside the folder', () => {
+    const folder = makeFolder();
+    const parent = path.dirname(folder);
+    const sentinel = path.join(parent, 'SENTINEL_DEPOSIT_SWEEP.json');
+    fs.writeFileSync(sentinel, JSON.stringify({ status: 'pending' }), 'utf-8');
+    const paid = { amount: 121, at: '2026-09-04T10:00:00.000Z', by: 'Mostrador' };
+    try {
+      for (const bad of badIds) {
+        expect(setDepositPaid(folder, bad, paid)).toBeNull();
+      }
+      // A traversal id must not overwrite the sentinel.
+      expect(setDepositPaid(folder, '../SENTINEL_DEPOSIT_SWEEP', paid)).toBeNull();
+      expect(JSON.parse(fs.readFileSync(sentinel, 'utf-8')).status).toBe('pending');
       expect(fs.existsSync(sentinel + '.tmp')).toBe(false);
     } finally {
       fs.rmSync(sentinel, { force: true });

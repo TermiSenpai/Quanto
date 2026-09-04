@@ -79,6 +79,26 @@ describe('normalizeDepositPaid', () => {
     expect(() => normalizeDepositPaid(5)).toThrow(/objeto/i);
     expect(() => normalizeDepositPaid([1])).toThrow(/objeto/i);
   });
+
+  test('rejects a boolean, array, hex or exponent-notation amount (Number() would coerce them)', () => {
+    expect(() => normalizeDepositPaid({ amount: true, at: AT })).toThrow(/importe/i);
+    expect(() => normalizeDepositPaid({ amount: [5], at: AT })).toThrow(/importe/i);
+    expect(() => normalizeDepositPaid({ amount: '0x10', at: AT })).toThrow(/importe/i);
+    expect(() => normalizeDepositPaid({ amount: '1e3', at: AT })).toThrow(/importe/i);
+  });
+
+  test('accepts a comma-decimal amount string', () => {
+    expect(normalizeDepositPaid({ amount: '12,5', at: AT })).toEqual({ amount: 12.5, at: AT, by: null });
+  });
+
+  test('normalizes `at` to a full ISO timestamp', () => {
+    expect(normalizeDepositPaid({ amount: 10, at: '2026-09-04T10:00:00Z' }))
+      .toEqual({ amount: 10, at: '2026-09-04T10:00:00.000Z', by: null });
+  });
+
+  test('rejects a non-string `by`', () => {
+    expect(() => normalizeDepositPaid({ amount: 10, at: AT, by: 123 })).toThrow(/autor/i);
+  });
 });
 
 describe('withoutDepositPaid', () => {
@@ -92,5 +112,11 @@ describe('withoutDepositPaid', () => {
     const out = withoutDepositPaid(d);
     expect(out).toEqual({ user: 'a' });
     expect(d.deposit_paid).toEqual({ amount: 1 });
+  });
+
+  test('strips an explicit `deposit_paid: undefined` too', () => {
+    const d = { a: 1, deposit_paid: undefined };
+    const out = withoutDepositPaid(d);
+    expect('deposit_paid' in out).toBe(false);
   });
 });

@@ -53,7 +53,8 @@ the default percentage.
 two halves. The *minimum* (percentage + euros) is quote **content**: it is part
 of the draft and is saved with the quote. The *payment* is **workflow**: a
 dedicated operation that never bumps the content `version`, is preserved by
-edits, and in cloud mode lives in its own additive table next to the flat
+edits (in file mode it still moves the content-hash token, like a status
+change), and in cloud mode lives in its own additive table next to the flat
 status row. One operation writes the payment and flips the status. Cost: one
 additive SQL migration, one new repository operation in both backends, one IPC
 channel.
@@ -188,7 +189,12 @@ File mode needs no schema change: the two fields are keys in `<id>.json`.
 - Writes `deposit_paid` **and** `status = paid ? 'accepted' : 'pending'` with
   `status_ts = now`. It is the **only** writer of `deposit_paid`.
 - Does **not** bump `version` (workflow, not content — same rule as
-  `setStatus`), so an open editor's conflict token stays valid.
+  `setStatus`). Cloud mode: the version token of an open editor stays valid.
+  File mode: the token is a content hash, so a deposit write from another PC
+  makes that editor's next save show the standard (spurious but safe)
+  conflict dialog; Sobrescribir keeps the pinned `deposit_paid`. To keep the
+  SAME PC's editor consistent, `quotes:set-deposit` returns a fresh token
+  (see §4.2).
 - Returns the updated full quote, or `null` for an unknown id (the same
   `updated | null` contract as `setStatus`).
 - `createQuote` and `replaceQuote` in **both** backends drop any
@@ -233,7 +239,9 @@ undefined). `listQuotes` already returns full records, so list rows carry
   fallback), calls `quoteRepo(settings)
   .setDepositPaid(id, paid, { now })`, upserts the cache with the returned
   quote, logs `quote deposit updated { id, paid: bool }`. Returns
-  `{ ok: true, quote }`; unknown id ⇒ `{ ok: false, error: 'No se encontró el
+  `{ ok: true, quote, token }` (token re-read with `getQuote` after the
+  write, so the renderer can refresh `state.editingQuoteToken` when it is
+  editing that quote); unknown id ⇒ `{ ok: false, error: 'No se encontró el
   presupuesto <id>.' }`; backend unreachable ⇒ `{ ok: false, offline: true,
   error }` (no outbox — the renderer shows the standard offline notice, never
   a silent loss). Any other error ⇒ `{ ok: false, error }` + log.
