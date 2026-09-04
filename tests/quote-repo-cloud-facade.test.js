@@ -551,9 +551,21 @@ describe('setDepositPaid', () => {
     const client = fakeClient();
     const q = await createQuote(client, sampleDraft());
     await setDepositPaid(client, q.id, PAID, { now: NOW });
+    client.calls.length = 0;
     const cleared = await setDepositPaid(client, q.id, null, { now: NOW });
     expect(cleared.status).toBe('pending');
     expect(cleared.deposit_paid).toBeNull();
+    expect(client.calls.some((c) => /DELETE FROM quote_deposits/.test(c.sql))).toBe(true);
+    expect(client.calls.some((c) => /INSERT INTO quote_deposits/.test(c.sql))).toBe(false);
+  });
+
+  test('orphan payload (no flat row): returns null and writes NO deposit row', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft());
+    client.quotes.delete(q.id); // simulate a lost flat insert after the payload claim
+    client.calls.length = 0;
+    expect(await setDepositPaid(client, q.id, PAID, { now: NOW })).toBeNull();
+    expect(client.calls.some((c) => /INSERT INTO quote_deposits/.test(c.sql))).toBe(false);
   });
 
   test('returns null for an unknown id and for a shape-invalid id (no query)', async () => {
