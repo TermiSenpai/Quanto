@@ -23,6 +23,7 @@ import {
   searchQuotes,
   replaceQuote,
   setStatus,
+  setDepositPaid,
   deleteQuote,
 } from '../lib/quote-repo-cloud.js';
 import { tryClaimFullQuote, deleteFullQuote } from '../lib/cloud-quotes.js';
@@ -527,6 +528,91 @@ describe('setStatus', () => {
     expect(mutated).toBe(false);
     // status unchanged
     expect(client.quotes.get('PP-2026-0001').status).toBe('pending');
+  });
+});
+
+// ── setDepositPaid ───────────────────────────────────────────────
+describe('setDepositPaid', () => {
+  const PAID = { amount: 249, at: '2026-09-04T10:00:00.000Z', by: 'Mostrador' };
+  const NOW = '2026-09-04T10:00:00.000Z';
+
+  test('returns the overlaid quote: payment recorded, status accepted, version untouched', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
+    const updated = await setDepositPaid(client, q.id, PAID, { now: NOW });
+    expect(updated.deposit_paid).toEqual(PAID);
+    expect(updated.status).toBe('accepted');
+    expect(updated.status_ts).toBe(NOW);
+    expect(updated.version).toBe(1);
+    expect((await getQuote(client, q.id)).quote.deposit_paid).toEqual(PAID);
+  });
+
+  test('clearing returns the quote to pending with deposit_paid null', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft());
+    await setDepositPaid(client, q.id, PAID, { now: NOW });
+    const cleared = await setDepositPaid(client, q.id, null, { now: NOW });
+    expect(cleared.status).toBe('pending');
+    expect(cleared.deposit_paid).toBeNull();
+  });
+
+  test('returns null for an unknown id and for a shape-invalid id (no query)', async () => {
+    const client = fakeClient();
+    expect(await setDepositPaid(client, 'PP-2026-9999', PAID, { now: NOW })).toBeNull();
+    client.calls.length = 0;
+    expect(await setDepositPaid(client, '../evil', PAID, { now: NOW })).toBeNull();
+    expect(client.calls).toHaveLength(0);
+  });
+
+  test('rejects a bad amount BEFORE any network call', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft());
+    client.calls.length = 0;
+    await expect(setDepositPaid(client, q.id, { amount: 0, at: NOW, by: null }, { now: NOW }))
+      .rejects.toThrow(/importe/i);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  test('replaceQuote preserves the stored payment and drops one smuggled in the draft', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft());
+    await setDepositPaid(client, q.id, PAID, { now: NOW });
+    const { version } = await getQuote(client, q.id);
+    const res = await replaceQuote(client, q.id, sampleDraft({ user: 'Edited', deposit_paid: { amount: 1, at: NOW, by: 'x' } }), version);
+    expect(res.quote.deposit_paid).toEqual(PAID);
+    expect(res.quote.status).toBe('accepted');
+    expect(res.quote.version).toBe(2);
+    expect(JSON.parse(client.payloads.get(q.id).payload).deposit_paid).toEqual(PAID);
+  });
+
+  test('createQuote never writes a deposit_paid carried by the draft', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft({ deposit_paid: PAID }));
+    expect(q.deposit_paid).toBeUndefined();
+    expect(JSON.parse(client.payloads.get(q.id).payload).deposit_paid).toBeUndefined();
+    expect((await getQuote(client, q.id)).quote.deposit_paid).toBeNull();
+  });
+
+  test('listQuotes rows carry deposit_paid (null when unpaid)', async () => {
+    const client = fakeClient();
+    const a = await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
+    const b = await createQuote(client, sampleDraft(), { now: '2026-06-13T10:00:00.000Z' });
+    await setDepositPaid(client, b.id, PAID, { now: NOW });
+    const rows = await listQuotes(client);
+    expect(rows.find((r) => r.id === a.id).deposit_paid).toBeNull();
+    expect(rows.find((r) => r.id === b.id).deposit_paid).toEqual(PAID);
+  });
+
+  test('getQuote returns the RIGHT row when several quotes exist', async () => {
+    const client = fakeClient();
+    const a = await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
+    const b = await createQuote(client, sampleDraft(), { now: '2026-06-13T10:00:00.000Z' });
+    await setStatus(client, a.id, 'rejected', NOW);
+    await setDepositPaid(client, b.id, PAID, { now: NOW });
+    expect((await getQuote(client, a.id)).quote.status).toBe('rejected');
+    expect((await getQuote(client, a.id)).quote.deposit_paid).toBeNull();
+    expect((await getQuote(client, b.id)).quote.status).toBe('accepted');
+    expect((await getQuote(client, b.id)).quote.deposit_paid).toEqual(PAID);
   });
 });
 
