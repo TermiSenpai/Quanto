@@ -64,7 +64,8 @@ const {
 const { enqueueFullQuote } = require('./lib/quote-outbox');
 const {
   quotesFolder,
-  newPendingId
+  newPendingId,
+  isPendingId
 } = require('./lib/quote-store-helpers');
 const {
   isBackendUnreachable,
@@ -206,6 +207,9 @@ function quoteRepo(settings) {
       async setStatus(id, status, statusTs) {
         return quoteRepoCloud.setStatus(client, id, status, statusTs);
       },
+      async setDepositPaid(id, paid, now) {
+        return quoteRepoCloud.setDepositPaid(client, id, paid, { now });
+      },
       async deleteQuote(id) {
         return quoteRepoCloud.deleteQuote(client, id);
       }
@@ -242,6 +246,9 @@ function quoteRepo(settings) {
     async setStatus(id, status, statusTs) {
       return quoteRepoFile.setStatus(folder, id, { status, status_ts: statusTs });
     },
+    async setDepositPaid(id, paid, now) {
+      return quoteRepoFile.setDepositPaid(folder, id, paid, { now });
+    },
     async deleteQuote(id) {
       return quoteRepoFile.deleteQuote(folder, id);
     }
@@ -264,7 +271,8 @@ function readQuoteCacheSafe() {
 }
 
 // Maps a full quote to the lightweight list-row shape the history list
-// renders (mirrors lib/quote-repo-cloud.js listQuotes' projection).
+// renders (mirrors lib/quote-repo-cloud.js listQuotes' projection, which
+// now carries deposit_paid).
 function quoteListRow(q) {
   return {
     id: q.id,
@@ -273,6 +281,7 @@ function quoteListRow(q) {
     customer: { name: q.customer && q.customer.name },
     total_vat_inc: (q.totals && q.totals.total_vat_inc) != null ? q.totals.total_vat_inc : q.total_vat_inc,
     status: q.status,
+    deposit_paid: q.deposit_paid || null,
     pack_id: q.pack_id
   };
 }
@@ -1715,6 +1724,54 @@ ipcMain.handle('quotes:update', async (event, payload) => {
       return { ok: false, offline: true, error: err.message };
     }
     logger.error('quote update failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+});
+
+// Who marked the deposit: the cloud user name when set, else the local one,
+// else null — unlike cloudAuthor there is NO 'Equipo' fallback: the record
+// should say "unknown" rather than invent an author.
+function depositAuthor(settings) {
+  const s = settings || {};
+  return (s.cloud && s.cloud.user_name) || s.user_name || null;
+}
+
+// Records or clears a quote's paid deposit ("señal") — workflow, not a
+// content edit (no version bump). The backend marks the quote accepted
+// (paid) or pending (cleared) in the same write. NOT queued offline: the
+// renderer shows the standard offline notice and the mark is redone from
+// the history once the backend is back (design 2026-09-04 §4.2). Returns
+// a fresh conflict token too: in file mode the write moves the content
+// hash, so an editor open on this PC must refresh its token.
+ipcMain.handle('quotes:set-deposit', async (event, payload) => {
+  const settings = readSettings();
+  const { id, paid } = payload || {};
+  if (typeof id !== 'string' || !id) {
+    return { ok: false, error: 'Falta el identificador del presupuesto.' };
+  }
+  if (isPendingId(id)) {
+    // A provisional id has nothing to mark yet (the create is still queued).
+    return { ok: false, pending: true, error: 'Este presupuesto aún no se ha sincronizado; podrás marcar la señal cuando tenga su ID definitivo.' };
+  }
+  const now = new Date().toISOString();
+  const stamped = paid ? { amount: paid.amount, at: now, by: depositAuthor(settings) } : null;
+  const repo = quoteRepo(settings);
+  try {
+    const updated = await repo.setDepositPaid(id, stamped, now);
+    if (!updated) return { ok: false, error: `No se encontró el presupuesto ${id}.` };
+    logger.info('quote deposit updated', { id, paid: Boolean(stamped) });
+    // Re-read for the fresh token (file: new mtime/sha256; cloud: version) and
+    // cache the authoritative record rather than the write's own return.
+    const fresh = await repo.getQuote(id);
+    const quote = (fresh && fresh.quote) || updated;
+    upsertCachedQuote(quote);
+    return { ok: true, quote, token: fresh ? fresh.token : null };
+  } catch (err) {
+    if (isBackendUnreachable(err)) {
+      logger.warn('quotes:set-deposit backend unreachable', { id, error: err.message });
+      return { ok: false, offline: true, error: err.message };
+    }
+    logger.error('quote deposit update failed', { id, error: err.message });
     return { ok: false, error: err.message };
   }
 });

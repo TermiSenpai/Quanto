@@ -108,6 +108,11 @@ contextBridge.exposeInMainWorld('packprice', {
   // record the cloud UUID on the entry after an upload.
   updateQuote:        (data)  => ipcRenderer.invoke('quotes:update', data),
 
+  // Record/clear a quote's paid deposit ({ id, paid: { amount } | null }).
+  // Main stamps the timestamp + author; the backend flips the status and
+  // the reply carries a fresh conflict token ({ ok, quote, token }).
+  setQuoteDeposit:    (data)  => ipcRenderer.invoke('quotes:set-deposit', data),
+
   // --- Cloud quotes + statistics (v5) ---
   // Cloud-only. `uploadQuote({ quote })` mirrors a quote to D1
   // idempotently (enqueues offline); `setQuoteStatus({ id, status })`
