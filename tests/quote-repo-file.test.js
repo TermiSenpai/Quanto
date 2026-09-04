@@ -18,6 +18,7 @@ import {
   searchQuotes,
   replaceQuote,
   setStatus,
+  setDepositPaid,
   deleteQuote,
   putQuoteIfAbsent,
   MAX_QUOTE_BYTES,
@@ -401,6 +402,84 @@ describe('setStatus', () => {
     const file = path.join(folder, `${q.id}.json`);
     expect(fs.existsSync(file + '.tmp')).toBe(false);
     expect(fs.existsSync(file)).toBe(true);
+  });
+});
+
+// ── setDepositPaid ───────────────────────────────────────────────
+describe('setDepositPaid', () => {
+  const PAID = { amount: 121, at: '2026-09-04T10:00:00.000Z', by: 'Mostrador' };
+
+  test('records the payment, sets status accepted + status_ts, keeps version', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT, { now: new Date('2026-09-01T10:00:00Z') });
+    const updated = setDepositPaid(folder, q.id, PAID, { now: '2026-09-04T10:00:00.000Z' });
+    expect(updated.deposit_paid).toEqual(PAID);
+    expect(updated.status).toBe('accepted');
+    expect(updated.status_ts).toBe('2026-09-04T10:00:00.000Z');
+    expect(updated.version).toBe(1);
+    expect(getQuote(folder, q.id).quote).toEqual(updated);
+  });
+
+  test('clearing (null) removes the payment and returns the quote to pending', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT);
+    setDepositPaid(folder, q.id, PAID, { now: '2026-09-04T10:00:00.000Z' });
+    const cleared = setDepositPaid(folder, q.id, null, { now: '2026-09-05T10:00:00.000Z' });
+    expect('deposit_paid' in cleared).toBe(false);
+    expect(cleared.status).toBe('pending');
+    expect(cleared.status_ts).toBe('2026-09-05T10:00:00.000Z');
+    expect(cleared.version).toBe(1);
+  });
+
+  test('normalizes the amount to cents and a blank `by` to null', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT);
+    const updated = setDepositPaid(folder, q.id, { amount: 120.006, at: PAID.at, by: '  ' });
+    expect(updated.deposit_paid).toEqual({ amount: 120.01, at: PAID.at, by: null });
+  });
+
+  test('rejects a non-positive amount BEFORE any write', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT);
+    expect(() => setDepositPaid(folder, q.id, { amount: 0, at: PAID.at, by: null })).toThrow(/importe/i);
+    expect(getQuote(folder, q.id).quote.status).toBe('pending');
+  });
+
+  test('returns null for an unknown or shape-invalid id', () => {
+    const folder = makeFolder();
+    expect(setDepositPaid(folder, 'PP-2026-9999', PAID)).toBeNull();
+    expect(setDepositPaid(folder, '../evil', PAID)).toBeNull();
+  });
+
+  test('replaceQuote preserves the stored payment and ignores one smuggled in the draft', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT, { now: new Date('2026-09-01T10:00:00Z') });
+    setDepositPaid(folder, q.id, PAID, { now: '2026-09-04T10:00:00.000Z' });
+    const token = getQuote(folder, q.id);
+    const res = replaceQuote(
+      folder, q.id,
+      { ...DRAFT, user: 'Edited', deposit_paid: { amount: 1, at: PAID.at, by: 'x' } },
+      token, { now: new Date('2026-09-06T10:00:00Z') }
+    );
+    expect(res.quote.deposit_paid).toEqual(PAID);
+    expect(res.quote.status).toBe('accepted');
+    expect(res.quote.version).toBe(2);
+    expect(res.quote.user).toBe('Edited');
+  });
+
+  test('replaceQuote of an unpaid quote stays unpaid (no key)', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, DRAFT);
+    const token = getQuote(folder, q.id);
+    const res = replaceQuote(folder, q.id, { ...DRAFT, deposit_paid: { amount: 9, at: PAID.at, by: null } }, token);
+    expect('deposit_paid' in res.quote).toBe(false);
+  });
+
+  test('createQuote drops a deposit_paid carried by the draft', () => {
+    const folder = makeFolder();
+    const q = createQuote(folder, { ...DRAFT, deposit_paid: PAID });
+    expect('deposit_paid' in q).toBe(false);
+    expect('deposit_paid' in getQuote(folder, q.id).quote).toBe(false);
   });
 });
 
