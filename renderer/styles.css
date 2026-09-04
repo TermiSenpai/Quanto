@@ -1171,38 +1171,28 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
   padding-top: 18px;
 }
 
-/* Próximos pasos */
-.next-steps {
+/* Señal (paso 3 · design 2026-09-04 §5) */
+.deposit-card { gap: 12px; }
+.deposit-card__pct { display: flex; align-items: center; gap: 8px; }
+.deposit-card__pct .input { width: 96px; }
+.deposit-card__min {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.next-steps__item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  align-items: baseline;
   padding: 12px 14px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: var(--surface-secondary);
-  width: 100%;
-  text-align: left;
+  background: var(--surface-tertiary);
 }
-.next-steps__item:hover {
-  border-color: var(--accent-primary);
-  background: var(--accent-soft);
-  color: var(--accent-text-on-soft);
+.deposit-card__min strong { font-size: 22px; }
+.deposit-card__hint { font-size: 12px; }
+.deposit-card__paid {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  cursor: pointer;
 }
-.next-steps__icon {
-  width: 36px; height: 36px;
-  background: var(--accent-soft);
-  color: var(--accent-text-on-soft);
-  border-radius: var(--radius-md);
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.next-steps__body { flex: 1; }
-.next-steps__body strong { display: block; font-size: 14px; }
-.next-steps__body span { font-size: 12px; color: var(--fg-muted); }
 
 /* Tabla de breakdown */
 .breakdown {

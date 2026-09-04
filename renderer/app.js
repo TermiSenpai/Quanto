@@ -62,6 +62,9 @@ import {
 import { enhanceDropdowns } from './dropdown.js';
 import { startCatalogWizard } from './catalog-wizard.js';
 import { planInputs } from './quote-inputs.js';
+import {
+  depositMinimum, parseDepositPct, parseDepositAmount, formatDepositPct, pctToPercentInput
+} from './deposit.js';
 
 // ============================================================
 // Module state
@@ -117,6 +120,12 @@ const state = {
   packId: null,
   editingQuoteId: null,        // id of the quote being edited (reopened); null = a new quote
   editingQuoteToken: null,     // opaque conflict token captured at reopen (file: {mtime,sha256}; cloud: {version}); null for a new/read-only quote
+  // Step-3 "Señal" card (design 2026-09-04 §5): the per-quote fraction
+  // (null = config default) and the paid mark as typed ({ amount, edited }).
+  deposit: { pct: null, paid: null },
+  // The payment the stored quote on screen carries — diffed on save so
+  // quotes:set-deposit runs only when the user changed it.
+  depositStored: null,
   isAdmin: false,
   adminTab: 'parameters',
   showCosts: false,            // secret shortcut: 3 × "." toggles the view
@@ -128,6 +137,27 @@ const state = {
   adminSearch: { products: '', packs: '', suppliers: '', addons: '' },
   adminClosedSections: new Set() // section keys the user collapsed
 };
+
+/** The deposit fraction for the quote on screen: per-quote override, else config. */
+function currentDepositPct() {
+  if (Number.isFinite(state.deposit.pct)) return state.deposit.pct;
+  return CFG.quote_settings.deposit_pct;
+}
+
+/** A fresh quote starts from the config percentage, unpaid. */
+function resetDepositState() {
+  state.deposit = { pct: null, paid: null };
+  state.depositStored = null;
+}
+
+/** Total with VAT of a calc result OR a saved record (lastResult is both over its life). */
+function totalVatIncOf(x) {
+  if (!x) return 0;
+  if (Number.isFinite(x.total_vat_inc)) return x.total_vat_inc;
+  if (x.totals && Number.isFinite(x.totals.total_vat_inc)) return x.totals.total_vat_inc;
+  if (x.result && Number.isFinite(x.result.total_vat_inc)) return x.result.total_vat_inc;
+  return 0;
+}
 
 // ============================================================
 // Visual metadata per pack (card icon and description)
@@ -1476,6 +1506,7 @@ function selectPack(packId) {
   state.packId = packId;
   state.editingQuoteId = null;  // picking a pack from the menu starts a fresh quote
   state.editingQuoteToken = null;
+  resetDepositState();
   hide('error-msg');
 
   const pack = CFG.packs[packId];
@@ -2186,29 +2217,7 @@ function renderResult(r) {
         </div>
       </article>
 
-      <article class="section-card">
-        <div>
-          <h3 class="h-card">Próximos pasos</h3>
-          <p class="text-secondary" style="font-size: 12px; margin-top: 2px;">Acciones que probablemente harás ahora.</p>
-        </div>
-        <div class="next-steps">
-          <button class="next-steps__item" type="button" disabled title="Próximamente">
-            <span class="next-steps__icon"><svg class="icon"><use href="#i-clock"/></svg></span>
-            <span class="next-steps__body"><strong>Programar producción</strong><span>Estimación: ${timeFmt}</span></span>
-            <svg class="icon"><use href="#i-arrow-right"/></svg>
-          </button>
-          <button class="next-steps__item" type="button" disabled title="Próximamente">
-            <span class="next-steps__icon"><svg class="icon"><use href="#i-send"/></svg></span>
-            <span class="next-steps__body"><strong>Enviar al cliente</strong><span>Por email o WhatsApp</span></span>
-            <svg class="icon"><use href="#i-arrow-right"/></svg>
-          </button>
-          <button class="next-steps__item" type="button" onclick="document.getElementById('btn-cambiar-pack').click()">
-            <span class="next-steps__icon"><svg class="icon"><use href="#i-plus"/></svg></span>
-            <span class="next-steps__body"><strong>Nuevo cálculo</strong><span>Sin perder este resultado</span></span>
-            <svg class="icon"><use href="#i-arrow-right"/></svg>
-          </button>
-        </div>
-      </article>
+${renderDepositCard(r)}
     </div>
 
     <div class="resultado-grid" style="margin-top: 16px;">
@@ -2289,6 +2298,172 @@ function renderResult(r) {
       </article>
     </div>
   `;
+
+  bindDepositCard(r);
+}
+
+// ============================================================
+// Step 3 · "Señal" card (design 2026-09-04 §5)
+// ============================================================
+
+function amountInputValue(n) {
+  return Number.isFinite(n)
+    ? n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false })
+    : '';
+}
+
+function depositHintText(r, pct) {
+  return `${formatDepositPct(pct)} de ${formatEur(totalVatIncOf(r))} · redondeado al euro hacia arriba`;
+}
+
+/**
+ * Markup of the "Señal" card from `state.deposit`: the per-quote
+ * percentage, the minimum it yields (or "sin señal mínima" at 0 %), and
+ * the paid mark with its amount. bindDepositCard wires the inputs after
+ * the innerHTML swap. Every interpolated value is a number this code
+ * produced or a string passed through escapeHTML (no sanitizer dep).
+ */
+function renderDepositCard(r) {
+  const pct = currentDepositPct();
+  const total = totalVatIncOf(r);
+  const min = depositMinimum(total, pct);
+  const paid = state.deposit.paid;
+  const stored = state.depositStored;
+  const storedLine = stored
+    ? `Señal recibida el ${formatValidDate(stored.at)}${stored.by ? ` por ${escapeHTML(stored.by)}` : ''}.`
+    : 'Al guardar, el presupuesto pasará a Aceptado.';
+  return `
+      <article class="section-card deposit-card" id="deposit-card">
+        <div class="section-card__head">
+          <div>
+            <h3 class="h-card">Señal</h3>
+            <p class="text-secondary" style="font-size: 12px; margin-top: 2px;">Anticipo mínimo para lanzar el pedido.</p>
+          </div>
+          <span class="badge badge--neutral"><svg class="icon"><use href="#i-tag"/></svg> Anticipo</span>
+        </div>
+        <div class="field">
+          <label class="field__label" for="deposit-pct">Porcentaje</label>
+          <div class="deposit-card__pct">
+            <input type="text" inputmode="decimal" id="deposit-pct" class="input" value="${pctToPercentInput(pct)}" autocomplete="off" aria-describedby="deposit-pct-error">
+            <span class="text-muted">%</span>
+          </div>
+          <span id="deposit-pct-error" class="field__error hidden" role="alert">Indica un porcentaje entre 0 y 100.</span>
+        </div>
+        <div class="deposit-card__min">
+          <span id="deposit-min-label">${min > 0 ? 'Señal mínima' : 'Sin señal mínima'}</span>
+          <strong class="text-mono" id="deposit-min">${min > 0 ? formatEur(min) : '—'}</strong>
+        </div>
+        <p class="text-muted deposit-card__hint ${min > 0 ? '' : 'hidden'}" id="deposit-hint">${depositHintText(r, pct)}</p>
+        <label class="deposit-card__paid">
+          <input type="checkbox" id="deposit-paid" ${paid ? 'checked' : ''}>
+          <span>Señal pagada</span>
+        </label>
+        <div class="field ${paid ? '' : 'hidden'}" id="deposit-amount-field">
+          <label class="field__label" for="deposit-amount">Importe recibido (€)</label>
+          <input type="text" inputmode="decimal" id="deposit-amount" class="input" value="${amountInputValue(paid ? paid.amount : min)}" autocomplete="off" aria-describedby="deposit-amount-error">
+          <span id="deposit-amount-error" class="field__error hidden" role="alert">Indica un importe mayor que cero.</span>
+          <span class="text-muted" style="font-size: 12px;">${storedLine}</span>
+        </div>
+      </article>`;
+}
+
+/** Wires the card: live minimum on percentage input, paid toggle, amount. */
+function bindDepositCard(r) {
+  const pctInput = el('deposit-pct');
+  const paidBox = el('deposit-paid');
+  const amountInput = el('deposit-amount');
+  if (!pctInput || !paidBox || !amountInput) return;
+  const total = totalVatIncOf(r);
+
+  pctInput.addEventListener('input', () => {
+    const pct = parseDepositPct(pctInput.value);
+    if (pct === null) { showFieldError('deposit-pct'); return; }
+    clearFieldError('deposit-pct');
+    state.deposit.pct = pct;
+    const min = depositMinimum(total, pct);
+    el('deposit-min-label').textContent = min > 0 ? 'Señal mínima' : 'Sin señal mínima';
+    el('deposit-min').textContent = min > 0 ? formatEur(min) : '—';
+    const hint = el('deposit-hint');
+    hint.textContent = depositHintText(r, pct);
+    hint.classList.toggle('hidden', min <= 0);
+    // The paid amount follows the minimum until the user types their own.
+    if (!state.deposit.paid || !state.deposit.paid.edited) {
+      amountInput.value = amountInputValue(min);
+      if (state.deposit.paid) state.deposit.paid = { amount: min, edited: false };
+    }
+  });
+
+  paidBox.addEventListener('change', () => {
+    const field = el('deposit-amount-field');
+    if (paidBox.checked) {
+      field.classList.remove('hidden');
+      const typed = parseDepositAmount(amountInput.value);
+      state.deposit.paid = { amount: typed ?? depositMinimum(total, currentDepositPct()), edited: false };
+      amountInput.focus();
+      amountInput.select();
+    } else {
+      field.classList.add('hidden');
+      clearFieldError('deposit-amount');
+      state.deposit.paid = null;
+    }
+  });
+
+  amountInput.addEventListener('input', () => {
+    const amount = parseDepositAmount(amountInput.value);
+    if (amount === null) { showFieldError('deposit-amount'); return; }
+    clearFieldError('deposit-amount');
+    state.deposit.paid = { amount, edited: true };
+  });
+}
+
+/**
+ * Reads + validates the "Señal" card at save time (mirrors
+ * collectClientOrInvalid). Returns { pct, min_amount, paid } with
+ * paid = { amount } | null, or null when a field is invalid (inline error
+ * shown, field focused).
+ */
+function collectDepositOrInvalid() {
+  const total = totalVatIncOf(lastResult);
+  const pctInput = el('deposit-pct');
+  const paidBox = el('deposit-paid');
+  const amountInput = el('deposit-amount');
+  if (!pctInput || !paidBox || !amountInput) {
+    // Card not on screen (defensive): config default, unpaid.
+    const pct = CFG.quote_settings.deposit_pct;
+    return { pct, min_amount: depositMinimum(total, pct), paid: null };
+  }
+  clearFieldError('deposit-pct');
+  clearFieldError('deposit-amount');
+  const pct = parseDepositPct(pctInput.value);
+  if (pct === null) { showFieldError('deposit-pct'); pctInput.focus(); return null; }
+  let paid = null;
+  if (paidBox.checked) {
+    const amount = parseDepositAmount(amountInput.value);
+    if (amount === null) { showFieldError('deposit-amount'); amountInput.focus(); return null; }
+    paid = { amount };
+  }
+  return { pct, min_amount: depositMinimum(total, pct), paid };
+}
+
+/**
+ * Loads a stored quote's deposit into the card (reopen, or right after a
+ * save): its per-quote percentage (else config) and its payment. Re-renders
+ * the card so there is one markup source.
+ */
+function syncDepositCard(quote) {
+  const deposit = quote && quote.deposit;
+  const paid = quote && quote.deposit_paid;
+  const hasPaid = Boolean(paid && Number.isFinite(paid.amount));
+  state.deposit = {
+    pct: deposit && Number.isFinite(deposit.pct) ? deposit.pct : null,
+    paid: hasPaid ? { amount: paid.amount, edited: true } : null
+  };
+  state.depositStored = hasPaid ? { amount: paid.amount, at: paid.at, by: paid.by } : null;
+  const card = el('deposit-card');
+  if (!card) return;
+  const r = quote.result || quote;
+  card.outerHTML = renderDepositCard(r);
+  bindDepositCard(r);
 }
 
 function buildBreakdownRows(r) {
@@ -2439,6 +2614,12 @@ function copySummary() {
     const parts = addonParts(r.extras_detail);
     lines.push(`Extras opcionales (sin IVA): ${formatEur(r.extras_no_vat)} (${parts.join(' · ')})`);
   }
+  const pct = currentDepositPct();
+  const min = depositMinimum(totalVatIncOf(r), pct);
+  if (min > 0) lines.push(`Señal mínima (${formatDepositPct(pct)}): ${formatEur(min)}`);
+  if (state.depositStored) {
+    lines.push(`Señal recibida: ${formatEur(state.depositStored.amount)} (${formatValidDate(state.depositStored.at)})`);
+  }
   navigator.clipboard.writeText(lines.join('\n')).catch(() => {});
 }
 
@@ -2451,6 +2632,7 @@ function escapeHTML(s) {
 function resetForm() {
   state.editingQuoteId = null; // Limpiar starts a fresh quote
   state.editingQuoteToken = null;
+  resetDepositState();
   if (state.packId) renderPackInputs(state.packId);
   el('cant_3xl').value = '0';
   el('cant_4xl').value = '0';
@@ -2462,6 +2644,7 @@ function resetForm() {
 function backToSelection() {
   state.editingQuoteId = null;
   state.editingQuoteToken = null;
+  resetDepositState();
   state.packId = null;
   hide('error-msg');
   document.querySelectorAll('.pack-card').forEach(card => card.classList.remove('is-selected'));
@@ -3578,6 +3761,7 @@ async function onHistoryAction(action, id) {
         lastOpt    = opt;         // snapshot the saved inputs so saving without recalc stores the correct opt
         renderResult(result);     // render the breakdown (calls syncClientCard(result) internally)
         syncClientCard(quote);    // re-prefill customer + validity from the full quote (overrides result)
+        syncDepositCard(quote);   // load the stored señal (percentage + payment) into the step-3 card
         goToScreen('resultado');  // land on the breakdown (current UX)
         state.editingQuoteId = quote.id;     // set AFTER selectPack, which reset it
         state.editingQuoteToken = r.token;   // conflict token captured at reopen (echoed back on edit-save)
@@ -3589,6 +3773,7 @@ async function onHistoryAction(action, id) {
         lastResult = result;
         renderResult(result);     // calls syncClientCard(result) — no customer on result
         syncClientCard(quote);    // re-prefill customer + validity from the full quote
+        syncDepositCard(quote);   // load the stored señal (percentage + payment) into the step-3 card
         goToScreen('resultado');
         if (pending) {
           await window.packprice.showInfo({
@@ -3833,13 +4018,16 @@ function computePvpDeviation(result) {
 async function persistCurrentQuote(client) {
   const ts = new Date().toISOString();
   const isEdit = Boolean(state.editingQuoteId);
+  const deposit = collectDepositOrInvalid();
+  if (!deposit) return null; // inline error already shown
 
   const draft = buildQuoteDraft(lastResult, {
     user: SETTINGS.user_name,
     configVersion: CFG && CFG.version,
     packId: state.packId,
     customer: { name: client.name, phone: client.phone },
-    opt: lastOpt
+    opt: lastOpt,
+    deposit: { pct: deposit.pct, min_amount: deposit.min_amount }
   });
   draft.valid_until = computeValidUntil(ts);
   draft.status = 'pending'; // new quotes start pending; on edit the backend preserves the existing status
@@ -3893,7 +4081,42 @@ async function persistCurrentQuote(client) {
     }
   }
 
-  return { quote: r.quote, queued };
+  let saved = r.quote;
+  // The paid mark is workflow (design §5 step 3): its own op AFTER the
+  // content save, only when it changed, and only if the save reached the
+  // backend (a queued save has no final id yet).
+  const wanted = deposit.paid;                // { amount } | null
+  const stored = saved.deposit_paid || null;  // what the backend holds now
+  const changed = Boolean(wanted) !== Boolean(stored)
+    || Boolean(wanted && stored && wanted.amount !== stored.amount);
+  if (changed) {
+    if (queued) {
+      await window.packprice.showInfo({
+        titulo: 'Señal pendiente',
+        mensaje: 'La señal se podrá marcar desde el historial cuando el presupuesto se sincronice.'
+      });
+    } else {
+      const d = await window.packprice.setQuoteDeposit({
+        id: saved.id,
+        paid: wanted ? { amount: wanted.amount } : null
+      });
+      if (d && d.ok && d.quote) {
+        saved = d.quote;
+        // File mode: the deposit write moved the content hash, so an editor
+        // still open on this quote must carry the fresh token (null ⇒ force).
+        if (isEdit) state.editingQuoteToken = d.token || null;
+      } else {
+        await window.packprice.showError({
+          titulo: 'No se pudo registrar la señal',
+          mensaje: d && d.offline
+            ? 'Sin conexión con el almacén de presupuestos. El presupuesto se guardó; marca la señal desde el historial cuando vuelva la conexión.'
+            : ((d && d.error) || 'Error desconocido')
+        });
+      }
+    }
+  }
+  syncDepositCard(saved);
+  return { quote: saved, queued };
 }
 
 async function saveCurrentQuote() {
