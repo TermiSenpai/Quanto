@@ -28,7 +28,12 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const { SCHEMA_VERSION, ADMIN_PASSWORD_PLACEHOLDER, buildEmptyConfig, applyQuoteSettingsDefaults } = require('./config.default');
+const {
+  SCHEMA_VERSION,
+  ADMIN_PASSWORD_PLACEHOLDER,
+  buildEmptyConfig,
+  applyQuoteSettingsDefaults
+} = require('./config.default');
 const {
   validateConfigShape,
   stripAdminPassword,

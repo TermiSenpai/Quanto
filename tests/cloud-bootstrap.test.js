@@ -176,6 +176,18 @@ describe('loadCatalog', () => {
     expect(res.config).toEqual(expectedConfig('2026-06-11T08:00:00.000Z'));
   });
 
+  test('cloud down + legacy cache: the cache fallback also fills deposit_pct', async () => {
+    const legacyEntities = { ...entities, company: entities.company.filter((r) => r.key !== 'quote_settings.deposit_pct') };
+    writeCache(cachePath, { fetchedAt: '2026-06-11T08:00:00.000Z', catalogVersion: 5, entities: legacyEntities });
+    const client = { async query() { throw new Error('No se pudo conectar con Cloudflare — comprueba la conexión a internet'); } };
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.loadCatalog(SETTINGS);
+
+    expect(res.ok).toBe(true);
+    expect(res.source).toBe('cache');
+    expect(res.config.quote_settings.deposit_pct).toBe(0.4);
+  });
+
   test('invalid cloud data also falls back to the last good cache', async () => {
     writeCache(cachePath, { fetchedAt: '2026-06-11T08:00:00.000Z', catalogVersion: 5, entities });
     // Reachable D1 but an empty/garbage catalog: validation must reject
@@ -602,10 +614,12 @@ describe('provision', () => {
 // version map) AND the writeEntities guarded-write traffic. Per-id main
 // rows carry a `version` column (db/migrations/0001_init.sql) so the
 // version derivation and the UPDATE guards have something real to bite.
-function fakeSaveClient({ staleIds = new Set(), serverRows = {}, metaRow = META_ROW } = {}) {
+function fakeSaveClient({ staleIds = new Set(), serverRows = {}, metaRow = META_ROW, entities: entitiesOverride } = {}) {
   // The live catalog rows: disassemble output with a version stamped onto
   // every per-id main row (children/globals have no version column).
-  const entities = disassemble(buildDefaultConfig());
+  // A caller may inject its own entities (e.g. a legacy `company` table
+  // missing a row) to exercise the loadEntities/writeEntities baseline.
+  const entities = entitiesOverride || disassemble(buildDefaultConfig());
   for (const table of ['packs', 'products', 'suppliers', 'addons']) {
     entities[table] = entities[table].map((r) => ({ ...r, version: 1 }));
   }
@@ -754,6 +768,30 @@ describe('saveCatalog', () => {
     expect(res.ok).toBe(true);
     expect(res.results).toContainEqual({ entityType: 'product', id: 'URBAN', status: 'deleted' });
     expect(readCache(cachePath).versions.product.URBAN).toBeUndefined();
+  });
+
+  test('does not report a phantom company change when the baseline predates deposit_pct', async () => {
+    // The live cloud rows predate quote_settings.deposit_pct (legacy
+    // catalog); the renderer's newCfg (built from the empty-config
+    // defaults) carries it, like every current config does.
+    const legacyEntities = disassemble(buildDefaultConfig());
+    legacyEntities.company = legacyEntities.company.filter((r) => r.key !== 'quote_settings.deposit_pct');
+    const client = fakeSaveClient({ entities: legacyEntities });
+    const { bootstrap } = makeBootstrap(client);
+    // ONE real edit elsewhere; company/quote_settings are untouched by
+    // the user.
+    const newCfg = editedCfg((c) => { c.products.BEAGLE.name = 'Camiseta editada'; });
+
+    const res = await bootstrap.saveCatalog(SETTINGS, {
+      newCfg, expectedVersions: rendererVersions(), user: 'Alberto'
+    });
+
+    expect(res.ok).toBe(true);
+    // Only the real product edit lands — the missing deposit_pct is
+    // defaulted onto the baseline too, so it never diffs as a phantom
+    // company change (which would also wrongly engage the catalog-wide
+    // version guard for an untouched entity).
+    expect(res.results).toEqual([{ entityType: 'product', id: 'BEAGLE', status: 'written' }]);
   });
 });
 

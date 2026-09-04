@@ -95,10 +95,12 @@ quote_settings: {
   renderer, never by rewriting files on boot: `main.js` `config:read` (file
   mode, after `readAndMigrateConfig` + `validateConfigSchema`) and
   `lib/cloud-bootstrap.js` `toValidatedConfig` (cloud mode, after `assemble`).
-  It is persisted naturally on the next admin save (file: whole config; cloud:
-  the `company` entity, which already folds in `quote_settings`). This keeps
-  the "a v4 config is returned untouched" invariant of `lib/migrations.js`
-  and avoids a mass rewrite of every customer's `config.js`.
+  It is persisted naturally on the next admin save (file: whole config;
+  cloud: the next save that really edits the `company`/`quote_settings`
+  entity — the save diff is computed against a defaulted baseline, so a
+  legacy catalog never reports a phantom change). This keeps the "a v4
+  config is returned untouched" invariant of `lib/migrations.js` and
+  avoids a mass rewrite of every customer's `config.js`.
 - `lib/config-schema.js` `validateQuoteSettings`: `deposit_pct`, when defined,
   must be a finite number in `[0, 1]` (Spanish error otherwise).
 - The renderer reads `CFG.quote_settings.deposit_pct` and **never hardcodes a
