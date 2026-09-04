@@ -145,8 +145,10 @@ Rules:
     `0` when either input is not a positive finite number. Rounding to cents
     first avoids `400.00000000000006 → 401`.
   - `depositRemaining(totalVatInc, paidAmount)` → `max(0, round2(total − paid))`.
-  - `parseDepositPct(text)` → fraction or `null` (accepts `1`–`100`, decimals
-    allowed, comma or dot).
+  - `parseDepositPct(text)` → fraction or `null` (accepts `0`–`100` (0 % = no
+    minimum deposit); decimals allowed, comma or dot; Spanish grouping dots
+    are stripped when a comma marks the decimals, an ambiguous dot-group such
+    as `1.234` is rejected).
   - `parseDepositAmount(text)` → euros rounded to cents or `null` (must be
     `> 0`).
   The PDF context (`lib/pdf-templates.js`) does **not** recompute the minimum:
@@ -264,7 +266,7 @@ Behaviour:
   `CFG.quote_settings.deposit_pct` (new quote), shown as a percent. Editing it
   recomputes the minimum on `input`, for **this quote only** (stored in
   `quote.deposit.pct`). Inline error (same `.field__error` pattern as the
-  client card) when outside `1`–`100`.
+  client card) when outside `0`–`100`.
 - **Minimum** = `depositMinimum(r.total_vat_inc, pct)`, mono, whole euros.
 - **"Señal pagada" checkbox** reveals the amount input, prefilled with the
   minimum, editable (2 decimals, `> 0`; inline error otherwise). A reopened
@@ -332,7 +334,7 @@ because the built-ins use `{{#if flag}}`; values may be dotted):
 
 | Field | Value |
 |---|---|
-| `has_deposit` | `quote.deposit` present with a finite `min_amount` |
+| `has_deposit` | `quote.deposit` present with `min_amount > 0` |
 | `deposit_pct` | `"40 %"` (Spanish locale, up to 2 decimals: `"12,5 %"`) |
 | `deposit_min` | `"494,00 €"` |
 | `deposit_paid` | `quote.deposit_paid` present |

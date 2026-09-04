@@ -2,9 +2,10 @@
 // Deposit ("señal") arithmetic (renderer/deposit.js)
 // ============================================================
 // Pure helpers behind the step-3 "Señal" card and the history inline
-// form: the minimum (percentage of the VAT-inclusive total, rounded UP
-// to the euro), the remaining balance, and the two input parsers.
-// The percentage is always an argument — the default lives in config.
+// form: the minimum (percentage of the VAT-inclusive total, rounded to
+// cents before ceiling to the whole euro), the remaining balance, and
+// the two input parsers. The percentage is always an argument — the
+// default lives in config.
 // ============================================================
 import { describe, test, expect } from 'vitest';
 import {
@@ -76,12 +77,22 @@ describe('parseDepositPct', () => {
     expect(parseDepositPct('12.5')).toBe(0.125);
   });
 
-  test('rejects 0, above 100, blanks and garbage', () => {
-    expect(parseDepositPct('0')).toBeNull();
+  test('rejects negatives, above 100, blanks and garbage', () => {
+    expect(parseDepositPct('-1')).toBeNull();
     expect(parseDepositPct('101')).toBeNull();
     expect(parseDepositPct('')).toBeNull();
     expect(parseDepositPct('abc')).toBeNull();
     expect(parseDepositPct(null)).toBeNull();
+  });
+
+  test('accepts the bounds 0 and 100 (0 % = no minimum deposit)', () => {
+    expect(parseDepositPct('0')).toBe(0);
+    expect(parseDepositPct('1')).toBe(0.01);
+    expect(parseDepositPct('100')).toBe(1);
+  });
+
+  test('rounds the percentage to two decimals (12,345 → 12,35 %)', () => {
+    expect(parseDepositPct('12,345')).toBe(0.1235);
   });
 });
 
@@ -89,7 +100,7 @@ describe('parseDepositAmount', () => {
   test('parses euros with comma or dot decimals, rounded to cents', () => {
     expect(parseDepositAmount('494')).toBe(494);
     expect(parseDepositAmount('493,82')).toBe(493.82);
-    expect(parseDepositAmount('493.826')).toBe(493.83);
+    expect(parseDepositAmount('493,826')).toBe(493.83);
   });
 
   test('rejects zero, negatives, blanks and garbage', () => {
@@ -98,17 +109,27 @@ describe('parseDepositAmount', () => {
     expect(parseDepositAmount('')).toBeNull();
     expect(parseDepositAmount('cinco')).toBeNull();
   });
+
+  test('Spanish grouping: dots are stripped when a comma marks the decimals, an ambiguous dot-group is rejected', () => {
+    expect(parseDepositAmount('1.234,56')).toBe(1234.56);
+    expect(parseDepositAmount('1 234')).toBe(1234);
+    expect(parseDepositAmount('1.234')).toBeNull();
+    expect(parseDepositAmount('493.826')).toBeNull();
+    expect(parseDepositAmount('1234.56')).toBe(1234.56);
+  });
 });
 
 describe('formatDepositPct / pctToPercentInput', () => {
   test('formats a fraction as a Spanish percentage label', () => {
     expect(formatDepositPct(0.4)).toBe('40 %');
     expect(formatDepositPct(0.125)).toBe('12,5 %');
+    expect(formatDepositPct(0.1234)).toBe('12,34 %');
     expect(formatDepositPct(undefined)).toBe('');
   });
 
   test('turns a fraction into the number the input shows', () => {
     expect(pctToPercentInput(0.4)).toBe(40);
     expect(pctToPercentInput(0.125)).toBe(12.5);
+    expect(pctToPercentInput(undefined)).toBe('');
   });
 });

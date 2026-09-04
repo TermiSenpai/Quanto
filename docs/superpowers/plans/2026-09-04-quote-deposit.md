@@ -300,9 +300,10 @@ Create `tests/deposit.test.js`:
 // Deposit ("señal") arithmetic (renderer/deposit.js)
 // ============================================================
 // Pure helpers behind the step-3 "Señal" card and the history inline
-// form: the minimum (percentage of the VAT-inclusive total, rounded UP
-// to the euro), the remaining balance, and the two input parsers.
-// The percentage is always an argument — the default lives in config.
+// form: the minimum (percentage of the VAT-inclusive total, rounded to
+// cents before ceiling to the whole euro), the remaining balance, and
+// the two input parsers. The percentage is always an argument — the
+// default lives in config.
 // ============================================================
 import { describe, test, expect } from 'vitest';
 import {
@@ -374,12 +375,22 @@ describe('parseDepositPct', () => {
     expect(parseDepositPct('12.5')).toBe(0.125);
   });
 
-  test('rejects 0, above 100, blanks and garbage', () => {
-    expect(parseDepositPct('0')).toBeNull();
+  test('rejects negatives, above 100, blanks and garbage', () => {
+    expect(parseDepositPct('-1')).toBeNull();
     expect(parseDepositPct('101')).toBeNull();
     expect(parseDepositPct('')).toBeNull();
     expect(parseDepositPct('abc')).toBeNull();
     expect(parseDepositPct(null)).toBeNull();
+  });
+
+  test('accepts the bounds 0 and 100 (0 % = no minimum deposit)', () => {
+    expect(parseDepositPct('0')).toBe(0);
+    expect(parseDepositPct('1')).toBe(0.01);
+    expect(parseDepositPct('100')).toBe(1);
+  });
+
+  test('rounds the percentage to two decimals (12,345 → 12,35 %)', () => {
+    expect(parseDepositPct('12,345')).toBe(0.1235);
   });
 });
 
@@ -387,7 +398,7 @@ describe('parseDepositAmount', () => {
   test('parses euros with comma or dot decimals, rounded to cents', () => {
     expect(parseDepositAmount('494')).toBe(494);
     expect(parseDepositAmount('493,82')).toBe(493.82);
-    expect(parseDepositAmount('493.826')).toBe(493.83);
+    expect(parseDepositAmount('493,826')).toBe(493.83);
   });
 
   test('rejects zero, negatives, blanks and garbage', () => {
@@ -396,18 +407,28 @@ describe('parseDepositAmount', () => {
     expect(parseDepositAmount('')).toBeNull();
     expect(parseDepositAmount('cinco')).toBeNull();
   });
+
+  test('Spanish grouping: dots are stripped when a comma marks the decimals, an ambiguous dot-group is rejected', () => {
+    expect(parseDepositAmount('1.234,56')).toBe(1234.56);
+    expect(parseDepositAmount('1 234')).toBe(1234);
+    expect(parseDepositAmount('1.234')).toBeNull();
+    expect(parseDepositAmount('493.826')).toBeNull();
+    expect(parseDepositAmount('1234.56')).toBe(1234.56);
+  });
 });
 
 describe('formatDepositPct / pctToPercentInput', () => {
   test('formats a fraction as a Spanish percentage label', () => {
     expect(formatDepositPct(0.4)).toBe('40 %');
     expect(formatDepositPct(0.125)).toBe('12,5 %');
+    expect(formatDepositPct(0.1234)).toBe('12,34 %');
     expect(formatDepositPct(undefined)).toBe('');
   });
 
   test('turns a fraction into the number the input shows', () => {
     expect(pctToPercentInput(0.4)).toBe(40);
     expect(pctToPercentInput(0.125)).toBe(12.5);
+    expect(pctToPercentInput(undefined)).toBe('');
   });
 });
 ```
@@ -438,12 +459,25 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-// "40", "12,5", "493.82" → number; null for anything else. No thousands
-// separators (the inputs are short amounts typed at the counter).
+// Spanish-locale number parsing ("40", "12,5", "1.234,56"): a comma
+// marks the decimals, and any dots before it are thousands grouping,
+// stripped before parsing. With no comma, a value is read as dot-decimal
+// UNLESS the whole string is dot-grouped in groups of exactly three
+// digits ("1.234", "493.826") — thousands or a decimal typo is
+// ambiguous there, so it is rejected rather than guessed at. Whitespace,
+// including a thousands separator ("1 234"), is stripped first.
 function parseLocaleNumber(text) {
   if (typeof text === 'number') return Number.isFinite(text) ? text : null;
   if (typeof text !== 'string') return null;
-  const s = text.trim().replace(/\s/g, '').replace(',', '.');
+  const trimmed = text.trim().replace(/\s/g, '');
+  let s;
+  if (trimmed.includes(',')) {
+    s = trimmed.replace(/\./g, '').replace(',', '.');
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(trimmed)) {
+    return null;
+  } else {
+    s = trimmed;
+  }
   if (!/^\d+(\.\d+)?$/.test(s)) return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
@@ -467,7 +501,13 @@ export function depositMinimum(totalVatInc, pct) {
   return Math.ceil(round2(totalVatInc * pct));
 }
 
-/** Balance still due after a paid deposit; never negative. */
+/**
+ * Balance still due after a paid deposit; never negative.
+ *
+ * @param {number} totalVatInc - VAT-inclusive quote total
+ * @param {number} paidAmount - amount already paid (missing/invalid treated as 0)
+ * @returns {number} remaining balance, rounded to cents, floored at 0
+ */
 export function depositRemaining(totalVatInc, paidAmount) {
   const total = Number.isFinite(totalVatInc) ? totalVatInc : 0;
   const paid = Number.isFinite(paidAmount) ? paidAmount : 0;
@@ -476,15 +516,25 @@ export function depositRemaining(totalVatInc, paidAmount) {
 
 /**
  * Percentage typed in the card ("40", "12,5") → fraction (0.4, 0.125).
- * Accepts 1–100; null otherwise.
+ * Accepts 0–100 (0 % means no minimum deposit for this quote); rounds to
+ * two decimals before converting to a fraction (12,345 → 12.35 % → 0.1235).
+ *
+ * @param {string|number} text - the raw input value
+ * @returns {number|null} fraction in [0, 1], or null when unparseable/out of range
  */
 export function parseDepositPct(text) {
   const n = parseLocaleNumber(text);
-  if (n === null || n < 1 || n > 100) return null;
+  if (n === null || n < 0 || n > 100) return null;
   return round2(n) / 100;
 }
 
-/** Amount in euros ("494", "493,82") → number to cents; must be > 0, else null. */
+/**
+ * Amount in euros ("494", "493,82", "1.234,56") typed at the counter →
+ * number rounded to cents. Must be strictly positive, else null.
+ *
+ * @param {string|number} text - the raw input value
+ * @returns {number|null} amount in euros to cents, or null when unparseable/non-positive
+ */
 export function parseDepositAmount(text) {
   const n = parseLocaleNumber(text);
   if (n === null || n <= 0) return null;
@@ -497,7 +547,13 @@ export function formatDepositPct(pct) {
   return (pct * 100).toLocaleString('es-ES', { maximumFractionDigits: 2 }) + ' %';
 }
 
-/** The number the percentage input shows for a fraction: 0.4 → 40. */
+/**
+ * The number the percentage input shows for a fraction: 0.4 → 40.
+ *
+ * @param {number} pct - fraction, e.g. 0.4
+ * @returns {number|''} the percent value, or '' to clear the input when
+ *   pct is not a finite number
+ */
 export function pctToPercentInput(pct) {
   return Number.isFinite(pct) ? round2(pct * 100) : '';
 }
@@ -1594,7 +1650,7 @@ Replace the `confirmation` computation (the `const channel = …` block and the 
   // a quote saved before the feature but marked paid from the history has
   // deposit_paid and no stored minimum.
   const deposit = quote?.deposit;
-  const hasDeposit = Boolean(deposit && Number.isFinite(deposit.min_amount));
+  const hasDeposit = Boolean(deposit && Number.isFinite(deposit.min_amount) && deposit.min_amount > 0);
   const paid = quote?.deposit_paid;
   const depositPaid = Boolean(paid && Number.isFinite(paid.amount));
   const remaining = depositPaid ? Math.max(0, Math.round((total - paid.amount) * 100) / 100) : 0;
@@ -1791,7 +1847,7 @@ function renderDepositCard(r) {
             <input type="text" inputmode="decimal" id="deposit-pct" class="input" value="${pctToPercentInput(pct)}" autocomplete="off" aria-describedby="deposit-pct-error">
             <span class="text-muted">%</span>
           </div>
-          <span id="deposit-pct-error" class="field__error hidden" role="alert">Indica un porcentaje entre 1 y 100.</span>
+          <span id="deposit-pct-error" class="field__error hidden" role="alert">Indica un porcentaje entre 0 y 100.</span>
         </div>
         <div class="deposit-card__min">
           <span>Señal mínima</span>
