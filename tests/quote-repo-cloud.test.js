@@ -492,6 +492,7 @@ describe('0003_quote_deposits migration', () => {
     expect(m.sql).toMatch(/CREATE TABLE IF NOT EXISTS quote_deposits/);
     expect(m.sql).not.toMatch(/ALTER TABLE/i);
     expect(m.sql).toMatch(/quote_id\s+TEXT PRIMARY KEY/);
+    expect(m.sql).toMatch(/REFERENCES quotes\(id\)/);
     expect(m.sql).toMatch(/amount\s+REAL NOT NULL/);
     expect(m.sql).toMatch(/paid_at\s+TEXT NOT NULL/);
   });
@@ -575,5 +576,11 @@ describe('setQuoteDeposit', () => {
     await deleteFullQuote(client, 'PP-2026-0001');
     expect(client.calls.some((c) => c.sql === 'DELETE FROM quote_deposits WHERE quote_id = ?')).toBe(true);
     expect(client.deposits.size).toBe(0);
+    // FK-mandated order: the deposit row (references quotes(id)) must be
+    // deleted before the flat quotes row.
+    const depIdx = client.calls.findIndex((c) => /DELETE FROM quote_deposits/.test(c.sql));
+    const flatIdx = client.calls.findIndex((c) => /DELETE FROM quotes\b/.test(c.sql));
+    expect(depIdx).toBeGreaterThanOrEqual(0);
+    expect(depIdx).toBeLessThan(flatIdx);
   });
 });

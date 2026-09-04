@@ -76,6 +76,19 @@ function fakeClient() {
   const items = [];           // { quote_id, ... }
   const addons = [];          // { quote_id, ... }
   const calls = [];
+  const deposits = new Map(); // quote_id → { amount, paid_at, paid_by }
+
+  // getFullQuote/listFullQuotes LEFT JOIN quote_deposits: expose the
+  // deposit columns (null when unpaid) on every flat row they return.
+  function withDeposit(row) {
+    const d = deposits.get(row.id);
+    return {
+      ...row,
+      deposit_amount: d ? d.amount : null,
+      deposit_paid_at: d ? d.paid_at : null,
+      deposit_paid_by: d ? d.paid_by : null
+    };
+  }
 
   function insertOrIgnoreQuotes(sql, params) {
     const cols = sql.match(/\(([^)]*)\) VALUES/)[1].split(',').map((c) => c.trim());
@@ -92,6 +105,7 @@ function fakeClient() {
     payloads,
     items,
     addons,
+    deposits,
     async query(sql, params = []) {
       calls.push({ sql, params });
 
@@ -153,6 +167,16 @@ function fakeClient() {
         const had = payloads.delete(params[0]);
         return { results: [], meta: { changes: had ? 1 : 0 } };
       }
+      if (/INSERT INTO quote_deposits/.test(sql)) {
+        // upsert: [quote_id, amount, paid_at, paid_by]
+        const [quote_id, amount, paid_at, paid_by] = params;
+        deposits.set(quote_id, { amount, paid_at, paid_by });
+        return { results: [], meta: { changes: 1 } };
+      }
+      if (/DELETE FROM quote_deposits/.test(sql)) {
+        const had = deposits.delete(params[0]);
+        return { results: [], meta: { changes: had ? 1 : 0 } };
+      }
       if (/DELETE FROM quotes/.test(sql)) {
         const had = quotes.delete(params[0]);
         return { results: [], meta: { changes: had ? 1 : 0 } };
@@ -163,9 +187,9 @@ function fakeClient() {
         return { results: p ? [{ quote_id: id, payload: p.payload, version: p.version, updated_at: p.updated_at }] : [], meta: {} };
       }
       if (/SELECT [^]*FROM quotes/i.test(sql)) {
-        if (/WHERE id = \?/.test(sql)) {
+        if (/WHERE (q\.)?id = \?/.test(sql)) {
           const row = quotes.get(params[0]);
-          return { results: row ? [row] : [], meta: {} };
+          return { results: row ? [withDeposit(row)] : [], meta: {} };
         }
         if (/LIKE \?/.test(sql)) {
           const like = String(params[0]);
@@ -173,8 +197,8 @@ function fakeClient() {
           const rows = [...quotes.values()].filter((r) => String(r.id).startsWith(prefix)).map((r) => ({ id: r.id }));
           return { results: rows, meta: {} };
         }
-        // plain list (listFullQuotes) — return the flat rows as-is
-        return { results: [...quotes.values()], meta: {} };
+        // plain list (listFullQuotes) — return the flat rows joined with any deposit
+        return { results: [...quotes.values()].map(withDeposit), meta: {} };
       }
       return { results: [], meta: { changes: 0 } };
     },
