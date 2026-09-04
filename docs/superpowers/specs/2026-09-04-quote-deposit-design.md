@@ -244,7 +244,11 @@ undefined). `listQuotes` already returns full records, so list rows carry
   editing that quote); unknown id ⇒ `{ ok: false, error: 'No se encontró el
   presupuesto <id>.' }`; backend unreachable ⇒ `{ ok: false, offline: true,
   error }` (no outbox — the renderer shows the standard offline notice, never
-  a silent loss). Any other error ⇒ `{ ok: false, error }` + log.
+  a silent loss). Any other error ⇒ `{ ok: false, error }` + log. A
+  provisional `PP-PENDING-…` id ⇒ `{ ok: false, pending: true, error }` (the
+  create is still queued; the renderer shows the message). If the post-write
+  token re-read fails, the reply is still `ok: true` with `token: null` (the
+  renderer's next edit-save forces), and the failure is logged.
 - `quotes:update` (status chips) is unchanged.
 
 ---

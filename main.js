@@ -1754,15 +1754,21 @@ ipcMain.handle('quotes:set-deposit', async (event, payload) => {
     return { ok: false, pending: true, error: 'Este presupuesto aún no se ha sincronizado; podrás marcar la señal cuando tenga su ID definitivo.' };
   }
   const now = new Date().toISOString();
-  const stamped = paid ? { amount: paid.amount, at: now, by: depositAuthor(settings) } : null;
-  const repo = quoteRepo(settings);
+  const stamped = paid == null ? null : { amount: paid && paid.amount, at: now, by: depositAuthor(settings) };
   try {
+    const repo = quoteRepo(settings);
     const updated = await repo.setDepositPaid(id, stamped, now);
     if (!updated) return { ok: false, error: `No se encontró el presupuesto ${id}.` };
     logger.info('quote deposit updated', { id, paid: Boolean(stamped) });
-    // Re-read for the fresh token (file: new mtime/sha256; cloud: version) and
-    // cache the authoritative record rather than the write's own return.
-    const fresh = await repo.getQuote(id);
+    // The write already landed; only the fresh token can still be lost. On a
+    // re-read failure reply token:null ⇒ the renderer's next edit-save forces,
+    // exactly like quotes:get's offline branch. Logged, never swallowed silently.
+    let fresh = null;
+    try {
+      fresh = await repo.getQuote(id);
+    } catch (readErr) {
+      logger.warn('quotes:set-deposit token re-read failed (ignored)', { id, error: readErr.message });
+    }
     const quote = (fresh && fresh.quote) || updated;
     upsertCachedQuote(quote);
     return { ok: true, quote, token: fresh ? fresh.token : null };
