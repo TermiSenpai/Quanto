@@ -20,7 +20,9 @@ import {
   getFullQuote,
   listFullQuotes,
   updateFullQuote,
-  nextCloudQuoteId
+  nextCloudQuoteId,
+  setQuoteDeposit,
+  deleteFullQuote
 } from '../lib/cloud-quotes.js';
 import { loadMigrations } from '../lib/migration-loader.js';
 import { applyMigrations } from '../lib/db-migrator.js';
@@ -77,6 +79,19 @@ function fakeClient() {
   const quotes = new Map();         // id → flat row object
   const payloads = new Map();       // quote_id → { payload, version, updated_at }
   const calls = [];
+  const deposits = new Map();       // quote_id → { amount, paid_at, paid_by }
+
+  // getFullQuote/listFullQuotes LEFT JOIN quote_deposits: expose the
+  // deposit columns (null when unpaid) on every flat row they return.
+  function withDeposit(row) {
+    const d = deposits.get(row.id);
+    return {
+      ...row,
+      deposit_amount: d ? d.amount : null,
+      deposit_paid_at: d ? d.paid_at : null,
+      deposit_paid_by: d ? d.paid_by : null
+    };
+  }
 
   function insertOrIgnoreQuotes(sql, params) {
     // INSERT OR IGNORE INTO quotes (col, col, ...) VALUES (?, ?, ...)
@@ -94,6 +109,7 @@ function fakeClient() {
     calls,
     quotes,
     payloads,
+    deposits,
     async query(sql, params = []) {
       calls.push({ sql, params });
 
@@ -121,6 +137,16 @@ function fakeClient() {
           return { results: [], meta: { changes: 1 } };
         }
         return { results: [], meta: { changes: 0 } };
+      }
+      if (/INSERT INTO quote_deposits/.test(sql)) {
+        // upsert: [quote_id, amount, paid_at, paid_by]
+        const [quote_id, amount, paid_at, paid_by] = params;
+        deposits.set(quote_id, { amount, paid_at, paid_by });
+        return { results: [], meta: { changes: 1 } };
+      }
+      if (/DELETE FROM quote_deposits/.test(sql)) {
+        const had = deposits.delete(params[0]);
+        return { results: [], meta: { changes: had ? 1 : 0 } };
       }
       if (/UPDATE quotes SET/.test(sql)) {
         // stat update: parse the SET columns ("col = ?, col = ?, ...") and map
@@ -151,9 +177,9 @@ function fakeClient() {
       }
       if (/SELECT [^]*FROM quotes/i.test(sql)) {
         // Two shapes: by id (getFullQuote overlay) and the list/year scan.
-        if (/WHERE id = \?/.test(sql)) {
+        if (/WHERE (q\.)?id = \?/.test(sql)) {
           const row = quotes.get(params[0]);
-          return { results: row ? [row] : [], meta: {} };
+          return { results: row ? [withDeposit(row)] : [], meta: {} };
         }
         if (/LIKE \?/.test(sql)) {
           // nextCloudQuoteId: SELECT id ... WHERE id LIKE 'PP-YYYY-%'
@@ -163,7 +189,7 @@ function fakeClient() {
           return { results: rows, meta: {} };
         }
         // plain list
-        return { results: [...quotes.values()], meta: {} };
+        return { results: [...quotes.values()].map(withDeposit), meta: {} };
       }
       return { results: [], meta: { changes: 0 } };
     },
@@ -451,5 +477,103 @@ describe('nextCloudQuoteId', () => {
     await saveFullQuote(client, sampleFullQuote({ id: 'PP-2025-0042' }), { now: '2025-06-12T10:00:00.000Z' });
     const id = await nextCloudQuoteId(client, 2026);
     expect(id).toBe('PP-2026-0001');
+  });
+});
+
+// ── Migration 0003 ───────────────────────────────────────────────
+describe('0003_quote_deposits migration', () => {
+  test('the loader picks up 0003 right after 0002', () => {
+    const ids = loadMigrations(REAL_MIGRATIONS).map((m) => m.id);
+    expect(ids.indexOf('0003_quote_deposits')).toBe(ids.indexOf('0002_quote_payloads') + 1);
+  });
+
+  test('0003 creates quote_deposits with CREATE TABLE IF NOT EXISTS (no ALTER)', () => {
+    const m = loadMigrations(REAL_MIGRATIONS).find((x) => x.id === '0003_quote_deposits');
+    expect(m.sql).toMatch(/CREATE TABLE IF NOT EXISTS quote_deposits/);
+    expect(m.sql).not.toMatch(/ALTER TABLE/i);
+    expect(m.sql).toMatch(/quote_id\s+TEXT PRIMARY KEY/);
+    expect(m.sql).toMatch(/amount\s+REAL NOT NULL/);
+    expect(m.sql).toMatch(/paid_at\s+TEXT NOT NULL/);
+  });
+
+  test('applyMigrations runs 0003 once; a second run is a no-op (ledger)', async () => {
+    const migrations = loadMigrations(REAL_MIGRATIONS);
+    const client = fakeMigratorClient();
+    const opts = { user: 'PC-Test', appVersion: '5.2.0-beta', now: () => '2026-09-04T10:00:00.000Z' };
+    expect(await applyMigrations(client, migrations, opts)).toContain('0003_quote_deposits');
+    expect(await applyMigrations(client, migrations, opts)).toEqual([]);
+  });
+});
+
+// ── setQuoteDeposit ──────────────────────────────────────────────
+describe('setQuoteDeposit', () => {
+  const PAID = { amount: 249, at: '2026-09-04T10:00:00.000Z', by: 'Mostrador' };
+  const NOW = '2026-09-04T10:00:00.000Z';
+
+  test('paid: flips the flat status to accepted FIRST, then upserts quote_deposits', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote());
+    client.calls.length = 0;
+    const res = await setQuoteDeposit(client, { id: 'PP-2026-0001', paid: PAID, now: NOW });
+    expect(res).toEqual({ ok: true, changes: 1 });
+    expect(client.calls[0].sql).toBe('UPDATE quotes SET status = ?, status_ts = ? WHERE id = ?');
+    expect(client.calls[0].params).toEqual(['accepted', NOW, 'PP-2026-0001']);
+    expect(client.calls[1].sql).toMatch(/INSERT INTO quote_deposits[^]*ON CONFLICT\(quote_id\) DO UPDATE/);
+    expect(client.calls[1].params).toEqual(['PP-2026-0001', 249, PAID.at, 'Mostrador']);
+    const quote = await getFullQuote(client, 'PP-2026-0001');
+    expect(quote.status).toBe('accepted');
+    expect(quote.deposit_paid).toEqual(PAID);
+    expect(quote.version).toBe(1); // payload untouched
+  });
+
+  test('clear: status back to pending and the deposit row deleted', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote());
+    await setQuoteDeposit(client, { id: 'PP-2026-0001', paid: PAID, now: NOW });
+    client.calls.length = 0;
+    const res = await setQuoteDeposit(client, { id: 'PP-2026-0001', paid: null, now: NOW });
+    expect(res).toEqual({ ok: true, changes: 1 });
+    expect(client.calls[0].params).toEqual(['pending', NOW, 'PP-2026-0001']);
+    expect(client.calls[1].sql).toBe('DELETE FROM quote_deposits WHERE quote_id = ?');
+    const quote = await getFullQuote(client, 'PP-2026-0001');
+    expect(quote.status).toBe('pending');
+    expect(quote.deposit_paid).toBeNull();
+  });
+
+  test('unknown id: the status UPDATE reports 0 changes and NOTHING else is written', async () => {
+    const client = fakeClient();
+    const res = await setQuoteDeposit(client, { id: 'PP-2026-9999', paid: PAID, now: NOW });
+    expect(res).toEqual({ ok: false, changes: 0 });
+    expect(client.calls).toHaveLength(1);
+  });
+
+  test('getFullQuote: the join is authoritative — a stale payload copy of deposit_paid is overridden with null', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote({ deposit_paid: { amount: 1, at: NOW, by: 'stale' } }));
+    const quote = await getFullQuote(client, 'PP-2026-0001');
+    expect(quote.deposit_paid).toBeNull();
+  });
+
+  test('listFullQuotes rows carry the deposit columns (null when unpaid)', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote());
+    await saveFullQuote(client, sampleFullQuote({ id: 'PP-2026-0002', ts: '2026-06-13T10:00:00.000Z' }));
+    await setQuoteDeposit(client, { id: 'PP-2026-0002', paid: PAID, now: NOW });
+    const list = await listFullQuotes(client);
+    const byId = Object.fromEntries(list.map((r) => [r.id, r]));
+    expect(byId['PP-2026-0001'].deposit_amount).toBeNull();
+    expect(byId['PP-2026-0002'].deposit_amount).toBe(249);
+    expect(byId['PP-2026-0002'].deposit_paid_at).toBe(PAID.at);
+    const sql = client.calls.at(-1).sql;
+    expect(sql).toMatch(/LEFT JOIN quote_deposits/);
+  });
+
+  test('deleteFullQuote also deletes the deposit row', async () => {
+    const client = fakeClient();
+    await saveFullQuote(client, sampleFullQuote());
+    await setQuoteDeposit(client, { id: 'PP-2026-0001', paid: PAID, now: NOW });
+    await deleteFullQuote(client, 'PP-2026-0001');
+    expect(client.calls.some((c) => c.sql === 'DELETE FROM quote_deposits WHERE quote_id = ?')).toBe(true);
+    expect(client.deposits.size).toBe(0);
   });
 });
