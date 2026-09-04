@@ -88,4 +88,11 @@ describe('buildQuoteDraft', () => {
   test('deposit is null when the context has none', () => {
     expect(buildQuoteDraft(BASE_RESULT, BASE_CTX).deposit).toBeNull();
   });
+
+  test('drops anything else the deposit context carries (e.g. a payment)', () => {
+    const draft = buildQuoteDraft(BASE_RESULT, {
+      ...BASE_CTX, deposit: { pct: 0.4, min_amount: 41, paid: { amount: 50 } }
+    });
+    expect(draft.deposit).toEqual({ pct: 0.4, min_amount: 41 });
+  });
 });
