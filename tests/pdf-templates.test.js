@@ -490,6 +490,17 @@ describe('buildQuoteContext — deposit', () => {
     expect(ctx.deposit_remaining).toBe('0,00 €');
   });
 
+  test('a paid deposit on a zero-total quote never claims acceptance', () => {
+    const ctx = buildQuoteContext({
+      ...SAMPLE_CREW_QUOTE,
+      totals: { total_vat_inc: 0 },
+      result: { ...SAMPLE_CREW_QUOTE.result, total_vat_inc: 0 },
+      deposit_paid: { amount: 100, at: '2026-09-04T10:00:00.000Z', by: null }
+    });
+    expect(ctx.deposit_paid).toBe(false);
+    expect(ctx.confirmation).not.toContain('aceptado');
+  });
+
   test('formats a fractional percentage in Spanish (must match renderer/deposit.js formatDepositPct)', () => {
     const ctx = buildQuoteContext({ ...UNPAID_QUOTE, deposit: { pct: 0.125, min_amount: 39 } });
     expect(ctx.deposit_pct).toBe('12,5 %');
@@ -509,6 +520,9 @@ describe('renderQuote — deposit rows in every built-in', () => {
       expect(paid).toContain('Resto pendiente');
       expect(paid).toContain('181,40 €');
       expect(paid).not.toContain('{{');
+      expect(balanced(paid, 'table')).toBe(true);
+      expect(paid.indexOf('Señal mínima')).toBeGreaterThan(paid.indexOf('<tr class="total">'));
+      expect(paid.lastIndexOf('</table>')).toBeGreaterThan(paid.indexOf('Resto pendiente'));
       const unpaid = renderQuote(UNPAID_QUOTE, opts);
       expect(unpaid).toContain('Señal mínima (40 %)');
       expect(unpaid).not.toContain('Señal recibida');
