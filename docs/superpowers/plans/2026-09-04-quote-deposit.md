@@ -324,8 +324,12 @@ describe('depositMinimum', () => {
     expect(depositMinimum(250, 0.4)).toBe(100);
   });
 
-  test('a float artefact never bumps an exact result (100 × 0.7 = 70.00000000000001 → 70)', () => {
-    expect(depositMinimum(100, 0.7)).toBe(70);
+  test('rounds to cents BEFORE ceiling: a float artefact never bumps the euro (100 × 0.07 = 7.000000000000001 → 7)', () => {
+    expect(depositMinimum(100, 0.07)).toBe(7);
+  });
+
+  test('rounds to cents BEFORE ceiling: a sub-cent remainder is not a cent (2.01 × 0.5 = 1.005 → 1)', () => {
+    expect(depositMinimum(2.01, 0.5)).toBe(1);
   });
 
   test('one cent above a whole euro rounds up (100.02 × 0.5 = 50.01 → 51)', () => {
@@ -352,6 +356,10 @@ describe('depositRemaining', () => {
 
   test('treats a missing payment as zero', () => {
     expect(depositRemaining(100, undefined)).toBe(100);
+  });
+
+  test('rounds to cents (0.3 − 0.1 is 0.19999999999999998 in floats → 0.2)', () => {
+    expect(depositRemaining(0.3, 0.1)).toBe(0.2);
   });
 });
 
@@ -416,11 +424,12 @@ Expected: FAIL — cannot resolve `../renderer/deposit.js`.
 // Quanto · Quote deposit ("señal") arithmetic (pure, renderer)
 // ============================================================
 // The workshop asks for a minimum deposit before launching an order: a
-// percentage of the quote total (VAT included), rounded UP to the whole
-// euro because it is a minimum. This module is the single home of that
-// arithmetic plus the two input parsers the step-3 card and the history
-// inline form share. No DOM, no IPC, no config access: the percentage is
-// always an argument (its default lives in config — CLAUDE.md §2.2).
+// percentage of the quote total (VAT included), rounded to cents before
+// ceiling to the whole euro because it is a minimum. This module is the
+// single home of that arithmetic plus the two input parsers the step-3
+// card and the history inline form share. No DOM, no IPC, no config
+// access: the percentage is always an argument (its default lives in
+// config — CLAUDE.md §2.2).
 // ============================================================
 
 'use strict';
@@ -442,8 +451,11 @@ function parseLocaleNumber(text) {
 
 /**
  * Minimum deposit in whole euros for a VAT-inclusive total and a fraction.
- * Rounds to cents BEFORE ceiling so a float artefact such as
- * 70.00000000000001 never becomes 71. 0 for a non-positive/invalid input.
+ * Money is computed at cent precision FIRST, then ceiled to the euro:
+ *   - a float artefact never rounds up (100 × 0.07 = 7.000000000000001 → 7,
+ *     not 8);
+ *   - a sub-cent remainder is not a real cent (2.01 × 0.5 = 1.005 → 1.00 → 1).
+ * 0 for a non-positive/invalid input.
  *
  * @param {number} totalVatInc
  * @param {number} pct - fraction, e.g. 0.4
