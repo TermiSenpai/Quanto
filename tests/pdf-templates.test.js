@@ -431,3 +431,93 @@ describe('renderPreview — settings preview (Task 6B)', () => {
     expect(html).not.toContain('{{');
   });
 });
+
+// ── Deposit ("señal") ────────────────────────────────────────
+const UNPAID_QUOTE = { ...SAMPLE_CREW_QUOTE, deposit: { pct: 0.4, min_amount: 125 } }; // 311.40 × 0.4 = 124.56 → 125
+const PAID_QUOTE = {
+  ...UNPAID_QUOTE,
+  status: 'accepted',
+  deposit_paid: { amount: 130, at: '2026-09-04T10:00:00.000Z', by: 'Mostrador' }
+};
+
+describe('buildQuoteContext — deposit', () => {
+  test('a quote without deposit exposes the flags off and empty strings', () => {
+    const ctx = buildQuoteContext(SAMPLE_CREW_QUOTE);
+    expect(ctx.has_deposit).toBe(false);
+    expect(ctx.deposit_paid).toBe(false);
+    expect(ctx.deposit_min).toBe('');
+    expect(ctx.deposit_remaining).toBe('');
+    expect(ctx.confirmation).not.toMatch(/señal/i);
+  });
+
+  test('a 0 % deposit (no minimum) prints no minimum row', () => {
+    const ctx = buildQuoteContext({ ...SAMPLE_CREW_QUOTE, deposit: { pct: 0, min_amount: 0 } });
+    expect(ctx.has_deposit).toBe(false);
+    expect(ctx.confirmation).not.toMatch(/señal/i);
+  });
+
+  test('an unpaid deposit prints the minimum and asks for it in the confirmation', () => {
+    const ctx = buildQuoteContext(UNPAID_QUOTE, { company: { phone: '942 000 000' } });
+    expect(ctx.has_deposit).toBe(true);
+    expect(ctx.deposit_pct).toBe('40 %');
+    expect(ctx.deposit_min).toBe('125,00 €');
+    expect(ctx.deposit_paid).toBe(false);
+    expect(ctx.confirmation).toContain('942 000 000');
+    expect(ctx.confirmation).toContain('señal mínima de 125,00 €');
+    expect(ctx.confirmation).toContain('No requiere firma');
+  });
+
+  test('a paid deposit prints amount, date and remaining balance; the confirmation says accepted', () => {
+    const ctx = buildQuoteContext(PAID_QUOTE);
+    expect(ctx.deposit_paid).toBe(true);
+    expect(ctx.deposit_paid_amount).toBe('130,00 €');
+    expect(ctx.deposit_paid_date).toBe('04/09/2026');
+    expect(ctx.deposit_remaining).toBe('181,40 €');
+    expect(ctx.confirmation).toContain('Señal de 130,00 € recibida el 04/09/2026');
+    expect(ctx.confirmation).toContain('presupuesto aceptado');
+    expect(ctx.confirmation).toContain('Resto pendiente: 181,40 €');
+  });
+
+  test('a legacy quote (no stored minimum) marked paid from the history still prints the payment', () => {
+    const ctx = buildQuoteContext({ ...SAMPLE_CREW_QUOTE, deposit_paid: { amount: 100, at: '2026-09-04T10:00:00.000Z', by: null } });
+    expect(ctx.has_deposit).toBe(false);
+    expect(ctx.deposit_paid).toBe(true);
+    expect(ctx.deposit_remaining).toBe('211,40 €');
+  });
+
+  test('the remaining balance never goes negative', () => {
+    const ctx = buildQuoteContext({ ...PAID_QUOTE, deposit_paid: { amount: 999, at: '2026-09-04T10:00:00.000Z', by: null } });
+    expect(ctx.deposit_remaining).toBe('0,00 €');
+  });
+
+  test('formats a fractional percentage in Spanish (must match renderer/deposit.js formatDepositPct)', () => {
+    const ctx = buildQuoteContext({ ...UNPAID_QUOTE, deposit: { pct: 0.125, min_amount: 39 } });
+    expect(ctx.deposit_pct).toBe('12,5 %');
+    expect(buildQuoteContext({ ...UNPAID_QUOTE, deposit: { pct: 0.1234, min_amount: 39 } }).deposit_pct).toBe('12,34 %');
+  });
+});
+
+describe('renderQuote — deposit rows in every built-in', () => {
+  for (const id of BUILTIN_IDS) {
+    test(`'${id}' prints the three deposit rows when paid and none without a deposit`, () => {
+      const opts = { templateId: id, company: { name: 'T' }, quoteSettings: { terms: '' }, brand: brandColors('#3D7BD9') };
+      const paid = renderQuote(PAID_QUOTE, opts);
+      expect(paid).toContain('Señal mínima (40 %)');
+      expect(paid).toContain('125,00 €');
+      expect(paid).toContain('Señal recibida (04/09/2026)');
+      expect(paid).toContain('130,00 €');
+      expect(paid).toContain('Resto pendiente');
+      expect(paid).toContain('181,40 €');
+      expect(paid).not.toContain('{{');
+      const unpaid = renderQuote(UNPAID_QUOTE, opts);
+      expect(unpaid).toContain('Señal mínima (40 %)');
+      expect(unpaid).not.toContain('Señal recibida');
+      const none = renderQuote(SAMPLE_CREW_QUOTE, opts);
+      expect(none).not.toMatch(/Señal/);
+    });
+  }
+
+  test('the settings-gallery preview carries the minimum deposit', () => {
+    expect(renderPreview({ templateId: 'clasica' })).toContain('Señal mínima (40 %)');
+  });
+});
