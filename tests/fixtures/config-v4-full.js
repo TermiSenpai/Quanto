@@ -261,7 +261,8 @@ const COMPANY = {
 
 const QUOTE_SETTINGS = {
   validity_days: 30,
-  terms:         'Precios IVA incluido. Validez 30 días desde la fecha de emisión. La aceptación implica conformidad con las condiciones del taller.'
+  terms:         'Precios IVA incluido. Validez 30 días desde la fecha de emisión. La aceptación implica conformidad con las condiciones del taller.',
+  deposit_pct:   0.4
 };
 
 /**

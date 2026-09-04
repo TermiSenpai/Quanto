@@ -11,7 +11,9 @@ import * as configDefault from '../config.default.js';
 import {
   SCHEMA_VERSION,
   PARAMETER_KEYS,
-  buildEmptyConfig
+  buildEmptyConfig,
+  DEFAULT_DEPOSIT_PCT,
+  applyQuoteSettingsDefaults
 } from '../config.default.js';
 import { validateConfigSchema } from '../lib/config-schema.js';
 
@@ -79,5 +81,38 @@ describe('config.default (empty-config builder)', () => {
       }
     };
     expect(() => validateConfigSchema(cfg)).not.toThrow();
+  });
+});
+
+describe('deposit defaults (quote_settings.deposit_pct)', () => {
+  it('buildEmptyConfig carries the default deposit percentage', () => {
+    expect(DEFAULT_DEPOSIT_PCT).toBe(0.4);
+    expect(buildEmptyConfig().quote_settings.deposit_pct).toBe(DEFAULT_DEPOSIT_PCT);
+  });
+
+  it('applyQuoteSettingsDefaults returns the SAME reference when deposit_pct is present', () => {
+    const cfg = buildEmptyConfig();
+    expect(applyQuoteSettingsDefaults(cfg)).toBe(cfg);
+    const custom = { quote_settings: { deposit_pct: 0.5 } };
+    expect(applyQuoteSettingsDefaults(custom)).toBe(custom);
+  });
+
+  it('fills a missing deposit_pct without touching the input or the other keys', () => {
+    const cfg = { version: '4.0.0', quote_settings: { validity_days: 15 } };
+    const out = applyQuoteSettingsDefaults(cfg);
+    expect(out).not.toBe(cfg);
+    expect(out.quote_settings).toEqual({ validity_days: 15, deposit_pct: 0.4 });
+    expect(cfg.quote_settings).toEqual({ validity_days: 15 });
+    expect(out.version).toBe('4.0.0');
+  });
+
+  it('creates quote_settings when the whole object is absent, filling ONLY deposit_pct', () => {
+    const out = applyQuoteSettingsDefaults({ version: '4.0.0' });
+    expect(out.quote_settings).toEqual({ deposit_pct: 0.4 });
+  });
+
+  it('is idempotent', () => {
+    const once = applyQuoteSettingsDefaults({ version: '4.0.0' });
+    expect(applyQuoteSettingsDefaults(once)).toBe(once);
   });
 });

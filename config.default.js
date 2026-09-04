@@ -11,6 +11,11 @@
 //   - buildEmptyConfig(meta): a schema-SHAPED but EMPTY config — the
 //     in-memory scaffold the wizard fills. It is NOT valid until the
 //     wizard adds the required minimums (>=1 tier/supplier/product/pack).
+//   - DEFAULT_DEPOSIT_PCT : the default quote deposit ("señal") fraction,
+//                           stamped into buildEmptyConfig and used to
+//                           back-fill configs that predate the key.
+//   - applyQuoteSettingsDefaults(cfg): back-fills a missing
+//     quote_settings.deposit_pct on an existing config (pure, idempotent).
 //
 // Used in the main process (main.js). The renderer receives the empty
 // scaffold over IPC (`config:empty`), already renderer-shaped
@@ -27,6 +32,14 @@ const SCHEMA_VERSION = '4.0.0';
 // single source of truth the v2/v3→v4 migration (lib/migrations.js)
 // reads when it back-fills the margin fields a legacy config lacks.
 const DEFAULT_TARGET_MARGIN = 0.35;
+
+// The default minimum deposit ("señal") a quote asks for, as a fraction
+// of the total with VAT (0.4 = 40 %). This file is the single home for
+// schema-level default numbers: it reaches configs through
+// buildEmptyConfig (new catalogs) and applyQuoteSettingsDefaults
+// (catalogs that predate the key). Never hardcoded anywhere else
+// (CLAUDE.md hard rule §2.2).
+const DEFAULT_DEPOSIT_PCT = 0.4;
 
 // Dead-code compatibility: the admin password gate is removed (CLAUDE.md
 // §9 / v5), but validateConfigSchema still requires a non-empty
@@ -77,8 +90,31 @@ function buildEmptyConfig(meta = {}) {
     },
     quote_settings: {
       validity_days: 30,
-      terms: 'Precios IVA incluido. Validez 30 días desde la fecha de emisión.'
+      terms: 'Precios IVA incluido. Validez 30 días desde la fecha de emisión.',
+      deposit_pct: DEFAULT_DEPOSIT_PCT
     }
+  };
+}
+
+/**
+ * Fills `quote_settings.deposit_pct` with DEFAULT_DEPOSIT_PCT when a config
+ * predates the key. Pure and idempotent: returns the SAME reference when
+ * nothing is missing (callers can detect "untouched" by identity, like
+ * migrateConfig), else a shallow copy with a copied quote_settings. Fills
+ * ONLY deposit_pct on purpose: filling validity_days/terms would change
+ * the PDFs of catalogs that left them undefined.
+ *
+ * @param {object} cfg
+ * @returns {object} cfg itself, or a filled shallow copy
+ */
+function applyQuoteSettingsDefaults(cfg) {
+  if (!cfg || typeof cfg !== 'object') return cfg;
+  const qs = cfg.quote_settings;
+  const hasQs = qs && typeof qs === 'object' && !Array.isArray(qs);
+  if (hasQs && Number.isFinite(qs.deposit_pct)) return cfg;
+  return {
+    ...cfg,
+    quote_settings: { ...(hasQs ? qs : {}), deposit_pct: DEFAULT_DEPOSIT_PCT }
   };
 }
 
@@ -86,6 +122,8 @@ module.exports = {
   SCHEMA_VERSION,
   ADMIN_PASSWORD_PLACEHOLDER,
   DEFAULT_TARGET_MARGIN,
+  DEFAULT_DEPOSIT_PCT,
   PARAMETER_KEYS,
-  buildEmptyConfig
+  buildEmptyConfig,
+  applyQuoteSettingsDefaults
 };
