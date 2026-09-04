@@ -78,4 +78,14 @@ describe('buildQuoteDraft', () => {
       'total_vat_inc', 'sale_base', 'vat', 'total_cost', 'margin'
     ]);
   });
+
+  test('carries the deposit content (pct + min_amount) and never a payment', () => {
+    const draft = buildQuoteDraft(BASE_RESULT, { ...BASE_CTX, deposit: { pct: 0.4, min_amount: 41 } });
+    expect(draft.deposit).toEqual({ pct: 0.4, min_amount: 41 });
+    expect('deposit_paid' in draft).toBe(false);
+  });
+
+  test('deposit is null when the context has none', () => {
+    expect(buildQuoteDraft(BASE_RESULT, BASE_CTX).deposit).toBeNull();
+  });
 });

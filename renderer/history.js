@@ -127,7 +127,7 @@ export function renderHistoryList(quotes) {
  * so the entry survives future config changes.
  *
  * @param {object} result  the calculator output
- * @param {object} ctx      { user, configVersion, customer?, packId?, opt? }
+ * @param {object} ctx      { user, configVersion, customer?, packId?, opt?, deposit? }
  * @returns {object} draft passed to packprice.saveQuote
  */
 export function buildQuoteDraft(result, ctx) {
@@ -145,6 +145,11 @@ export function buildQuoteDraft(result, ctx) {
       total_cost:    result.total_cost ?? null,
       margin:        result.margin ?? null
     },
-    opt: ctx.opt || null
+    opt: ctx.opt || null,
+    // Deposit minimum for this quote (content — design 2026-09-04 §3.2).
+    // The payment (`deposit_paid`) is workflow and NEVER travels in a draft.
+    deposit: ctx.deposit
+      ? { pct: ctx.deposit.pct, min_amount: ctx.deposit.min_amount }
+      : null
   };
 }
