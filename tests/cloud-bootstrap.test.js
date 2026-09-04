@@ -251,6 +251,17 @@ describe('loadCatalog', () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/no respondió a tiempo/);
   });
+
+  test('fills quote_settings.deposit_pct from the schema default when the cloud rows predate it', async () => {
+    const legacyCompany = entities.company.filter((r) => r.key !== 'quote_settings.deposit_pct');
+    const client = fakeCatalogClient({ ...entities, company: legacyCompany });
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.loadCatalog(SETTINGS);
+    expect(res.ok).toBe(true);
+    expect(res.config.quote_settings.deposit_pct).toBe(0.4);
+    // The other quote settings are untouched (only deposit_pct is defaulted).
+    expect(res.config.quote_settings.validity_days).toBe(30);
+  });
 });
 
 // ------------------------------------------------------------
@@ -300,6 +311,15 @@ describe('refreshCatalog', () => {
     expect(res.catalogVersion).toBe(7);
     expect(res.config).toEqual(expectedConfig(NOW()));
     expect(readCache(cachePath).catalogVersion).toBe(7);
+  });
+
+  test('also fills quote_settings.deposit_pct when the cloud rows predate it', async () => {
+    const legacyCompany = entities.company.filter((r) => r.key !== 'quote_settings.deposit_pct');
+    const client = fakeCatalogClient({ ...entities, company: legacyCompany });
+    const { bootstrap } = makeBootstrap(client);
+    const res = await bootstrap.refreshCatalog(SETTINGS);
+    expect(res.ok).toBe(true);
+    expect(res.config.quote_settings.deposit_pct).toBe(0.4);
   });
 
   test('offline: fails loudly even when a cache exists (no silent fallback)', async () => {

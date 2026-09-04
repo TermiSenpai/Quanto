@@ -17,9 +17,9 @@
 //   - applyQuoteSettingsDefaults(cfg): back-fills a missing
 //     quote_settings.deposit_pct on an existing config (pure, idempotent).
 //
-// Used in the main process (main.js). The renderer receives the empty
-// scaffold over IPC (`config:empty`), already renderer-shaped
-// (has_password instead of the raw password).
+// Used in the main process (main.js, lib/cloud-bootstrap.js). The
+// renderer receives the empty scaffold over IPC (`config:empty`),
+// already renderer-shaped (has_password instead of the raw password).
 // ============================================================
 
 'use strict';

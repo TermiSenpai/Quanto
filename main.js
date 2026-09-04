@@ -28,7 +28,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const { SCHEMA_VERSION, ADMIN_PASSWORD_PLACEHOLDER, buildEmptyConfig } = require('./config.default');
+const { SCHEMA_VERSION, ADMIN_PASSWORD_PLACEHOLDER, buildEmptyConfig, applyQuoteSettingsDefaults } = require('./config.default');
 const {
   validateConfigShape,
   stripAdminPassword,
@@ -993,7 +993,9 @@ ipcMain.handle('config:read', (event, payload) => {
     // deep in the calculator.
     validateConfigSchema(config);
     const info = getFileInfo(filePath);
-    return { ok: true, config: stripAdminPassword(config), info };
+    // Optional keys newer versions introduced (quote_settings.deposit_pct)
+    // are defaulted in memory only — never by rewriting config.js on boot.
+    return { ok: true, config: stripAdminPassword(applyQuoteSettingsDefaults(config)), info };
   } catch (err) {
     return { ok: false, error: err.message };
   }
