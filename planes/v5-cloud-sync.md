@@ -212,7 +212,8 @@ Sin cambios respecto a lo ya diseñado:
 
 - **Caché:** `%APPDATA%\Quanto\cache\catalog.json` (entidades +
   `catalog_version` + `fetched_at`), escritura atómica. Arranque: intento red
-  (timeout 5 s) → si falla, caché en solo lectura con banner; sin caché ni
+  (timeout 5 s; las migraciones pendientes se aplican antes, con su propio
+  límite de 120 s) → si falla, caché en solo lectura con banner; sin caché ni
   red → pantalla de error con salida a modo local. Jamás datos inventados.
 - **Outbox:** `outbox.json` para presupuestos y cambios de estado creados sin
   red; se vacía al arrancar y al pulsar «Actualizar»; UUIDs = reintentos

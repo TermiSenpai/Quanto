@@ -711,8 +711,9 @@ async function loadCloudAndShowApp() {
   const r = await window.packprice.loadCatalog();
 
   if (!r || !r.ok) {
-    // The only non-ok cloud boot is NO_CLOUD_NO_CACHE (no network and
-    // this PC has never cached the catalog) — UI-UX §2.4.
+    // Two non-ok cloud boots: NO_CLOUD_NO_CACHE (no network and this PC
+    // has never cached the catalog) and MIGRATION_FAILED (a pending
+    // schema migration failed on this load) — UI-UX §2.4.
     await showCloudErrorScreen(r);
     return;
   }
@@ -813,7 +814,9 @@ async function showErrorScreen(detail) {
 
 /**
  * v5 cloud boot error (UI-UX §2.4): no network and no cached catalog
- * (code NO_CLOUD_NO_CACHE). Two exits — retry the cloud read, or fall
+ * (code NO_CLOUD_NO_CACHE), or a pending schema migration that failed on
+ * this load (code MIGRATION_FAILED — lib/cloud-bootstrap.js
+ * ensurePendingMigrations). Two exits — retry the cloud read, or fall
  * back to local file mode by re-running the wizard's local branch.
  */
 async function showCloudErrorScreen(result) {

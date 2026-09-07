@@ -70,10 +70,15 @@ function expectedConfig(updatedAt) {
 // serves reads + the §6 lock/backup/ledger traffic against an EXISTING
 // base). Omitting `opts.ledger` keeps the exact prior behaviour: no
 // schema_migrations table, so ensurePendingMigrations is a no-op.
+// `opts.exportDelayMs` delays exportDatabase() by that many ms (via a REAL
+// setTimeout, so it plays along with vi.useFakeTimers()); `opts.exportHangs`
+// makes it never resolve at all — both simulate a slow/stuck migration
+// (planes/v5-cloud-sync.md §6) independent of the cheap-gate/read timeouts.
 function fakeCatalogClient(entities, metaRow = META_ROW, opts = {}) {
   const hasLedger = Array.isArray(opts.ledger);
   const ledger = hasLedger ? [...opts.ledger] : [];
   const client = {
+    calls: [], // every query() SQL, in order — lets a test count e.g. full catalog reads
     executed: [],
     exported: false,
     lockCalls: 0,
@@ -84,9 +89,14 @@ function fakeCatalogClient(entities, metaRow = META_ROW, opts = {}) {
     },
     async exportDatabase() {
       client.exported = true;
+      if (opts.exportHangs) return new Promise(() => {}); // never resolves
+      if (opts.exportDelayMs) {
+        return new Promise((resolve) => setTimeout(() => resolve('-- dump --'), opts.exportDelayMs));
+      }
       return '-- dump --';
     },
     async query(sql, params = []) {
+      client.calls.push(sql);
       if (/FROM sqlite_master/.test(sql)) {
         return { results: hasLedger ? [{ name: 'schema_migrations' }] : [], meta: {} };
       }
@@ -426,6 +436,60 @@ describe('loadCatalog — pending migrations', () => {
 
     expect(res.ok).toBe(true);
     expect(client.executed).toContain(DEPOSIT_MIGRATIONS[2].sql);
+  });
+
+  // The migration sequence must NOT share the 5s catalog-read cutoff — it
+  // gets its own, separate migrationTimeoutMs budget (default 120000).
+  test('a slow export (8s) is not cut off by the 5s read budget — only migrationTimeoutMs applies', async () => {
+    vi.useFakeTimers();
+    const client = fakeCatalogClient(entities, META_ROW, {
+      ledger: ['0001_init', '0002_quote_payloads'],
+      exportDelayMs: 8000 // longer than the 5s read cutoff, well under migrationTimeoutMs (120000)
+    });
+    const { bootstrap } = makeDepositBootstrap(client); // timeoutMs: 5000, migrationTimeoutMs default 120000
+
+    const pending = bootstrap.loadCatalog(SETTINGS);
+    await vi.advanceTimersByTimeAsync(8000);
+    const res = await pending;
+
+    expect(res.ok).toBe(true);
+    expect(res.source).toBe('cloud');
+    expect(client.executed).toContain(DEPOSIT_MIGRATIONS[2].sql);
+  });
+
+  test('a migration that never resolves is cut off by its OWN migrationTimeoutMs, tagged MIGRATION_FAILED, NO cache fallback', async () => {
+    vi.useFakeTimers();
+    // A cache exists — proves this does NOT fall back to it, same as an
+    // ordinary migration failure (this is not an offline/timeout result).
+    writeCache(cachePath, { fetchedAt: '2026-06-11T08:00:00.000Z', catalogVersion: 5, entities });
+    const client = fakeCatalogClient(entities, META_ROW, {
+      ledger: ['0001_init', '0002_quote_payloads'],
+      exportHangs: true
+    });
+    const { bootstrap } = makeDepositBootstrap(client, { migrationTimeoutMs: 120000 });
+
+    const pending = bootstrap.loadCatalog(SETTINGS);
+    await vi.advanceTimersByTimeAsync(120000);
+    const res = await pending;
+
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe('MIGRATION_FAILED');
+    expect(res.error).toMatch(/no terminó a tiempo/);
+    expect(res.source).toBeUndefined();
+  });
+
+  test('a migrating boot loads the full catalog only once (verifyCatalog\'s read is reused, not repeated)', async () => {
+    const client = fakeCatalogClient(entities, META_ROW, { ledger: ['0001_init', '0002_quote_payloads'] });
+    const { bootstrap } = makeDepositBootstrap(client);
+
+    const res = await bootstrap.loadCatalog(SETTINGS);
+
+    expect(res.ok).toBe(true);
+    // products is the archivable-table read shape loadEntities uses
+    // ('SELECT * FROM products WHERE archived_at IS NULL') — distinct from
+    // verifyCatalog's own count probe ('SELECT COUNT(*) AS n FROM products').
+    const fullProductReads = client.calls.filter((sql) => /^SELECT \* FROM products/.test(sql));
+    expect(fullProductReads).toHaveLength(1);
   });
 });
 
