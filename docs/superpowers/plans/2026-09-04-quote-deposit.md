@@ -425,9 +425,9 @@ describe('formatDepositPct / pctToPercentInput', () => {
     expect(formatDepositPct(undefined)).toBe('');
   });
 
-  test('turns a fraction into the number the input shows', () => {
-    expect(pctToPercentInput(0.4)).toBe(40);
-    expect(pctToPercentInput(0.125)).toBe(12.5);
+  test('turns a fraction into the Spanish string the input shows', () => {
+    expect(pctToPercentInput(0.4)).toBe('40');
+    expect(pctToPercentInput(0.125)).toBe('12,5');
     expect(pctToPercentInput(undefined)).toBe('');
   });
 });
@@ -548,14 +548,16 @@ export function formatDepositPct(pct) {
 }
 
 /**
- * The number the percentage input shows for a fraction: 0.4 → 40.
+ * The percentage input's text for a fraction: 0.4 → "40", 0.125 → "12,5"
+ * (Spanish decimal).
  *
  * @param {number} pct - fraction, e.g. 0.4
- * @returns {number|''} the percent value, or '' to clear the input when
- *   pct is not a finite number
+ * @returns {string} e.g. '40', '12,5'; '' clears the input
  */
 export function pctToPercentInput(pct) {
-  return Number.isFinite(pct) ? round2(pct * 100) : '';
+  return Number.isFinite(pct)
+    ? (pct * 100).toLocaleString('es-ES', { maximumFractionDigits: 2, useGrouping: false })
+    : '';
 }
 ```
 

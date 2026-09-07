@@ -1605,7 +1605,15 @@ ipcMain.handle('quotes:save', async (event, draft) => {
         if (isEdit) {
           // An edit already owns a real id; mark it so the drain UPDATES it
           // (never the create-only path, which would no-op and lose the edit).
-          display = clean;
+          // The cached display keeps the workflow facts the draft never
+          // carries (status/status_ts/deposit_paid) — the backend pins them
+          // from the stored record when the queue drains, so the local view
+          // must not regress them meanwhile.
+          const cached = readQuoteCacheSafe();
+          const prev = cached && cached.payloads && cached.payloads[clean.id];
+          display = prev
+            ? { ...clean, status: prev.status, status_ts: prev.status_ts, deposit_paid: prev.deposit_paid }
+            : clean;
           enqueueFullQuote(SETTINGS_DIR, { ...clean, __op: 'edit' });
         } else {
           // A fresh offline create gets a provisional id until the drain

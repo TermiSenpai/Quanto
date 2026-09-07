@@ -127,9 +127,9 @@ describe('formatDepositPct / pctToPercentInput', () => {
     expect(formatDepositPct(undefined)).toBe('');
   });
 
-  test('turns a fraction into the number the input shows', () => {
-    expect(pctToPercentInput(0.4)).toBe(40);
-    expect(pctToPercentInput(0.125)).toBe(12.5);
+  test('turns a fraction into the Spanish string the input shows', () => {
+    expect(pctToPercentInput(0.4)).toBe('40');
+    expect(pctToPercentInput(0.125)).toBe('12,5');
     expect(pctToPercentInput(undefined)).toBe('');
   });
 });

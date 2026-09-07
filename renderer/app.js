@@ -64,7 +64,7 @@ import { enhanceDropdowns } from './dropdown.js';
 import { startCatalogWizard } from './catalog-wizard.js';
 import { planInputs } from './quote-inputs.js';
 import {
-  depositMinimum, parseDepositPct, parseDepositAmount, formatDepositPct
+  depositMinimum, parseDepositPct, parseDepositAmount, formatDepositPct, pctToPercentInput
 } from './deposit.js';
 
 // ============================================================
@@ -2325,13 +2325,6 @@ function amountInputValue(n) {
     : '';
 }
 
-/** The percentage input's text for a fraction: 0.4 → "40", 0.125 → "12,5" (Spanish decimal). */
-function pctInputValue(pct) {
-  return Number.isFinite(pct)
-    ? (pct * 100).toLocaleString('es-ES', { maximumFractionDigits: 2, useGrouping: false })
-    : '';
-}
-
 function depositHintText(r, pct) {
   return `${formatDepositPct(pct)} de ${formatEur(totalVatIncOf(r))} · redondeado al euro hacia arriba`;
 }
@@ -2364,7 +2357,7 @@ function renderDepositCard(r) {
         <div class="field">
           <label class="field__label" for="deposit-pct">Porcentaje</label>
           <div class="deposit-card__pct">
-            <input type="text" inputmode="decimal" id="deposit-pct" class="input" value="${pctInputValue(pct)}" autocomplete="off" aria-describedby="deposit-pct-error">
+            <input type="text" inputmode="decimal" id="deposit-pct" class="input" value="${pctToPercentInput(pct)}" autocomplete="off" aria-describedby="deposit-pct-error">
             <span class="text-muted">%</span>
           </div>
           <span id="deposit-pct-error" class="field__error hidden" role="alert">Indica un porcentaje entre 0 y 100.</span>
@@ -2500,7 +2493,12 @@ async function syncDepositWithBackend(saved, deposit, { queued, isEdit }) {
   const stored = queued ? state.depositStored : (saved.deposit_paid || null); // what the backend holds
   const changed = Boolean(wanted) !== Boolean(stored)
     || Boolean(wanted && stored && wanted.amount !== stored.amount);
-  if (!changed) { syncDepositCard(saved); return saved; }
+  if (!changed) {
+    // A queued save echoes the draft (no deposit_paid): keep what the card
+    // was loaded with instead of re-syncing from an incomplete record.
+    if (!queued) syncDepositCard(saved);
+    return saved;
+  }
   if (queued) {
     await window.packprice.showInfo({
       titulo: 'Señal pendiente',
