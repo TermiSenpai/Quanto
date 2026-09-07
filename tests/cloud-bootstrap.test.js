@@ -62,15 +62,59 @@ function expectedConfig(updatedAt) {
   return { ...cfg, version: buildDefaultConfig().version, updated_at: updatedAt, modified_by: 'nube' };
 }
 
-// Fake read-only client: serves the meta row + entity tables.
-function fakeCatalogClient(entities, metaRow = META_ROW) {
-  return {
-    async query(sql) {
-      const table = sql.match(/FROM (\w+)/)[1];
+// Fake read-only client: serves the meta row + entity tables. `opts.ledger`
+// (array of already-applied migration ids) additionally turns it into a
+// migration-capable fake — used by the "loadCatalog — pending migrations"
+// suite below to exercise ensurePendingMigrations/migrateWithLock without
+// the full provisionWorld machinery (this fake never provisions a DB, only
+// serves reads + the §6 lock/backup/ledger traffic against an EXISTING
+// base). Omitting `opts.ledger` keeps the exact prior behaviour: no
+// schema_migrations table, so ensurePendingMigrations is a no-op.
+function fakeCatalogClient(entities, metaRow = META_ROW, opts = {}) {
+  const hasLedger = Array.isArray(opts.ledger);
+  const ledger = hasLedger ? [...opts.ledger] : [];
+  const client = {
+    executed: [],
+    exported: false,
+    lockCalls: 0,
+    releaseCalls: 0,
+    async exec(sql) {
+      client.executed.push(sql);
+      return [{ success: true }];
+    },
+    async exportDatabase() {
+      client.exported = true;
+      return '-- dump --';
+    },
+    async query(sql, params = []) {
+      if (/FROM sqlite_master/.test(sql)) {
+        return { results: hasLedger ? [{ name: 'schema_migrations' }] : [], meta: {} };
+      }
+      if (/SELECT id FROM schema_migrations/.test(sql)) {
+        return { results: ledger.map((id) => ({ id })), meta: {} };
+      }
+      if (/INSERT INTO schema_migrations/.test(sql)) {
+        ledger.push(params[0]);
+        return { results: [], meta: { changes: 1 } };
+      }
+      if (/SET migrating_since = \?/.test(sql)) {
+        client.lockCalls++;
+        if (opts.lockHeld) return { results: [], meta: { changes: 0 } };
+        return { results: [], meta: { changes: 1 } };
+      }
+      if (/SET migrating_since = NULL WHERE migrating_since = \?/.test(sql)) {
+        client.releaseCalls++;
+        return { results: [], meta: { changes: 1 } };
+      }
+      if (/SELECT COUNT\(\*\) AS n FROM products/.test(sql)) {
+        return { results: [{ n: (entities.products || []).length }], meta: {} };
+      }
+      const table = (sql.match(/FROM (\w+)/) || [])[1];
       if (table === 'catalog_meta') return { results: metaRow ? [metaRow] : [], meta: {} };
       return { results: entities[table] || [], meta: {} };
     }
   };
+  return client;
 }
 
 function makeBootstrap(client, overrides = {}) {
@@ -273,6 +317,115 @@ describe('loadCatalog', () => {
     expect(res.config.quote_settings.deposit_pct).toBe(0.4);
     // The other quote settings are untouched (only deposit_pct is defaulted).
     expect(res.config.quote_settings.validity_days).toBe(30);
+  });
+});
+
+// ------------------------------------------------------------
+// loadCatalog — pending migrations (planes/v5-cloud-sync.md §6, applied on
+// EVERY cloud load now, not only at cloud:provision). 0003_quote_deposits
+// is the first migration an already-provisioned customer database needs
+// picked up this way: lib/cloud-quotes.js LEFT JOINs quote_deposits in
+// getFullQuote/listFullQuotes, so an upgraded .exe against a base that only
+// ever saw 0001+0002 would fail every quote read until this runs.
+// ------------------------------------------------------------
+describe('loadCatalog — pending migrations', () => {
+  const entities = disassemble(buildDefaultConfig());
+  const DEPOSIT_MIGRATIONS = [
+    { id: '0001_init', sql: 'CREATE TABLE IF NOT EXISTS x (y);' },
+    { id: '0002_quote_payloads', sql: 'CREATE TABLE IF NOT EXISTS quote_payloads (x);' },
+    { id: '0003_quote_deposits', sql: 'CREATE TABLE IF NOT EXISTS quote_deposits (x);' }
+  ];
+
+  function makeDepositBootstrap(client, overrides = {}) {
+    return makeBootstrap(client, { loadMigrations: () => DEPOSIT_MIGRATIONS, ...overrides });
+  }
+
+  test('applies the missing 0003 migration: backs up first, ledger updated, lock released', async () => {
+    const client = fakeCatalogClient(entities, META_ROW, { ledger: ['0001_init', '0002_quote_payloads'] });
+    const { bootstrap } = makeDepositBootstrap(client);
+
+    const res = await bootstrap.loadCatalog(SETTINGS);
+
+    expect(res.ok).toBe(true);
+    expect(res.source).toBe('cloud');
+    expect(res.config).toEqual(expectedConfig(NOW()));
+    expect(client.executed.filter((sql) => sql === DEPOSIT_MIGRATIONS[2].sql)).toHaveLength(1);
+    expect(client.exported).toBe(true);
+    expect(fs.readdirSync(backupDir)).toEqual(['pre-migration-2026-06-12T10-00-00-000Z.sql']);
+    expect(client.lockCalls).toBe(1);
+    expect(client.releaseCalls).toBe(1);
+  });
+
+  test('ledger already complete: no migration attempt, load proceeds as normal', async () => {
+    const client = fakeCatalogClient(entities, META_ROW, {
+      ledger: ['0001_init', '0002_quote_payloads', '0003_quote_deposits']
+    });
+    const { bootstrap } = makeDepositBootstrap(client);
+
+    const res = await bootstrap.loadCatalog(SETTINGS);
+
+    expect(res.ok).toBe(true);
+    expect(client.executed).toEqual([]);
+    expect(client.lockCalls).toBe(0);
+    expect(client.exported).toBe(false);
+  });
+
+  test('no schema_migrations table (unprovisioned DB): left for provision, no attempt', async () => {
+    const client = fakeCatalogClient(entities); // no opts.ledger → sqlite_master has no such table
+    const { bootstrap } = makeDepositBootstrap(client);
+
+    const res = await bootstrap.loadCatalog(SETTINGS);
+
+    expect(res.ok).toBe(true);
+    expect(client.executed).toEqual([]); // no INSERT INTO schema_migrations, no exec at all
+  });
+
+  test('lock held by another PC: load still succeeds, nothing executed, the lock is logged', async () => {
+    const client = fakeCatalogClient(entities, META_ROW, {
+      ledger: ['0001_init', '0002_quote_payloads'],
+      lockHeld: true
+    });
+    const logs = [];
+    const { bootstrap } = makeDepositBootstrap(client, { log: (msg) => logs.push(msg) });
+
+    const res = await bootstrap.loadCatalog(SETTINGS);
+
+    expect(res.ok).toBe(true);
+    expect(client.executed).toEqual([]);
+    expect(logs.some((msg) => /lock held by another PC/.test(msg))).toBe(true);
+  });
+
+  test('exec throws applying 0003: MIGRATION_FAILED, backup kept, lock released, NO cache fallback', async () => {
+    // A cache from a prior successful boot exists — proves this failure
+    // path does NOT fall back to it, unlike an ordinary cloud outage.
+    writeCache(cachePath, { fetchedAt: '2026-06-11T08:00:00.000Z', catalogVersion: 5, entities });
+    const client = fakeCatalogClient(entities, META_ROW, { ledger: ['0001_init', '0002_quote_payloads'] });
+    const originalExec = client.exec;
+    client.exec = async (sql) => {
+      if (sql === DEPOSIT_MIGRATIONS[2].sql) throw new Error('Cloudflare rechazó la petición: syntax error');
+      return originalExec(sql);
+    };
+    const { bootstrap } = makeDepositBootstrap(client);
+
+    const res = await bootstrap.loadCatalog(SETTINGS);
+
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe('MIGRATION_FAILED');
+    expect(res.error).toMatch(/syntax error/);
+    expect(res.source).toBeUndefined();
+    expect(res.backupPath).toBe(path.join(backupDir, 'pre-migration-2026-06-12T10-00-00-000Z.sql'));
+    expect(fs.existsSync(res.backupPath)).toBe(true);
+    expect(client.releaseCalls).toBe(1);
+  });
+
+  test('refreshCatalog also applies a pending 0003 migration', async () => {
+    const client = fakeCatalogClient(entities, META_ROW, { ledger: ['0001_init', '0002_quote_payloads'] });
+    const { bootstrap } = makeDepositBootstrap(client);
+
+    const res = await bootstrap.refreshCatalog(SETTINGS);
+
+    expect(res.ok).toBe(true);
+    expect(client.executed).toContain(DEPOSIT_MIGRATIONS[2].sql);
   });
 });
 

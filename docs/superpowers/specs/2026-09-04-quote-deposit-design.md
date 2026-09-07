@@ -174,6 +174,9 @@ CREATE TABLE IF NOT EXISTS quote_deposits (
 
 File mode needs no schema change: the two fields are keys in `<id>.json`.
 
+Applied to existing databases on the first cloud load after the upgrade
+(`ensurePendingMigrations`), not only at provision.
+
 ---
 
 ## 4. Backends and IPC

@@ -758,7 +758,13 @@ beyond them needs a debate and a `CLAUDE.md` update.
   API — no Worker, no server-side code**; the app self-provisions the
   database on first run and applies bundled SQL migrations itself
   (`db/migrations/`, additive-only, idempotent, run by `lib/db-migrator.js`).
-  Every invariant above holds: network only in the main process
+  Pending bundled migrations an existing database hasn't seen yet are also
+  applied on every cloud load, not only at first-run provision
+  (`fetchFromCloud` → `ensurePendingMigrations`, same lock/backup/verify
+  contract as `cloud:provision`, `lib/cloud-bootstrap.js`), so a customer
+  who upgrades the `.exe` on an already-provisioned database gets brought
+  up to date automatically instead of failing every read against a
+  newer table/column. Every invariant above holds: network only in the main process
   (`lib/d1-client.js`, injectable `fetch`), wired through
   `lib/cloud-bootstrap.js`; each `config:*`/`quotes:*` IPC handler routes on
   `settings.data_source` (`'file' | 'cloud'`) — there is no separate
