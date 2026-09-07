@@ -823,8 +823,17 @@ async function showCloudErrorScreen(result) {
   show('pantalla-error');
 
   el('error-titulo').textContent = 'No se pudo cargar el catálogo';
-  el('error-detalle').textContent =
-    'No hay conexión y este equipo aún no tiene datos guardados.';
+  // A failed schema migration on load (planes/v5 §6) is not a network
+  // problem: say so, and point at the pre-migration backup main wrote.
+  if (result && result.code === 'MIGRATION_FAILED') {
+    el('error-detalle').textContent =
+      'No se pudo actualizar la base de datos en la nube. No se ha cambiado nada'
+      + (result.backupPath ? ` (copia previa en ${result.backupPath})` : '')
+      + '. Vuelve a intentarlo o avisa a otro equipo para que reintente.';
+  } else {
+    el('error-detalle').textContent =
+      'No hay conexión y este equipo aún no tiene datos guardados.';
+  }
   // The generic NAS hint does not apply here; hide it.
   el('error-hint').classList.add('hidden');
 
