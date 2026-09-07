@@ -2387,6 +2387,13 @@ input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 .quote-chip--rejected.is-active {
   background: var(--danger-soft); color: var(--danger); border-color: var(--danger);
 }
+.quote-chip--deposit.is-active {
+  background: var(--success-soft); color: var(--success); border-color: var(--success);
+}
+
+/* Inline "Marcar señal" form in the history row (§2.7 — no modal) */
+.deposit-form { display: inline-flex; align-items: center; gap: 6px; }
+.deposit-form__amount { width: 96px; }
 
 /* --- Statistics screen (§2.7) --- */
 .stats-head {

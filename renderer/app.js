@@ -44,7 +44,8 @@ import {
 } from './admin-extras.js';
 import {
   renderHistoryList,
-  buildQuoteDraft
+  buildQuoteDraft,
+  renderDepositForm
 } from './history.js';
 import { deriveDataStatus, formatFreshness, planRefreshTrigger } from './data-status.js';
 import { buildGalleryModel } from './pdf-gallery.js';
@@ -138,14 +139,22 @@ const state = {
   adminClosedSections: new Set() // section keys the user collapsed
 };
 
-/** The deposit fraction for the quote on screen: per-quote override, else config. */
-function currentDepositPct() {
-  if (Number.isFinite(state.deposit.pct)) return state.deposit.pct;
-  // Guarded like computeValidUntil: 0 = no minimum, a neutral degrade (not
-  // a business number) — main guarantees the key anyway.
+/**
+ * The config-wide deposit fraction (quote_settings.deposit_pct), the
+ * default before any per-quote override. Guarded like computeValidUntil:
+ * 0 = no minimum, a neutral degrade (not a business number) — main
+ * guarantees the key anyway.
+ */
+function configDepositPct() {
   return (CFG && CFG.quote_settings && Number.isFinite(CFG.quote_settings.deposit_pct))
     ? CFG.quote_settings.deposit_pct
     : 0;
+}
+
+/** The deposit fraction for the quote on screen: per-quote override, else config. */
+function currentDepositPct() {
+  if (Number.isFinite(state.deposit.pct)) return state.deposit.pct;
+  return configDepositPct();
 }
 
 /** A fresh quote starts from the config percentage, unpaid. */
@@ -2441,12 +2450,8 @@ function collectDepositOrInvalid() {
   const paidBox = el('deposit-paid');
   const amountInput = el('deposit-amount');
   if (!pctInput || !paidBox || !amountInput) {
-    // Card not on screen (defensive): config default, unpaid. Guarded like
-    // computeValidUntil — 0 = no minimum, a neutral degrade, not a
-    // business number; main guarantees the key anyway.
-    const cfgPct = (CFG && CFG.quote_settings && Number.isFinite(CFG.quote_settings.deposit_pct))
-      ? CFG.quote_settings.deposit_pct
-      : 0;
+    // Card not on screen (defensive): config default, unpaid.
+    const cfgPct = configDepositPct();
     return { pct: cfgPct, min_amount: depositMinimum(total, cfgPct), paid: null };
   }
   clearFieldError('deposit-pct');
@@ -3774,6 +3779,8 @@ async function onHistoryAction(action, id) {
     // Handled by the dedicated chip handler (needs the target status).
     return;
   }
+  if (action === 'deposit-mark') { await startDepositMark(id); return; }
+  if (action === 'deposit-clear') { await clearQuoteDeposit(id); return; }
   if (action === 'delete') {
     const ok = await window.packprice.confirm({
       titulo: 'Eliminar presupuesto',
@@ -4215,13 +4222,20 @@ async function exportQuotePdf() {
     // changed on the card AFTER the save is deliberately NOT re-saved —
     // that would rewrite quote content from an export action and could
     // create a duplicate quote; the user re-saves explicitly for that.
-    const deposit = collectDepositOrInvalid();
-    if (!deposit) return; // inline error already shown
-    quote = await syncDepositWithBackend(lastResult, deposit, {
-      queued: isPendingQuoteId(lastResult.id),
-      isEdit: Boolean(state.editingQuoteId)
-    });
-    lastResult = quote;
+    // A pending (queued offline) quote skips the sync entirely: the
+    // "Presupuesto pendiente" notice below should show alone, not after
+    // a "Señal pendiente" dialog nobody can act on yet.
+    if (!isPendingQuoteId(lastResult.id)) {
+      const deposit = collectDepositOrInvalid();
+      if (!deposit) return; // inline error already shown
+      quote = await syncDepositWithBackend(lastResult, deposit, {
+        queued: false,
+        isEdit: Boolean(state.editingQuoteId)
+      });
+      lastResult = quote;
+    } else {
+      quote = lastResult;
+    }
   } else {
     const client = collectClientOrInvalid();
     if (!client) return; // inline errors already shown
@@ -4303,6 +4317,87 @@ async function applyQuoteStatus(quote, status) {
   await window.packprice.updateQuote({
     id: quote.id,
     patch: { status, status_ts: new Date().toISOString() }
+  });
+}
+
+// ============================================================
+// History deposit actions (design 2026-09-04 §6)
+// ============================================================
+
+/**
+ * Writes a deposit mark through the shared store; surfaces failures with
+ * the same dialogs as the status chips. Returns true on success.
+ */
+async function applyQuoteDeposit(localId, paid) {
+  const d = await window.packprice.setQuoteDeposit({ id: localId, paid });
+  if (d && d.ok) return true;
+  await window.packprice.showError({
+    titulo: 'No se pudo registrar la señal',
+    mensaje: d && d.offline
+      ? 'Sin conexión con el almacén de presupuestos. Inténtalo cuando vuelva la conexión.'
+      : ((d && d.error) || 'Error desconocido')
+  });
+  return false;
+}
+
+/**
+ * "Marcar señal": swaps the cell for the inline amount form, prefilled
+ * with the quote's stored minimum (or the config percentage for a quote
+ * saved before the feature), then writes through quotes:set-deposit with
+ * undo in the toast.
+ */
+async function startDepositMark(localId) {
+  const body = el('history-body');
+  const btn = body && body.querySelector(`[data-action="deposit-mark"][data-id="${cssEscape(localId)}"]`);
+  if (!btn) return;
+  const cell = btn.closest('td');
+  const r = await window.packprice.getQuote(localId);
+  const quote = r && r.ok ? r.quote : null;
+  if (!quote) return;
+  const defaultAmount = quote.deposit && Number.isFinite(quote.deposit.min_amount) && quote.deposit.min_amount > 0
+    ? quote.deposit.min_amount
+    : depositMinimum(totalVatIncOf(quote), configDepositPct());
+
+  cell.innerHTML = renderDepositForm(localId, defaultAmount);
+  const form = cell.querySelector('form');
+  const input = form.querySelector('.deposit-form__amount');
+  input.focus();
+  input.select();
+  form.querySelector('[data-deposit-cancel]').addEventListener('click', () => refreshHistory());
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const amount = parseDepositAmount(input.value);
+    if (amount === null) { input.classList.add('input--error'); input.focus(); return; }
+    const ok = await applyQuoteDeposit(localId, { amount });
+    await refreshHistory();
+    if (!ok) return;
+    showStatusToast(`Señal registrada · ${formatEur(amount)}`, async () => {
+      await applyQuoteDeposit(localId, null);
+      await refreshHistory();
+    });
+  });
+}
+
+/** Clicking the paid chip: confirm, clear (→ Pendiente); undo re-marks the same amount. */
+async function clearQuoteDeposit(localId) {
+  const r = await window.packprice.getQuote(localId);
+  const quote = r && r.ok ? r.quote : null;
+  if (!quote || !quote.deposit_paid) return;
+  const prevAmount = quote.deposit_paid.amount;
+  const choice = await window.packprice.confirm({
+    titulo: 'Quitar señal',
+    mensaje: `¿Quitar la señal de ${formatEur(prevAmount)} del presupuesto ${localId}?`,
+    detalle: 'El presupuesto volverá a Pendiente.',
+    botones: ['Quitar', 'Cancelar'],
+    defaultId: 1
+  });
+  if (choice !== 0) return;
+  const ok = await applyQuoteDeposit(localId, null);
+  await refreshHistory();
+  if (!ok) return;
+  showStatusToast('Señal eliminada', async () => {
+    await applyQuoteDeposit(localId, { amount: prevAmount });
+    await refreshHistory();
   });
 }
 
