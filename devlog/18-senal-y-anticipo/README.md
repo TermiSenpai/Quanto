@@ -8,7 +8,7 @@
 > el catálogo, sin esperar a una reprovisión.
 
 **Release:** `v5.2.0-beta` · **Fecha:** 2026-09-07 · **Tests:** 1258 verdes ·
-**Tamaño .exe:** ~75 MB (pendiente de medir)
+**Tamaño .exe:** 75,4 MB
 
 ---
 
@@ -179,7 +179,7 @@ flowchart LR
 | Métrica | Antes | Después |
 |---|---|---|
 | Tests | 1143 | 1258 |
-| Tamaño del `.exe` | 75,4 MB | pendiente de medir |
+| Tamaño del `.exe` | 75,4 MB | 75,4 MB |
 | Migraciones SQL (`db/migrations/`) | `0002` | `0003` |
 
 ---
