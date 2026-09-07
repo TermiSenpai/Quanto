@@ -63,7 +63,7 @@ import { enhanceDropdowns } from './dropdown.js';
 import { startCatalogWizard } from './catalog-wizard.js';
 import { planInputs } from './quote-inputs.js';
 import {
-  depositMinimum, parseDepositPct, parseDepositAmount, formatDepositPct, pctToPercentInput
+  depositMinimum, parseDepositPct, parseDepositAmount, formatDepositPct
 } from './deposit.js';
 
 // ============================================================
@@ -141,7 +141,11 @@ const state = {
 /** The deposit fraction for the quote on screen: per-quote override, else config. */
 function currentDepositPct() {
   if (Number.isFinite(state.deposit.pct)) return state.deposit.pct;
-  return CFG.quote_settings.deposit_pct;
+  // Guarded like computeValidUntil: 0 = no minimum, a neutral degrade (not
+  // a business number) — main guarantees the key anyway.
+  return (CFG && CFG.quote_settings && Number.isFinite(CFG.quote_settings.deposit_pct))
+    ? CFG.quote_settings.deposit_pct
+    : 0;
 }
 
 /** A fresh quote starts from the config percentage, unpaid. */
@@ -2312,6 +2316,13 @@ function amountInputValue(n) {
     : '';
 }
 
+/** The percentage input's text for a fraction: 0.4 → "40", 0.125 → "12,5" (Spanish decimal). */
+function pctInputValue(pct) {
+  return Number.isFinite(pct)
+    ? (pct * 100).toLocaleString('es-ES', { maximumFractionDigits: 2, useGrouping: false })
+    : '';
+}
+
 function depositHintText(r, pct) {
   return `${formatDepositPct(pct)} de ${formatEur(totalVatIncOf(r))} · redondeado al euro hacia arriba`;
 }
@@ -2344,7 +2355,7 @@ function renderDepositCard(r) {
         <div class="field">
           <label class="field__label" for="deposit-pct">Porcentaje</label>
           <div class="deposit-card__pct">
-            <input type="text" inputmode="decimal" id="deposit-pct" class="input" value="${pctToPercentInput(pct)}" autocomplete="off" aria-describedby="deposit-pct-error">
+            <input type="text" inputmode="decimal" id="deposit-pct" class="input" value="${pctInputValue(pct)}" autocomplete="off" aria-describedby="deposit-pct-error">
             <span class="text-muted">%</span>
           </div>
           <span id="deposit-pct-error" class="field__error hidden" role="alert">Indica un porcentaje entre 0 y 100.</span>
@@ -2387,7 +2398,9 @@ function bindDepositCard(r) {
     hint.textContent = depositHintText(r, pct);
     hint.classList.toggle('hidden', min <= 0);
     // The paid amount follows the minimum until the user types their own.
-    if (!state.deposit.paid || !state.deposit.paid.edited) {
+    // At min <= 0 there is nothing sensible to follow (an amount must be
+    // > 0), so the amount input is left as typed.
+    if (min > 0 && (!state.deposit.paid || !state.deposit.paid.edited)) {
       amountInput.value = amountInputValue(min);
       if (state.deposit.paid) state.deposit.paid = { amount: min, edited: false };
     }
@@ -2428,9 +2441,13 @@ function collectDepositOrInvalid() {
   const paidBox = el('deposit-paid');
   const amountInput = el('deposit-amount');
   if (!pctInput || !paidBox || !amountInput) {
-    // Card not on screen (defensive): config default, unpaid.
-    const pct = CFG.quote_settings.deposit_pct;
-    return { pct, min_amount: depositMinimum(total, pct), paid: null };
+    // Card not on screen (defensive): config default, unpaid. Guarded like
+    // computeValidUntil — 0 = no minimum, a neutral degrade, not a
+    // business number; main guarantees the key anyway.
+    const cfgPct = (CFG && CFG.quote_settings && Number.isFinite(CFG.quote_settings.deposit_pct))
+      ? CFG.quote_settings.deposit_pct
+      : 0;
+    return { pct: cfgPct, min_amount: depositMinimum(total, cfgPct), paid: null };
   }
   clearFieldError('deposit-pct');
   clearFieldError('deposit-amount');
@@ -2461,9 +2478,46 @@ function syncDepositCard(quote) {
   state.depositStored = hasPaid ? { amount: paid.amount, at: paid.at, by: paid.by } : null;
   const card = el('deposit-card');
   if (!card) return;
-  const r = quote.result || quote;
+  const r = (quote && quote.result) || quote;
   card.outerHTML = renderDepositCard(r);
   bindDepositCard(r);
+}
+
+/**
+ * Runs the paid-deposit op for the quote on screen when the card's paid
+ * state differs from what the backend holds (design §5 step 3). Returns
+ * the quote to keep on screen. The baseline is what the card was loaded
+ * with when the backend echo cannot know (queued save) — never the draft.
+ * On failure the card is left as typed so the user can retry.
+ */
+async function syncDepositWithBackend(saved, deposit, { queued, isEdit }) {
+  const wanted = deposit.paid;                                               // { amount } | null
+  const stored = queued ? state.depositStored : (saved.deposit_paid || null); // what the backend holds
+  const changed = Boolean(wanted) !== Boolean(stored)
+    || Boolean(wanted && stored && wanted.amount !== stored.amount);
+  if (!changed) { syncDepositCard(saved); return saved; }
+  if (queued) {
+    await window.packprice.showInfo({
+      titulo: 'Señal pendiente',
+      mensaje: 'La señal se podrá marcar desde el historial cuando el presupuesto se sincronice.'
+    });
+    return saved; // keep the card as typed; state.depositStored untouched
+  }
+  const d = await window.packprice.setQuoteDeposit({ id: saved.id, paid: wanted ? { amount: wanted.amount } : null });
+  if (d && d.ok && d.quote) {
+    // File mode: the deposit write moved the content hash, so an editor
+    // still open on this quote must carry the fresh token (null ⇒ force).
+    if (isEdit) state.editingQuoteToken = d.token || null;
+    syncDepositCard(d.quote);
+    return d.quote;
+  }
+  await window.packprice.showError({
+    titulo: 'No se pudo registrar la señal',
+    mensaje: d && d.offline
+      ? 'Sin conexión con el almacén de presupuestos. El presupuesto se guardó; marca la señal desde el historial cuando vuelva la conexión.'
+      : ((d && d.error) || 'Error desconocido')
+  });
+  return saved; // card left as typed
 }
 
 function buildBreakdownRows(r) {
@@ -4081,41 +4135,10 @@ async function persistCurrentQuote(client) {
     }
   }
 
-  let saved = r.quote;
   // The paid mark is workflow (design §5 step 3): its own op AFTER the
   // content save, only when it changed, and only if the save reached the
   // backend (a queued save has no final id yet).
-  const wanted = deposit.paid;                // { amount } | null
-  const stored = saved.deposit_paid || null;  // what the backend holds now
-  const changed = Boolean(wanted) !== Boolean(stored)
-    || Boolean(wanted && stored && wanted.amount !== stored.amount);
-  if (changed) {
-    if (queued) {
-      await window.packprice.showInfo({
-        titulo: 'Señal pendiente',
-        mensaje: 'La señal se podrá marcar desde el historial cuando el presupuesto se sincronice.'
-      });
-    } else {
-      const d = await window.packprice.setQuoteDeposit({
-        id: saved.id,
-        paid: wanted ? { amount: wanted.amount } : null
-      });
-      if (d && d.ok && d.quote) {
-        saved = d.quote;
-        // File mode: the deposit write moved the content hash, so an editor
-        // still open on this quote must carry the fresh token (null ⇒ force).
-        if (isEdit) state.editingQuoteToken = d.token || null;
-      } else {
-        await window.packprice.showError({
-          titulo: 'No se pudo registrar la señal',
-          mensaje: d && d.offline
-            ? 'Sin conexión con el almacén de presupuestos. El presupuesto se guardó; marca la señal desde el historial cuando vuelva la conexión.'
-            : ((d && d.error) || 'Error desconocido')
-        });
-      }
-    }
-  }
-  syncDepositCard(saved);
+  const saved = await syncDepositWithBackend(r.quote, deposit, { queued, isEdit });
   return { quote: saved, queued };
 }
 
@@ -4188,7 +4211,17 @@ async function exportQuotePdf() {
   // the PDF and the history are consistent (same id printed + stored).
   let quote;
   if (lastResult.id && lastResult.date) {
-    quote = lastResult;
+    // Already saved: only the paid mark is synced here. A percentage
+    // changed on the card AFTER the save is deliberately NOT re-saved —
+    // that would rewrite quote content from an export action and could
+    // create a duplicate quote; the user re-saves explicitly for that.
+    const deposit = collectDepositOrInvalid();
+    if (!deposit) return; // inline error already shown
+    quote = await syncDepositWithBackend(lastResult, deposit, {
+      queued: isPendingQuoteId(lastResult.id),
+      isEdit: Boolean(state.editingQuoteId)
+    });
+    lastResult = quote;
   } else {
     const client = collectClientOrInvalid();
     if (!client) return; // inline errors already shown
