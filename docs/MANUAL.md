@@ -213,6 +213,28 @@ esta semana** (validez 15 días). Pulsar **[Revisar]** abre el historial
 filtrado. Se descarta con un clic y no vuelve hasta el día siguiente. **Nunca
 bloquea**: es un recordatorio, no una tarea.
 
+### 3.3 La señal
+
+En el paso 3 (resultado), junto al precio final verás una tarjeta **«Señal»**
+con el porcentaje mínimo que se pide antes de lanzar el pedido (por defecto un
+40 %, configurable — ver §4). Puedes ajustar el porcentaje **solo para este
+presupuesto**; el importe mínimo se recalcula al momento, redondeado al euro
+hacia arriba.
+
+- Marca la casilla **«Señal pagada»** e indica el importe recibido cuando el
+  cliente pague. Al guardar, el presupuesto pasa automáticamente a
+  **Aceptado**. Desmarcarla lo devuelve a **Pendiente**.
+- También puedes marcar (o quitar) la señal directamente desde el
+  **historial**, sin reabrir el presupuesto: un chip verde «Señal · importe»
+  cuando ya está pagada, o un botón «Marcar señal» con un mini formulario en
+  la propia fila. Ambas acciones tienen **deshacer** en el aviso que aparece
+  tras la acción.
+- El **PDF** imprime siempre la señal mínima bajo el total y, si ya está
+  pagada, el importe recibido, la fecha y el resto pendiente.
+- Si trabajas en modo Nube y te quedas sin conexión, marcar la señal como
+  pagada **no se guarda en la cola**: la app te avisa y puedes repetir la
+  acción desde el historial en cuanto el presupuesto se sincronice.
+
 ---
 
 ## 4. Editar el catálogo

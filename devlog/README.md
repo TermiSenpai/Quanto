@@ -37,6 +37,7 @@ También hace algo más útil para un equipo pequeño: **bloquea decisiones**. U
 | 15  | [Presupuestos compartidos](15-presupuestos-compartidos/README.md)                     | La fuente de verdad del presupuesto pasa a un almacén compartido (carpeta junto al config o D1), reabrir/editar entre PCs, conflicto por versión, caché + outbox offline. |
 | 16  | [PDF con desglose sin IVA](16-pdf-desglose-sin-iva/README.md)                         | Cada prenda y cada extra en su línea (también en packs bundle, con reparto que cuadra al céntimo), precios netos que cierran, totales Subtotal/IVA/Total, fuera el "precio por persona". |
 | 17  | [Margen bruto oculto por defecto](17-margen-oculto-por-defecto/README.md)             | Los costes internos del paso 3 arrancan siempre ocultos, también en admin; solo el atajo 3 × "." los alterna. |
+| 18  | [Señal (anticipo) del pedido](18-senal-y-anticipo/README.md)                          | La señal mínima (40 % con IVA, redondeada al euro) se calcula, se marca como pagada desde el paso 3 o el historial y se imprime en el PDF; las bases de datos en la nube migran su esquema solas al cargar el catálogo. |
 
 ---
 
@@ -70,4 +71,4 @@ Para el resto, [`CLAUDE.md`](../CLAUDE.md) tiene la versión normativa de las re
 
 ---
 
-*Devlog por release desde la v5. Última revisión: 2026-07-21 (v5.1.1-beta, capítulo 17).*
+*Devlog por release desde la v5. Última revisión: 2026-09-07 (v5.2.0-beta, capítulo 18).*

@@ -356,3 +356,25 @@ describe('company — optional PDF settings (Plan 6)', () => {
     expect(errors.some(e => /pdf_template/.test(e))).toBe(true);
   });
 });
+
+describe('quote_settings.deposit_pct', () => {
+  test('accepts the bounds 0 and 1 and a fraction in between', () => {
+    for (const v of [0, 0.4, 1]) {
+      const cfg = makeConfig();
+      cfg.quote_settings.deposit_pct = v;
+      expect(collectConfigErrors(cfg)).toEqual([]);
+    }
+  });
+
+  test('accepts a config without deposit_pct (optional key)', () => {
+    const cfg = makeConfig();
+    delete cfg.quote_settings.deposit_pct;
+    expect(collectConfigErrors(cfg)).toEqual([]);
+  });
+
+  test.each([['0.4'], [1.5], [-0.1], [NaN]])('rejects %p naming the field', (bad) => {
+    const cfg = makeConfig();
+    cfg.quote_settings.deposit_pct = bad;
+    expect(collectConfigErrors(cfg).join('\n')).toMatch(/quote_settings\.deposit_pct/);
+  });
+});

@@ -11,6 +11,8 @@ import {
   quotesFolder,
   isPendingId,
   newPendingId,
+  normalizeDepositPaid,
+  withoutDepositPaid,
 } from '../lib/quote-store-helpers.js';
 
 describe('quotesFolder', () => {
@@ -44,5 +46,77 @@ describe('newPendingId', () => {
     const id = newPendingId(() => 'xyz');
     expect(isPendingId(id)).toBe(true);
     expect(/^PP-\d{4}-\d+$/.test(id)).toBe(false);
+  });
+});
+
+describe('normalizeDepositPaid', () => {
+  const AT = '2026-09-04T10:00:00.000Z';
+
+  test('null/undefined mean "not paid" and pass through as null', () => {
+    expect(normalizeDepositPaid(null)).toBeNull();
+    expect(normalizeDepositPaid(undefined)).toBeNull();
+  });
+
+  test('rounds the amount to cents and blanks an empty `by`', () => {
+    expect(normalizeDepositPaid({ amount: 120.006, at: AT, by: '  ' }))
+      .toEqual({ amount: 120.01, at: AT, by: null });
+    expect(normalizeDepositPaid({ amount: '121', at: AT, by: 'Mostrador' }))
+      .toEqual({ amount: 121, at: AT, by: 'Mostrador' });
+  });
+
+  test('rejects a non-positive or non-numeric amount with a Spanish error', () => {
+    expect(() => normalizeDepositPaid({ amount: 0, at: AT })).toThrow(/importe/i);
+    expect(() => normalizeDepositPaid({ amount: -5, at: AT })).toThrow(/importe/i);
+    expect(() => normalizeDepositPaid({ amount: 'x', at: AT })).toThrow(/importe/i);
+  });
+
+  test('rejects a missing or unparsable timestamp', () => {
+    expect(() => normalizeDepositPaid({ amount: 10 })).toThrow(/fecha/i);
+    expect(() => normalizeDepositPaid({ amount: 10, at: 'ayer' })).toThrow(/fecha/i);
+  });
+
+  test('rejects a non-object', () => {
+    expect(() => normalizeDepositPaid(5)).toThrow(/objeto/i);
+    expect(() => normalizeDepositPaid([1])).toThrow(/objeto/i);
+  });
+
+  test('rejects a boolean, array, hex or exponent-notation amount (Number() would coerce them)', () => {
+    expect(() => normalizeDepositPaid({ amount: true, at: AT })).toThrow(/importe/i);
+    expect(() => normalizeDepositPaid({ amount: [5], at: AT })).toThrow(/importe/i);
+    expect(() => normalizeDepositPaid({ amount: '0x10', at: AT })).toThrow(/importe/i);
+    expect(() => normalizeDepositPaid({ amount: '1e3', at: AT })).toThrow(/importe/i);
+  });
+
+  test('accepts a comma-decimal amount string', () => {
+    expect(normalizeDepositPaid({ amount: '12,5', at: AT })).toEqual({ amount: 12.5, at: AT, by: null });
+  });
+
+  test('normalizes `at` to a full ISO timestamp', () => {
+    expect(normalizeDepositPaid({ amount: 10, at: '2026-09-04T10:00:00Z' }))
+      .toEqual({ amount: 10, at: '2026-09-04T10:00:00.000Z', by: null });
+  });
+
+  test('rejects a non-string `by`', () => {
+    expect(() => normalizeDepositPaid({ amount: 10, at: AT, by: 123 })).toThrow(/autor/i);
+  });
+});
+
+describe('withoutDepositPaid', () => {
+  test('returns the same draft when it carries no payment', () => {
+    const d = { user: 'a' };
+    expect(withoutDepositPaid(d)).toBe(d);
+  });
+
+  test('drops deposit_paid from a copy, leaving the input untouched', () => {
+    const d = { user: 'a', deposit_paid: { amount: 1 } };
+    const out = withoutDepositPaid(d);
+    expect(out).toEqual({ user: 'a' });
+    expect(d.deposit_paid).toEqual({ amount: 1 });
+  });
+
+  test('strips an explicit `deposit_paid: undefined` too', () => {
+    const d = { a: 1, deposit_paid: undefined };
+    const out = withoutDepositPaid(d);
+    expect('deposit_paid' in out).toBe(false);
   });
 });

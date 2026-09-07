@@ -56,7 +56,7 @@ diálogos nativos de Electron para errores y conflictos.
 Bienvenida (split, hero oscuro)
    └► Paso 1: selección de pack (cards con color e icono)
         └► Paso 2: datos del pedido (formulario + preview en vivo en columna lateral)
-             └► Resultado (precio grande, desglose, margen, PDF, guardar en historial)
+             └► Resultado (precio grande, señal mínima + pago, desglose, margen, PDF, guardar en historial)
 Transversales: modo admin (modal lateral, edición por data-cfg-path),
                historial de presupuestos, ajustes locales.
 ```
@@ -386,6 +386,20 @@ recordatorio, no una tarea.
 **nombre y teléfono del cliente, obligatorios** (validación en línea, no al
 final), que viajan al historial, a D1 y al PDF junto con la validez de 15
 días («Presupuesto válido hasta dd/mm/aaaa»).
+
+**Señal (cambio asociado):** el paso 3 muestra una tarjeta «Señal» en el
+hueco del antiguo «Próximos pasos»: porcentaje (por defecto el de config,
+editable solo para ese pedido), señal mínima (redondeada al euro hacia
+arriba, «Sin señal mínima» al 0 %) y casilla «Señal pagada» con el importe
+recibido. Al guardar con la señal pagada el presupuesto pasa a **Aceptado**;
+quitarla lo devuelve a Pendiente. En el historial, cada fila añade un chip
+verde «Señal · Y €» (clic → confirmar y quitar) o un botón «Marcar señal»
+que abre un mini formulario en la propia fila (importe prefijado, sin
+modal) — ambos con deshacer en el toast, y deshabilitados mientras el
+presupuesto está pendiente de subir. El PDF imprime la señal mínima bajo
+el total y, si está pagada, la recibida y el resto pendiente. Sin conexión
+(nube) la marca de pago **no se encola**: se avisa y se repite desde el
+historial cuando el presupuesto se sincronice.
 
 ### 2.8 Accesibilidad y detalles
 

@@ -132,7 +132,7 @@ renderer/          ← UI + pure calc (no Node): app.js (orchestration), calculo
                      (pure pricing), admin.js/admin-extras.js/change-format.js/
                      save-summary.js (catalog editor), catalog-wizard.js/
                      wizard-validation.js (first run), history.js/quote-inputs.js/
-                     quote-reminder.js (quotes), charts.js/stats-view.js (stats),
+                     quote-reminder.js/deposit.js (quotes), charts.js/stats-view.js (stats),
                      pdf-gallery.js, data-status.js, dropdown.js, format.js,
                      index.html, styles.css
 tests/             ← Vitest (English), one file per module (~57 files)
@@ -179,7 +179,10 @@ For any non-trivial change, follow the agent loop in `AGENTS.md` §2
 
 **Smoke checklist:** first run (delete `%APPDATA%\Quanto\`); crew pack T1
 with/without hood; mixed pack with two quantities; admin conflict (edit config by
-hand while an admin editor is open).
+hand while an admin editor is open); señal: cambiar el porcentaje en el paso 3,
+marcar pagada, guardar → historial en Aceptado con chip y PDF con las tres
+filas; quitar desde el historial → Pendiente → deshacer; en nube, editar sin
+conexión un presupuesto pagado no debe borrar la señal.
 
 ## 9. Documented debates (decision log)
 
@@ -295,6 +298,20 @@ earlier entry says so.
   §2.6). Cloud-mode auto-migration of legacy local quotes is intentionally
   deferred (file mode migrates once on boot; see
   `devlog/15-presupuestos-compartidos/`).
+  **Deposit (señal):** two more fields on the same record. `deposit = { pct,
+  min_amount }` is **content** — the minimum owed before an order launches,
+  `ceil(round2(total_vat_inc × pct))` in whole euros, computed only in
+  `renderer/deposit.js` and saved with the draft like `totals`. `deposit_paid
+  = { amount, at, by } | null` is **workflow**, written only by the
+  `quotes:set-deposit` IPC → `setDepositPaid` (file: rewrites `<id>.json`;
+  cloud: additive `quote_deposits` table LEFT-JOINed on read), which also
+  flips `status` to accepted (paid) or pending (cleared) **without** bumping
+  `version` — same rule as a status chip. `createQuote` strips a
+  `deposit_paid` smuggled in a draft; `replaceQuote` pins it from the stored
+  record, so an edit never touches the payment. File mode's conflict token is
+  a content hash, so a deposit write from another PC still moves it: an open
+  editor's next save shows the standard (safe) conflict dialog rather than a
+  false "up to date". Design: `docs/superpowers/specs/2026-09-04-quote-deposit-design.md`.
 
 ---
 

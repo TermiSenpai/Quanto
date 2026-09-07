@@ -1,9 +1,12 @@
 // ============================================================
 // Quanto · History UI (renderer)
 // ============================================================
-// Pure rendering helpers for the quote-history modal. All IO
-// goes through window.packprice; this module never touches the
-// DOM directly. The orchestration in app.js wires the events.
+// Pure rendering helpers for the quote-history modal: the table
+// (renderHistoryList), its status chips (renderStatusChips), its
+// deposit ("señal") cell + inline amount form (renderDepositCell,
+// renderDepositForm), and the save draft builder (buildQuoteDraft).
+// All IO goes through window.packprice; this module never touches
+// the DOM directly. The orchestration in app.js wires the events.
 // ============================================================
 
 function esc(value) {
@@ -55,6 +58,43 @@ function renderStatusChips(quote) {
 }
 
 /**
+ * The deposit ("señal") cell of a history row (design 2026-09-04 §6): a
+ * success chip with the amount when paid (click → clear), else a "Marcar
+ * señal" button (click → inline amount form). A pending (PP-PENDING-…)
+ * row gets the button disabled — its id is provisional until it syncs.
+ */
+export function renderDepositCell(quote) {
+  const paid = quote.deposit_paid;
+  if (paid && typeof paid.amount === 'number') {
+    const when = paid.at ? formatDate(paid.at).slice(0, 10) : '';
+    const title = `Recibida${when ? ' el ' + when : ''}${paid.by ? ' por ' + paid.by : ''} · clic para quitar`;
+    return `<button type="button" class="quote-chip quote-chip--deposit is-active" data-action="deposit-clear" data-id="${esc(quote.id)}" title="${esc(title)}">Señal · ${esc(formatEur(paid.amount))}</button>`;
+  }
+  const pending = typeof quote.id === 'string' && quote.id.startsWith('PP-PENDING-');
+  const attrs = pending
+    ? 'disabled title="Pendiente de subir: marca la señal cuando se sincronice"'
+    : 'title="Registrar la señal recibida"';
+  return `<button type="button" class="btn btn-ghost btn-sm" data-action="deposit-mark" data-id="${esc(quote.id)}" ${attrs}>Marcar señal</button>`;
+}
+
+/**
+ * The inline amount form that replaces the deposit cell while marking —
+ * no modal, a counter click (UI-UX §2.7). `defaultAmount` is prefilled.
+ */
+export function renderDepositForm(quoteId, defaultAmount) {
+  const value = typeof defaultAmount === 'number'
+    ? defaultAmount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false })
+    : '';
+  return `
+    <form class="deposit-form" data-deposit-form="${esc(quoteId)}">
+      <input type="text" inputmode="decimal" class="input deposit-form__amount" value="${esc(value)}" aria-label="Importe de la señal (€)" autocomplete="off">
+      <span class="text-muted">€</span>
+      <button type="submit" class="btn btn-primary btn-sm" title="Confirmar"><svg class="icon"><use href="#i-check"/></svg></button>
+      <button type="button" class="btn btn-ghost btn-sm" data-deposit-cancel title="Cancelar"><svg class="icon"><use href="#i-x"/></svg></button>
+    </form>`;
+}
+
+/**
  * Renders a list of quotes as a table with action buttons. The
  * caller wires the dataset-driven actions via event delegation.
  *
@@ -83,6 +123,7 @@ export function renderHistoryList(quotes) {
         <td>${esc(pack)}</td>
         <td class="num">${esc(formatEur(total))}</td>
         <td>${renderStatusChips(q)}</td>
+        <td>${renderDepositCell(q)}</td>
         <td class="actions">
           <button type="button" class="btn btn-ghost btn-sm" data-action="open" data-id="${esc(q.id)}" title="Reabrir">
             <svg class="icon"><use href="#i-edit"/></svg>
@@ -109,6 +150,7 @@ export function renderHistoryList(quotes) {
           <th>Pack</th>
           <th class="num">Total</th>
           <th>Estado</th>
+          <th>Señal</th>
           <th></th>
         </tr>
       </thead>
@@ -127,7 +169,7 @@ export function renderHistoryList(quotes) {
  * so the entry survives future config changes.
  *
  * @param {object} result  the calculator output
- * @param {object} ctx      { user, configVersion, customer?, packId?, opt? }
+ * @param {object} ctx      { user, configVersion, customer?, packId?, opt?, deposit? }
  * @returns {object} draft passed to packprice.saveQuote
  */
 export function buildQuoteDraft(result, ctx) {
@@ -145,6 +187,11 @@ export function buildQuoteDraft(result, ctx) {
       total_cost:    result.total_cost ?? null,
       margin:        result.margin ?? null
     },
-    opt: ctx.opt || null
+    opt: ctx.opt || null,
+    // Deposit minimum for this quote (content — design 2026-09-04 §3.2).
+    // The payment (`deposit_paid`) is workflow and NEVER travels in a draft.
+    deposit: ctx.deposit
+      ? { pct: ctx.deposit.pct, min_amount: ctx.deposit.min_amount }
+      : null
   };
 }

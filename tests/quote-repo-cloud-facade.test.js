@@ -23,6 +23,7 @@ import {
   searchQuotes,
   replaceQuote,
   setStatus,
+  setDepositPaid,
   deleteQuote,
 } from '../lib/quote-repo-cloud.js';
 import { tryClaimFullQuote, deleteFullQuote } from '../lib/cloud-quotes.js';
@@ -76,6 +77,19 @@ function fakeClient() {
   const items = [];           // { quote_id, ... }
   const addons = [];          // { quote_id, ... }
   const calls = [];
+  const deposits = new Map(); // quote_id → { amount, paid_at, paid_by }
+
+  // getFullQuote/listFullQuotes LEFT JOIN quote_deposits: expose the
+  // deposit columns (null when unpaid) on every flat row they return.
+  function withDeposit(row) {
+    const d = deposits.get(row.id);
+    return {
+      ...row,
+      deposit_amount: d ? d.amount : null,
+      deposit_paid_at: d ? d.paid_at : null,
+      deposit_paid_by: d ? d.paid_by : null
+    };
+  }
 
   function insertOrIgnoreQuotes(sql, params) {
     const cols = sql.match(/\(([^)]*)\) VALUES/)[1].split(',').map((c) => c.trim());
@@ -92,6 +106,7 @@ function fakeClient() {
     payloads,
     items,
     addons,
+    deposits,
     async query(sql, params = []) {
       calls.push({ sql, params });
 
@@ -153,6 +168,16 @@ function fakeClient() {
         const had = payloads.delete(params[0]);
         return { results: [], meta: { changes: had ? 1 : 0 } };
       }
+      if (/INSERT INTO quote_deposits/.test(sql)) {
+        // upsert: [quote_id, amount, paid_at, paid_by]
+        const [quote_id, amount, paid_at, paid_by] = params;
+        deposits.set(quote_id, { amount, paid_at, paid_by });
+        return { results: [], meta: { changes: 1 } };
+      }
+      if (/DELETE FROM quote_deposits/.test(sql)) {
+        const had = deposits.delete(params[0]);
+        return { results: [], meta: { changes: had ? 1 : 0 } };
+      }
       if (/DELETE FROM quotes/.test(sql)) {
         const had = quotes.delete(params[0]);
         return { results: [], meta: { changes: had ? 1 : 0 } };
@@ -163,9 +188,9 @@ function fakeClient() {
         return { results: p ? [{ quote_id: id, payload: p.payload, version: p.version, updated_at: p.updated_at }] : [], meta: {} };
       }
       if (/SELECT [^]*FROM quotes/i.test(sql)) {
-        if (/WHERE id = \?/.test(sql)) {
+        if (/WHERE (q\.)?id = \?/.test(sql)) {
           const row = quotes.get(params[0]);
-          return { results: row ? [row] : [], meta: {} };
+          return { results: row ? [withDeposit(row)] : [], meta: {} };
         }
         if (/LIKE \?/.test(sql)) {
           const like = String(params[0]);
@@ -173,8 +198,8 @@ function fakeClient() {
           const rows = [...quotes.values()].filter((r) => String(r.id).startsWith(prefix)).map((r) => ({ id: r.id }));
           return { results: rows, meta: {} };
         }
-        // plain list (listFullQuotes) — return the flat rows as-is
-        return { results: [...quotes.values()], meta: {} };
+        // plain list (listFullQuotes) — return the flat rows joined with any deposit
+        return { results: [...quotes.values()].map(withDeposit), meta: {} };
       }
       return { results: [], meta: { changes: 0 } };
     },
@@ -503,6 +528,103 @@ describe('setStatus', () => {
     expect(mutated).toBe(false);
     // status unchanged
     expect(client.quotes.get('PP-2026-0001').status).toBe('pending');
+  });
+});
+
+// ── setDepositPaid ───────────────────────────────────────────────
+describe('setDepositPaid', () => {
+  const PAID = { amount: 249, at: '2026-09-04T10:00:00.000Z', by: 'Mostrador' };
+  const NOW = '2026-09-04T10:00:00.000Z';
+
+  test('returns the overlaid quote: payment recorded, status accepted, version untouched', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
+    const updated = await setDepositPaid(client, q.id, PAID, { now: NOW });
+    expect(updated.deposit_paid).toEqual(PAID);
+    expect(updated.status).toBe('accepted');
+    expect(updated.status_ts).toBe(NOW);
+    expect(updated.version).toBe(1);
+    expect((await getQuote(client, q.id)).quote.deposit_paid).toEqual(PAID);
+  });
+
+  test('clearing returns the quote to pending with deposit_paid null', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft());
+    await setDepositPaid(client, q.id, PAID, { now: NOW });
+    client.calls.length = 0;
+    const cleared = await setDepositPaid(client, q.id, null, { now: NOW });
+    expect(cleared.status).toBe('pending');
+    expect(cleared.deposit_paid).toBeNull();
+    expect(client.calls.some((c) => /DELETE FROM quote_deposits/.test(c.sql))).toBe(true);
+    expect(client.calls.some((c) => /INSERT INTO quote_deposits/.test(c.sql))).toBe(false);
+  });
+
+  test('orphan payload (no flat row): returns null and writes NO deposit row', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft());
+    client.quotes.delete(q.id); // simulate a lost flat insert after the payload claim
+    client.calls.length = 0;
+    expect(await setDepositPaid(client, q.id, PAID, { now: NOW })).toBeNull();
+    expect(client.calls.some((c) => /INSERT INTO quote_deposits/.test(c.sql))).toBe(false);
+  });
+
+  test('returns null for an unknown id and for a shape-invalid id (no query)', async () => {
+    const client = fakeClient();
+    expect(await setDepositPaid(client, 'PP-2026-9999', PAID, { now: NOW })).toBeNull();
+    client.calls.length = 0;
+    expect(await setDepositPaid(client, '../evil', PAID, { now: NOW })).toBeNull();
+    expect(client.calls).toHaveLength(0);
+  });
+
+  test('rejects a bad amount BEFORE any network call', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft());
+    client.calls.length = 0;
+    await expect(setDepositPaid(client, q.id, { amount: 0, at: NOW, by: null }, { now: NOW }))
+      .rejects.toThrow(/importe/i);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  test('replaceQuote preserves the stored payment and drops one smuggled in the draft', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft());
+    await setDepositPaid(client, q.id, PAID, { now: NOW });
+    const { version } = await getQuote(client, q.id);
+    const res = await replaceQuote(client, q.id, sampleDraft({ user: 'Edited', deposit_paid: { amount: 1, at: NOW, by: 'x' } }), version);
+    expect(res.quote.deposit_paid).toEqual(PAID);
+    expect(res.quote.status).toBe('accepted');
+    expect(res.quote.version).toBe(2);
+    expect(JSON.parse(client.payloads.get(q.id).payload).deposit_paid).toEqual(PAID);
+  });
+
+  test('createQuote never writes a deposit_paid carried by the draft', async () => {
+    const client = fakeClient();
+    const q = await createQuote(client, sampleDraft({ deposit_paid: PAID }));
+    expect(q.deposit_paid).toBeUndefined();
+    expect(JSON.parse(client.payloads.get(q.id).payload).deposit_paid).toBeUndefined();
+    expect((await getQuote(client, q.id)).quote.deposit_paid).toBeNull();
+  });
+
+  test('listQuotes rows carry deposit_paid (null when unpaid)', async () => {
+    const client = fakeClient();
+    const a = await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
+    const b = await createQuote(client, sampleDraft(), { now: '2026-06-13T10:00:00.000Z' });
+    await setDepositPaid(client, b.id, PAID, { now: NOW });
+    const rows = await listQuotes(client);
+    expect(rows.find((r) => r.id === a.id).deposit_paid).toBeNull();
+    expect(rows.find((r) => r.id === b.id).deposit_paid).toEqual(PAID);
+  });
+
+  test('getQuote returns the RIGHT row when several quotes exist', async () => {
+    const client = fakeClient();
+    const a = await createQuote(client, sampleDraft(), { now: '2026-06-12T10:00:00.000Z' });
+    const b = await createQuote(client, sampleDraft(), { now: '2026-06-13T10:00:00.000Z' });
+    await setStatus(client, a.id, 'rejected', NOW);
+    await setDepositPaid(client, b.id, PAID, { now: NOW });
+    expect((await getQuote(client, a.id)).quote.status).toBe('rejected');
+    expect((await getQuote(client, a.id)).quote.deposit_paid).toBeNull();
+    expect((await getQuote(client, b.id)).quote.status).toBe('accepted');
+    expect((await getQuote(client, b.id)).quote.deposit_paid).toEqual(PAID);
   });
 });
 
