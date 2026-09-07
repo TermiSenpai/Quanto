@@ -7,7 +7,7 @@
 > bases de datos en la nube ya existentes migran su esquema solas al cargar
 > el catálogo, sin esperar a una reprovisión.
 
-**Release:** `v5.2.0-beta` · **Fecha:** 2026-09-07 · **Tests:** 1255 verdes ·
+**Release:** `v5.2.0-beta` · **Fecha:** 2026-09-07 · **Tests:** 1258 verdes ·
 **Tamaño .exe:** ~75 MB (pendiente de medir)
 
 ---
@@ -178,7 +178,7 @@ flowchart LR
 
 | Métrica | Antes | Después |
 |---|---|---|
-| Tests | 1143 | 1255 |
+| Tests | 1143 | 1258 |
 | Tamaño del `.exe` | 75,4 MB | pendiente de medir |
 | Migraciones SQL (`db/migrations/`) | `0002` | `0003` |
 
