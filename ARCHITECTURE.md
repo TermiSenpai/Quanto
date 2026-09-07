@@ -160,6 +160,7 @@ packs app/
 │   ├── history.js          ← quote history UI
 │   ├── quote-inputs.js     ← pure inverse of collectInputs: planInputs/optFromPlan
 │   ├── quote-reminder.js   ← startup banner: stale/expiring open quotes (pure seam)
+│   ├── deposit.js          ← pure deposit ("señal") arithmetic + input parsers
 │   ├── charts.js           ← hand-rolled SVG chart builders (no chart libraries)
 │   ├── stats-view.js       ← stats object → chart inputs + KPI tiles (pure adapter)
 │   ├── pdf-gallery.js      ← view-model for the PDF-template gallery (IPC-fed)
@@ -251,7 +252,7 @@ through scattered `fs` calls:
 | Artifact | Module | Location | API shape |
 |---|---|---|---|
 | Business config (catalog) | file: `config-store.js` + `config-parser.js`; cloud: `cloud-bootstrap.js` → `cloud-catalog.js` / `catalog-writer.js` — each `config:*` handler routes on `settings.data_source` | NAS `config.js` **or** D1 entity tables | read / write / force-write / info |
-| Saved quotes (shared) | `lib/quote-repo-file.js` / `lib/quote-repo-cloud.js` behind `quoteRepo(settings)` | folder of `<id>.json` next to `config.js`, **or** D1 `quote_payloads` | `create` / `get` / `list` / `search` / `replace` / `setStatus` / `delete` |
+| Saved quotes (shared) | `lib/quote-repo-file.js` / `lib/quote-repo-cloud.js` behind `quoteRepo(settings)` | folder of `<id>.json` next to `config.js`, **or** D1 `quote_payloads` | `create` / `get` / `list` / `search` / `replace` / `setStatus` / `setDepositPaid` / `delete` |
 | Legacy per-PC quotes | `lib/history.js` | per-PC `presupuestos.json` | `save` / `list` / … — migrated into the shared store on boot, then retired |
 | Audit log | file: `lib/audit.js`; cloud: `lib/cloud-history.js` (audit + snapshots + restore) | NAS append-only file **or** D1 `audit_log`/snapshots | `appendAuditEntry` / `readRecentEntries` / restore |
 | Custom PDF templates | `lib/cloud-pdf-templates.js` + `lib/template-sanitizer.js` | D1 `pdf_templates` (untrusted shared HTML) | list / save — sanitized on load |
@@ -278,7 +279,9 @@ cloud mode — is the same canonical record:
   totals,       // { total_vat_inc, sale_base, vat, total_cost, margin }
   status,       // pending | accepted | rejected  (workflow; set without bumping version)
   status_ts,
-  cloud_id      // optional legacy UUID bridge (Phase-A cloud records)
+  cloud_id,     // optional legacy UUID bridge (Phase-A cloud records)
+  deposit,      // content: { pct, min_amount } — minimum deposit for this quote (renderer/deposit.js)
+  deposit_paid  // workflow: { amount, at, by } | null — paid deposit; set only by setDepositPaid
 }
 ```
 
@@ -343,7 +346,13 @@ main.js  quoteRepo(settings)  ── normalizes both conflict tokens into one op
   on `get`; the renderer round-trips it on edit. A stale write returns
   `{ conflict, current }` → the renderer offers Sobrescribir / Cancelar
   (reuses the catalog conflict UX). A status change is workflow, not a content
-  edit, so `setStatus` does **not** bump the version.
+  edit, so `setStatus` and `setDepositPaid` (which also flips the status) do
+  **not** bump the version. In cloud mode the payment lives in the additive
+  `quote_deposits` table (`db/migrations/0003_quote_deposits.sql`), LEFT-JOINed
+  onto the flat row on read; in file mode the token is a content hash, so a
+  deposit write from another PC still moves it and an open editor gets the
+  safe conflict dialog on its next save — `quotes:set-deposit` returns a fresh
+  token so the SAME PC's editor stays consistent.
 - **Offline behavior.** Cloud mode: an unreachable backend (`isBackendUnreachable`)
   queues the full quote and returns `{ queued: true }`; `quotes:list`/`search`
   fall back to the cache. File mode has **no drain** — a NAS-unreachable write
@@ -577,7 +586,7 @@ seen downstream.
     custom: { …, pricing_mode:'components', free_components:true, components:[] }
   },
   company:        { name, tax_id, address, phone, email, web },
-  quote_settings: { validity_days, terms }
+  quote_settings: { validity_days, terms, deposit_pct }
 }
 ```
 

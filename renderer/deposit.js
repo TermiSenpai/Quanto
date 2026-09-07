@@ -75,6 +75,9 @@ export function depositRemaining(totalVatInc, paidAmount) {
  * Percentage typed in the card ("40", "12,5") → fraction (0.4, 0.125).
  * Accepts 0–100 (0 % means no minimum deposit for this quote); rounds to
  * two decimals before converting to a fraction (12,345 → 12.35 % → 0.1235).
+ * A dot followed by exactly three digits ("12.345") is read as thousands
+ * grouping, not decimals, and is rejected as ambiguous — only the comma
+ * form ("12,345") reaches that 2-decimal rounding (see parseLocaleNumber).
  *
  * @param {string|number} text - the raw input value
  * @returns {number|null} fraction in [0, 1], or null when unparseable/out of range

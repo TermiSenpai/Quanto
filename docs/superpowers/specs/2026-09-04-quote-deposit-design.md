@@ -1,8 +1,8 @@
 # Quote Deposit (señal) — Design
 
 **Date:** 2026-09-04
-**Status:** Design approved by the owner; implementation plan pending.
-**Plan:** `docs/superpowers/plans/2026-09-04-quote-deposit.md` (to be written)
+**Status:** Implemented on branch feat/quote-deposit (plan docs/superpowers/plans/2026-09-04-quote-deposit.md).
+**Plan:** `docs/superpowers/plans/2026-09-04-quote-deposit.md`
 
 ---
 

@@ -46,7 +46,7 @@
 - Modify: `tests/fixtures/config-v4-full.js` (`QUOTE_SETTINGS` ~line 262)
 - Test: `tests/config-default.test.js`, `tests/config-schema.test.js`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/config-default.test.js` (add `DEFAULT_DEPOSIT_PCT, applyQuoteSettingsDefaults` to the existing named import from `'../config.default.js'`):
 
@@ -111,12 +111,12 @@ describe('quote_settings.deposit_pct', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm vitest run tests/config-default.test.js tests/config-schema.test.js`
 Expected: FAIL — `DEFAULT_DEPOSIT_PCT` is undefined / `applyQuoteSettingsDefaults is not a function`; the schema `rejects` cases fail because no error is produced.
 
-- [ ] **Step 3: Implement in `config.default.js`**
+- [x] **Step 3: Implement in `config.default.js`**
 
 Add after `DEFAULT_TARGET_MARGIN`:
 
@@ -168,7 +168,7 @@ function applyQuoteSettingsDefaults(cfg) {
 
 Export both: add `DEFAULT_DEPOSIT_PCT,` and `applyQuoteSettingsDefaults` to `module.exports`.
 
-- [ ] **Step 4: Implement the schema check in `lib/config-schema.js`**
+- [x] **Step 4: Implement the schema check in `lib/config-schema.js`**
 
 Inside `validateQuoteSettings`, after the `validity_days` check:
 
@@ -182,7 +182,7 @@ Inside `validateQuoteSettings`, after the `validity_days` check:
 
 (`describe` already exists in that module — it is used for `company.brand_color`.)
 
-- [ ] **Step 5: Keep the "full v4" fixture full**
+- [x] **Step 5: Keep the "full v4" fixture full**
 
 In `tests/fixtures/config-v4-full.js`, change `QUOTE_SETTINGS` to:
 
@@ -194,14 +194,14 @@ const QUOTE_SETTINGS = {
 };
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass, then the full suite**
+- [x] **Step 6: Run the tests to verify they pass, then the full suite**
 
 Run: `pnpm vitest run tests/config-default.test.js tests/config-schema.test.js`
 Expected: PASS.
 Run: `pnpm test`
 Expected: PASS (the fixture change round-trips through `catalog-assembler`/`backend-contract` untouched).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add config.default.js lib/config-schema.js tests/fixtures/config-v4-full.js tests/config-default.test.js tests/config-schema.test.js
@@ -217,7 +217,7 @@ git commit -m "feat(config): default deposit percentage (quote_settings.deposit_
 - Modify: `main.js` (require ~line 31; `config:read` handler ~line 974)
 - Test: `tests/cloud-bootstrap.test.js` (inside `describe('loadCatalog')`)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add inside `describe('loadCatalog', …)` in `tests/cloud-bootstrap.test.js`:
 
@@ -234,12 +234,12 @@ Add inside `describe('loadCatalog', …)` in `tests/cloud-bootstrap.test.js`:
   });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `pnpm vitest run tests/cloud-bootstrap.test.js -t "deposit_pct"`
 Expected: FAIL — `deposit_pct` is `undefined`.
 
-- [ ] **Step 3: Implement in `lib/cloud-bootstrap.js`**
+- [x] **Step 3: Implement in `lib/cloud-bootstrap.js`**
 
 Add to the requires:
 
@@ -255,7 +255,7 @@ In `toValidatedConfig`, replace the final `return config;` with:
     return applyQuoteSettingsDefaults(config);
 ```
 
-- [ ] **Step 4: Implement in `main.js`**
+- [x] **Step 4: Implement in `main.js`**
 
 Change the require on line 31 to:
 
@@ -271,12 +271,12 @@ In the `config:read` handler (file branch), change the success return to:
     return { ok: true, config: stripAdminPassword(applyQuoteSettingsDefaults(config)), info };
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `pnpm vitest run tests/cloud-bootstrap.test.js`
 Expected: PASS (the existing `expectedConfig` equality still holds: the fixture now carries `deposit_pct: 0.4`).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add lib/cloud-bootstrap.js main.js tests/cloud-bootstrap.test.js
@@ -291,7 +291,7 @@ git commit -m "feat(config): apply the deposit default at the config hand-off (f
 - Create: `renderer/deposit.js`
 - Test: `tests/deposit.test.js` (new)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/deposit.test.js`:
 
@@ -433,12 +433,12 @@ describe('formatDepositPct / pctToPercentInput', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `pnpm vitest run tests/deposit.test.js`
 Expected: FAIL — cannot resolve `../renderer/deposit.js`.
 
-- [ ] **Step 3: Create `renderer/deposit.js`**
+- [x] **Step 3: Create `renderer/deposit.js`**
 
 ```js
 // ============================================================
@@ -559,12 +559,12 @@ export function pctToPercentInput(pct) {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `pnpm vitest run tests/deposit.test.js`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add renderer/deposit.js tests/deposit.test.js
@@ -579,7 +579,7 @@ git commit -m "feat(quotes): pure deposit arithmetic (renderer/deposit.js)"
 - Modify: `renderer/history.js` (`buildQuoteDraft` ~line 133)
 - Test: `tests/history-draft.test.js`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append inside `describe('buildQuoteDraft', …)` in `tests/history-draft.test.js`:
 
@@ -595,12 +595,12 @@ Append inside `describe('buildQuoteDraft', …)` in `tests/history-draft.test.js
   });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `pnpm vitest run tests/history-draft.test.js`
 Expected: FAIL — `draft.deposit` is `undefined`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `buildQuoteDraft`, extend the JSDoc `ctx` line to `{ user, configVersion, customer?, packId?, opt?, deposit? }` and add after `opt: ctx.opt || null`:
 
@@ -612,12 +612,12 @@ In `buildQuoteDraft`, extend the JSDoc `ctx` line to `{ user, configVersion, cus
       : null
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `pnpm vitest run tests/history-draft.test.js`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add renderer/history.js tests/history-draft.test.js
@@ -633,7 +633,7 @@ git commit -m "feat(quotes): quote draft carries the deposit minimum"
 - Modify: `lib/quote-repo-file.js` (`createQuote` ~line 106, `replaceQuote` ~line 273, new `setDepositPaid` after `setStatus`, exports)
 - Test: `tests/quote-store-helpers.test.js`, `tests/quote-repo-file.test.js`
 
-- [ ] **Step 1: Write the failing helper tests**
+- [x] **Step 1: Write the failing helper tests**
 
 Append to `tests/quote-store-helpers.test.js`:
 
@@ -687,7 +687,7 @@ describe('withoutDepositPaid', () => {
 });
 ```
 
-- [ ] **Step 2: Write the failing file-backend tests**
+- [x] **Step 2: Write the failing file-backend tests**
 
 Add `setDepositPaid` to the named import of `tests/quote-repo-file.test.js` and append:
 
@@ -771,12 +771,12 @@ describe('setDepositPaid', () => {
 });
 ```
 
-- [ ] **Step 3: Run both files to verify they fail**
+- [x] **Step 3: Run both files to verify they fail**
 
 Run: `pnpm vitest run tests/quote-store-helpers.test.js tests/quote-repo-file.test.js`
 Expected: FAIL — the helpers and `setDepositPaid` are not exported.
 
-- [ ] **Step 4: Implement the helpers in `lib/quote-store-helpers.js`**
+- [x] **Step 4: Implement the helpers in `lib/quote-store-helpers.js`**
 
 Add before `module.exports`:
 
@@ -833,7 +833,7 @@ module.exports = {
 };
 ```
 
-- [ ] **Step 5: Implement in `lib/quote-repo-file.js`**
+- [x] **Step 5: Implement in `lib/quote-repo-file.js`**
 
 Add to the requires:
 
@@ -908,12 +908,12 @@ function setDepositPaid(folder, id, paid, opts = {}) {
 
 Add `setDepositPaid,` to `module.exports` (after `setStatus,`).
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 Run: `pnpm vitest run tests/quote-store-helpers.test.js tests/quote-repo-file.test.js`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add lib/quote-store-helpers.js lib/quote-repo-file.js tests/quote-store-helpers.test.js tests/quote-repo-file.test.js
@@ -929,7 +929,7 @@ git commit -m "feat(quotes): file backend setDepositPaid (workflow op, no versio
 - Modify: `lib/cloud-quotes.js` (`getFullQuote` ~line 324, `listFullQuotes` ~line 361, `deleteFullQuote` ~line 457, new `setQuoteDeposit` + `depositFromRow`, exports)
 - Test: `tests/quote-repo-cloud.test.js` (fake client + new describes)
 
-- [ ] **Step 1: Extend the fake client in `tests/quote-repo-cloud.test.js`**
+- [x] **Step 1: Extend the fake client in `tests/quote-repo-cloud.test.js`**
 
 Inside `fakeClient()` add a third table and a helper (after `const calls = [];`):
 
@@ -976,7 +976,7 @@ Change the two `SELECT … FROM quotes` shapes so they honour the join alias:
         return { results: [...quotes.values()].map(withDeposit), meta: {} };
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Add `setQuoteDeposit, deleteFullQuote` to the named import from `'../lib/cloud-quotes.js'`, then append:
 
@@ -1080,12 +1080,12 @@ describe('setQuoteDeposit', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 Run: `pnpm vitest run tests/quote-repo-cloud.test.js`
 Expected: FAIL — `0003_quote_deposits` missing; `setQuoteDeposit` not exported.
 
-- [ ] **Step 4: Create `db/migrations/0003_quote_deposits.sql`**
+- [x] **Step 4: Create `db/migrations/0003_quote_deposits.sql`**
 
 ```sql
 -- 0003_quote_deposits.sql — the paid-deposit ("señal") workflow fact, kept
@@ -1103,7 +1103,7 @@ CREATE TABLE IF NOT EXISTS quote_deposits (
 );
 ```
 
-- [ ] **Step 5: Implement in `lib/cloud-quotes.js`**
+- [x] **Step 5: Implement in `lib/cloud-quotes.js`**
 
 Add after `updateQuoteStatus`:
 
@@ -1201,12 +1201,12 @@ In `deleteFullQuote`, add as the FIRST statement:
 
 Add `setQuoteDeposit,` and `depositFromRow,` to `module.exports`.
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 Run: `pnpm vitest run tests/quote-repo-cloud.test.js`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add db/migrations/0003_quote_deposits.sql lib/cloud-quotes.js tests/quote-repo-cloud.test.js
@@ -1221,7 +1221,7 @@ git commit -m "feat(cloud): quote_deposits table (0003) + setQuoteDeposit data l
 - Modify: `lib/quote-repo-cloud.js` (requires ~line 23, `createQuote` ~line 77, `listQuotes` ~line 123, `replaceQuote` ~line 183, new `setDepositPaid`, exports)
 - Test: `tests/quote-repo-cloud-facade.test.js` (fake client + new describe)
 
-- [ ] **Step 1: Extend the façade fake client**
+- [x] **Step 1: Extend the façade fake client**
 
 In `fakeClient()` of `tests/quote-repo-cloud-facade.test.js`, add a deposits table and a helper after `const calls = [];`:
 
@@ -1268,7 +1268,7 @@ Change the two `SELECT … FROM quotes` shapes so they honour the join alias:
         return { results: [...quotes.values()].map(withDeposit), meta: {} };
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Add `setDepositPaid` to the named import from `'../lib/quote-repo-cloud.js'` and append:
 
@@ -1347,12 +1347,12 @@ describe('setDepositPaid', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 Run: `pnpm vitest run tests/quote-repo-cloud-facade.test.js`
 Expected: FAIL — `setDepositPaid` is not exported.
 
-- [ ] **Step 4: Implement in `lib/quote-repo-cloud.js`**
+- [x] **Step 4: Implement in `lib/quote-repo-cloud.js`**
 
 Requires:
 
@@ -1420,12 +1420,12 @@ async function setDepositPaid(client, id, paid, opts = {}) {
 
 Add `setDepositPaid,` to `module.exports`.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `pnpm vitest run tests/quote-repo-cloud-facade.test.js tests/quote-repo-cloud.test.js`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add lib/quote-repo-cloud.js tests/quote-repo-cloud-facade.test.js
@@ -1442,7 +1442,7 @@ git commit -m "feat(cloud): setDepositPaid in the cloud quote façade"
 
 No unit tests exist for `main.js`/`preload.js` (they are wiring); the repositories are tested in Tasks 5–7 and the flow is smoke-tested in Task 12.
 
-- [ ] **Step 1: Expose the op through `quoteRepo(settings)`**
+- [x] **Step 1: Expose the op through `quoteRepo(settings)`**
 
 Cloud branch — add after `setStatus`:
 
@@ -1460,11 +1460,11 @@ File branch — add after `setStatus`:
     },
 ```
 
-- [ ] **Step 2: Carry the payment in the cache list row**
+- [x] **Step 2: Carry the payment in the cache list row**
 
 In `quoteListRow`, add `deposit_paid: q.deposit_paid || null,` after `status: q.status,`.
 
-- [ ] **Step 3: Add the handler after `quotes:update`**
+- [x] **Step 3: Add the handler after `quotes:update`**
 
 ```js
 // Who marked the deposit: the cloud user name when set, else the local one,
@@ -1505,7 +1505,7 @@ ipcMain.handle('quotes:set-deposit', async (event, payload) => {
 });
 ```
 
-- [ ] **Step 4: Expose it in `preload.js`**
+- [x] **Step 4: Expose it in `preload.js`**
 
 After `updateQuote:` add:
 
@@ -1515,12 +1515,12 @@ After `updateQuote:` add:
   setQuoteDeposit:    (data)  => ipcRenderer.invoke('quotes:set-deposit', data),
 ```
 
-- [ ] **Step 5: Syntax-check main and preload, run the suite**
+- [x] **Step 5: Syntax-check main and preload, run the suite**
 
 Run: `node --check main.js && node --check preload.js && pnpm test`
 Expected: no syntax errors; suite PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add main.js preload.js
@@ -1535,7 +1535,7 @@ git commit -m "feat(ipc): quotes:set-deposit handler + preload setQuoteDeposit"
 - Modify: `lib/pdf-templates.js` (`buildQuoteContext` ~lines 132–245, `LINES_ROWS` ~line 253, the six templates' `table.totals` CSS + total row, `DEMO_QUOTE` ~line 700)
 - Test: `tests/pdf-templates.test.js`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/pdf-templates.test.js`:
 
@@ -1624,12 +1624,12 @@ describe('renderQuote — deposit rows in every built-in', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `pnpm vitest run tests/pdf-templates.test.js`
 Expected: FAIL — `has_deposit` undefined, rows missing.
 
-- [ ] **Step 3: Add the context fields and confirmation variants in `buildQuoteContext`**
+- [x] **Step 3: Add the context fields and confirmation variants in `buildQuoteContext`**
 
 Add a helper next to `fmtDate`:
 
@@ -1685,7 +1685,7 @@ Add to the returned context, after `confirmation`:
     deposit_remaining: depositPaid ? fmtEur(remaining) : ''
 ```
 
-- [ ] **Step 4: Add the shared rows and wire the six templates**
+- [x] **Step 4: Add the shared rows and wire the six templates**
 
 After `LINES_ROWS`, add:
 
@@ -1719,7 +1719,7 @@ Example (CLASICA, after the edit):
   </table>  {{#if has_conditions}}<div class="conditions"><h3>Condiciones</h3><p>{{conditions}}</p></div>{{/if}}
 ```
 
-- [ ] **Step 5: Demo quote**
+- [x] **Step 5: Demo quote**
 
 In `DEMO_QUOTE`, add after `customer: …`:
 
@@ -1727,12 +1727,12 @@ In `DEMO_QUOTE`, add after `customer: …`:
   deposit: { pct: 0.4, min_amount: 264 }, // 659.90 × 0.4 = 263.96 → 264 (unpaid: the common case)
 ```
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 Run: `pnpm vitest run tests/pdf-templates.test.js tests/cloud-pdf-templates.test.js tests/pdf-gallery.test.js`
 Expected: PASS (the existing "no leftover mustaches" tests also cover the new `{{#if}}` blocks).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add lib/pdf-templates.js tests/pdf-templates.test.js
@@ -1749,7 +1749,7 @@ git commit -m "feat(pdf): deposit rows + confirmation in the 6 built-in template
 
 There are no DOM unit tests for `app.js`; the pure parts are covered by Tasks 3–4 and the flow is smoke-tested in Task 12. Keep each step's syntax check green.
 
-- [ ] **Step 1: Import + state**
+- [x] **Step 1: Import + state**
 
 Add after the `planInputs` import:
 
@@ -1797,11 +1797,11 @@ function totalVatIncOf(x) {
 
 Call `resetDepositState();` as the first statement of `selectPack`, `resetForm` and `backToSelection` (after the existing `state.editingQuoteId = null;` lines).
 
-- [ ] **Step 2: Replace the "Próximos pasos" card in `renderResult`**
+- [x] **Step 2: Replace the "Próximos pasos" card in `renderResult`**
 
 Delete the whole `<article class="section-card">` that contains `<h3 class="h-card">Próximos pasos</h3>` (from its opening tag through its closing `</article>`), and put `${renderDepositCard(r)}` in its place. At the end of `renderResult` (after the `c.innerHTML = …;` statement) add `bindDepositCard(r);`.
 
-- [ ] **Step 3: Add the card renderer, binder, collector and sync (after `renderResult`)**
+- [x] **Step 3: Add the card renderer, binder, collector and sync (after `renderResult`)**
 
 ```js
 // ============================================================
@@ -1964,11 +1964,11 @@ function syncDepositCard(quote) {
 }
 ```
 
-- [ ] **Step 4: Reopen flow**
+- [x] **Step 4: Reopen flow**
 
 In `onHistoryAction` (`action === 'open'`), add `syncDepositCard(quote);` immediately after **both** `syncClientCard(quote);` calls (editable branch and read-only branch).
 
-- [ ] **Step 5: Persist flow**
+- [x] **Step 5: Persist flow**
 
 In `persistCurrentQuote`, right after `const isEdit = …;` add:
 
@@ -2017,7 +2017,7 @@ Replace the final `return { quote: r.quote, queued };` with:
   return { quote: saved, queued };
 ```
 
-- [ ] **Step 6: Copy summary**
+- [x] **Step 6: Copy summary**
 
 In `copySummary`, before `navigator.clipboard.writeText(...)`, add:
 
@@ -2030,7 +2030,7 @@ In `copySummary`, before `navigator.clipboard.writeText(...)`, add:
   }
 ```
 
-- [ ] **Step 7: CSS**
+- [x] **Step 7: CSS**
 
 In `renderer/styles.css`, delete the `/* Próximos pasos */` block (`.next-steps`, `.next-steps__item`, `.next-steps__item:hover`, `.next-steps__icon`, `.next-steps__body*`) and add in its place:
 
@@ -2059,12 +2059,12 @@ In `renderer/styles.css`, delete the `/* Próximos pasos */` block (`.next-steps
 }
 ```
 
-- [ ] **Step 8: Syntax check + grep for leftovers**
+- [x] **Step 8: Syntax check + grep for leftovers**
 
 Run: `node --input-type=module --check < renderer/app.js && grep -n "next-steps\|Próximos pasos\|WhatsApp" renderer/app.js renderer/styles.css renderer/index.html`
 Expected: syntax OK; the grep prints nothing.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add renderer/app.js renderer/styles.css
@@ -2081,7 +2081,7 @@ git commit -m "feat(ui): step-3 \"Señal\" card replaces \"Próximos pasos\""
 - Modify: `renderer/styles.css` (`.quote-chip--deposit`, `.deposit-form*`)
 - Test: `tests/history-render.test.js` (new — `tests/history.test.js` already covers the legacy `lib/history.js`)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/history-render.test.js`:
 
@@ -2156,12 +2156,12 @@ describe('renderHistoryList — deposit column', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `pnpm vitest run tests/history-render.test.js`
 Expected: FAIL — `renderDepositCell` is not exported.
 
-- [ ] **Step 3: Implement in `renderer/history.js`**
+- [x] **Step 3: Implement in `renderer/history.js`**
 
 Add after `renderStatusChips`:
 
@@ -2206,12 +2206,12 @@ export function renderDepositForm(quoteId, defaultAmount) {
 
 In `renderHistoryList`, add `<td>${renderDepositCell(q)}</td>` right after `<td>${renderStatusChips(q)}</td>`, and `<th>Señal</th>` right after `<th>Estado</th>`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `pnpm vitest run tests/history-render.test.js tests/history-draft.test.js`
 Expected: PASS.
 
-- [ ] **Step 5: Orchestration in `renderer/app.js`**
+- [x] **Step 5: Orchestration in `renderer/app.js`**
 
 Add `renderDepositCell` is not needed in app.js; import the form: extend the `./history.js` import to `{ renderHistoryList, buildQuoteDraft, renderDepositForm }`.
 
@@ -2307,7 +2307,7 @@ async function clearQuoteDeposit(localId) {
 }
 ```
 
-- [ ] **Step 6: CSS**
+- [x] **Step 6: CSS**
 
 Append after the `.quote-chip--rejected.is-active` rule in `renderer/styles.css`:
 
@@ -2321,12 +2321,12 @@ Append after the `.quote-chip--rejected.is-active` rule in `renderer/styles.css`
 .deposit-form__amount { width: 96px; }
 ```
 
-- [ ] **Step 7: Syntax check + suite**
+- [x] **Step 7: Syntax check + suite**
 
 Run: `node --input-type=module --check < renderer/app.js && pnpm test`
 Expected: syntax OK; suite PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add renderer/history.js renderer/app.js renderer/styles.css tests/history-render.test.js
@@ -2343,7 +2343,7 @@ git commit -m "feat(ui): history deposit chip + inline \"Marcar señal\""
 - Modify: `docs/UI-UX.md` (§1.4 flow ~line 59; §2.7 history paragraph ~line 373)
 - Modify: `docs/superpowers/specs/2026-09-04-quote-deposit-design.md` (status line)
 
-- [ ] **Step 1: CLAUDE.md**
+- [x] **Step 1: CLAUDE.md**
 
 §5: change `history.js/quote-inputs.js/` … `quote-reminder.js (quotes)` to `history.js/quote-inputs.js/quote-reminder.js/deposit.js (quotes)`.
 
@@ -2362,7 +2362,7 @@ git commit -m "feat(ui): history deposit chip + inline \"Marcar señal\""
   `docs/superpowers/specs/2026-09-04-quote-deposit-design.md`.
 ```
 
-- [ ] **Step 2: ARCHITECTURE.md**
+- [x] **Step 2: ARCHITECTURE.md**
 
 Repository table row "Saved quotes (shared)": change the verbs to `` `create` / `get` / `list` / `search` / `replace` / `setStatus` / `setDepositPaid` / `delete` ``.
 
@@ -2377,7 +2377,7 @@ Record shape: add after `status_ts,`:
 
 §6 shape line: change `quote_settings: { validity_days, terms }` to `quote_settings: { validity_days, terms, deposit_pct }`.
 
-- [ ] **Step 3: docs/UI-UX.md**
+- [x] **Step 3: docs/UI-UX.md**
 
 §1.4: change `Resultado (precio grande, desglose, margen, PDF, guardar en historial)` to `Resultado (precio grande, señal mínima + pago, desglose, margen, PDF, guardar en historial)`.
 
@@ -2397,14 +2397,14 @@ recibida y el resto pendiente. Sin conexión (nube) la marca no se encola: se
 avisa y se repite desde el historial.
 ```
 
-- [ ] **Step 4: Spec status**
+- [x] **Step 4: Spec status**
 
 In the spec header change `**Status:** Design approved by the owner; implementation plan pending.` to `**Status:** Implemented (plan `docs/superpowers/plans/2026-09-04-quote-deposit.md`).`
 
-- [ ] **Step 5: Full suite + smoke**
+- [ ] **Step 5: Full suite + smoke** (pending — cannot run Electron in this sandbox)
 
 Run: `pnpm test`
-Expected: PASS, all files.
+Expected: PASS, all files. [x] Done — 58 files, 1249 tests green.
 
 Smoke (`pnpm dev`, file mode with a scratch config, then cloud if available):
 1. Delete `%APPDATA%\Quanto\` → wizard → step 3 shows the "Señal" card with 40 % and the rounded-up minimum; no "Próximos pasos"/WhatsApp.
@@ -2415,7 +2415,7 @@ Smoke (`pnpm dev`, file mode with a scratch config, then cloud if available):
 6. Copiar resumen → the pasted text ends with the "Señal mínima …" line.
 7. Cloud mode (if a test database is available): the same, plus turning the network off before "Marcar señal" shows the offline notice and nothing changes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add CLAUDE.md ARCHITECTURE.md docs/UI-UX.md docs/superpowers/specs/2026-09-04-quote-deposit-design.md
