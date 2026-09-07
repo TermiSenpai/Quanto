@@ -4354,6 +4354,7 @@ async function startDepositMark(localId) {
   const r = await window.packprice.getQuote(localId);
   const quote = r && r.ok ? r.quote : null;
   if (!quote) return;
+  // A stored minimum of 0 (0 % quote) is not a useful prefill: recompute from the current config percentage instead.
   const defaultAmount = quote.deposit && Number.isFinite(quote.deposit.min_amount) && quote.deposit.min_amount > 0
     ? quote.deposit.min_amount
     : depositMinimum(totalVatIncOf(quote), configDepositPct());
@@ -4363,13 +4364,18 @@ async function startDepositMark(localId) {
   const input = form.querySelector('.deposit-form__amount');
   input.focus();
   input.select();
+  input.addEventListener('input', () => input.classList.remove('input--error'));
   form.querySelector('[data-deposit-cancel]').addEventListener('click', () => refreshHistory());
+  let submitting = false;
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (submitting) return;
     const amount = parseDepositAmount(input.value);
     if (amount === null) { input.classList.add('input--error'); input.focus(); return; }
+    submitting = true;
     const ok = await applyQuoteDeposit(localId, { amount });
     await refreshHistory();
+    submitting = false;
     if (!ok) return;
     showStatusToast(`Señal registrada · ${formatEur(amount)}`, async () => {
       await applyQuoteDeposit(localId, null);
